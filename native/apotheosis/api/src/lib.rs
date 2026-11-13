@@ -829,7 +829,7 @@ mod tests {
             panic!("no attribute modifiers");
         };
         assert_eq!(modifiers.len(), 2);
-        for entry in &modifiers {
+        for entry in modifiers {
             for key in ["type", "id", "amount", "operation", "slot"] {
                 assert!(entry.get(key).is_some(), "modifier without {key}");
             }

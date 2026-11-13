@@ -57,20 +57,24 @@ def build_native(ver):
     os.makedirs(BUILD, exist_ok=True)
     out = os.path.join(BUILD, ID + ".hnmod")
     meta = {
+        "schema": 1,
         "id": ID,
         "version": ver,
         "game": GAME,
         "horizon": HORIZON,
-        "horizon_mixins": MIXINS,
+        "mixins": MIXINS,
         "hooks": HOOKS,
     }
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("horizon-native.json", json.dumps(meta, indent=2) + "\n")
         add_tree(zf, os.path.join(ROOT, "native", ID), "mixins/%s/" % ID)
+        # A .hnmod holds only horizon-native.json and mixins/<id>/; the licence
+        # and the notices belong under the bundle, where README*/NOTICE* are
+        # the only allowed extra names.
         for name in ("README.md", "NOTICE.md"):
             path = os.path.join(ROOT, name)
             if os.path.exists(path):
-                zf.write(path, name)
+                zf.write(path, "mixins/%s/%s" % (ID, name))
     return out
 
 
