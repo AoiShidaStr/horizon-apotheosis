@@ -100,16 +100,23 @@ Both halves use the id `apotheosis`.
   VPS with `tools/vps/sync.sh full` (see `tools/vps/check.sh`); it builds as a
   trait mod with `horizon-launcher native-build`.
 
-### Build state (2026-11-13)
+### Build state (2026-11-13) — **not compiled yet**
 
-- `cargo test -p mod-apotheosis` on the VPS: **11 tests pass** — tier lines,
-  gem bonuses, gear recognition, tier scaling, the boss-only cap, affix
-  components (modifiers, lore, rarity), distinct affixes, rounded amounts, and
-  drop seeds — and the crate type-checks against the real `horizon-client` of
-  the pinned commit.
-- The dedicated-server engine check (`cargo check -p horizon-native-game
-  --no-default-features`) and the client-flavour check are run by
-  `bash tools/vps/sync.sh full`.
+- The v0.1.0 crate type-checked against the pinned commit and its 3 tests
+  passed. **v0.2.0 has never been compiled**: every attempt waited on the
+  shared `CARGO_TARGET_DIR` lock, which other mods' builds held for the whole
+  hour (`sync.sh check`, `sync.sh test`, two manual `cargo check` runs). One
+  `cargo check -p mod-apotheosis` was left waiting on the VPS, its output in
+  `/opt/build/apoth2.log`.
+- 11 unit tests are written and none has been run: tier lines, gem bonuses,
+  gear recognition, tier scaling, the boss-only cap, affix components
+  (modifiers, lore, rarity), distinct affixes, rounded amounts, drop seeds.
+- The first thing to do: `bash tools/vps/sync.sh full` (crate check, tests,
+  dedicated-server engine without default features, client flavour). Expect
+  errors first in the hook signatures (`modify_default_components` takes no
+  `host`) or in a `JavaString` conversion.
+- What did run: all 21 content JSON files parse, and `python tools/pack.py`
+  rebuilt `target/apotheosis.hmod` and `target/apotheosis.hnmod`.
 
 ## Licence
 
