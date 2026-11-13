@@ -17,7 +17,7 @@
 //! - `register_commands` / `perform_command`: `/apoth reforge` rolls affixes
 //!   onto plain gear, for experience levels.
 use horizon_client::mod_api::{
-    Hooks, Host, ItemStack, LootDropsEvent, ModifyDefaultComponentsEvent, NativeCommand,
+    Flow, Hooks, Host, ItemStack, LootDropsEvent, ModifyDefaultComponentsEvent, NativeCommand,
     PerformCommandEvent, RegisterCommandsEvent, Tag, Text, TooltipEvent, serde_json,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -326,7 +326,18 @@ pub fn is_equipment(item: &str) -> bool {
     item == "minecraft:bow"
         || item == "minecraft:crossbow"
         || item == "minecraft:trident"
+        || item == "minecraft:shield"
         || SUFFIXES.iter().any(|s| item.ends_with(s))
+}
+
+/// Whether a piece of equipment is worn as armour (the `armor` slot group),
+/// as opposed to held in a hand (`hand`). Shields are worn in the off hand and
+/// carry armour-group modifiers.
+pub fn is_armor(item: &str) -> bool {
+    item == "minecraft:shield"
+        || ["_helmet", "_chestplate", "_leggings", "_boots"]
+            .iter()
+            .any(|s| item.ends_with(s))
 }
 
 /// A stand-in for a random source: the hook API has none, so rolls come from a
@@ -475,7 +486,15 @@ pub fn apply_affixes(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) {
     if count == 0 {
         return;
     }
-    let mut pool: Vec<usize> = (0..AFFIXES.len()).collect();
+    // Only affixes whose slot group matches the piece: an armour affix on a
+    // sword would show a lore line that never applies, and the other way round.
+    let armor = is_armor(&stack.item);
+    let mut pool: Vec<usize> = (0..AFFIXES.len())
+        .filter(|i| (AFFIXES[*i].slot == "armor") == armor)
+        .collect();
+    if pool.is_empty() {
+        pool = (0..AFFIXES.len()).collect();
+    }
     let mut modifiers = Vec::with_capacity(count);
     let mut lore = Vec::with_capacity(count + 1);
     lore.push(tier_tag(tier));
@@ -625,13 +644,16 @@ impl Hooks for Apotheosis {
         event.commands.push(NativeCommand::new("apoth reforge"));
     }
 
-    fn perform_command(&self, host: &mut dyn Host, event: &mut PerformCommandEvent<'_>) {
+    fn perform_command(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PerformCommandEvent<'_>,
+    ) -> Flow {
         let command = event.command.trim();
         let words: Vec<&str> = command.split_whitespace().collect();
         if words.first() != Some(&"apoth") {
-            return;
+            return Flow::Continue;
         }
-        event.ran = true;
         if words.len() < 2 {
             host.feedback(
                 Text::translate_with_fallback(
@@ -640,7 +662,7 @@ impl Hooks for Apotheosis {
                     &[],
                 ),
             );
-            return;
+            return Flow::Cancel;
         }
         if words[1] != "reforge" {
             host.feedback(Text::translate_with_fallback(
@@ -648,9 +670,10 @@ impl Hooks for Apotheosis {
                 "Unknown Apotheosis command.",
                 &[],
             ));
-            return;
+            return Flow::Cancel;
         }
         reforge(host, event.player.uuid, event.player.xp_level);
+        Flow::Cancel
     }
 }
 

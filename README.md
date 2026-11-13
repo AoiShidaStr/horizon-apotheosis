@@ -50,8 +50,8 @@ and **gems whose high tiers drop only from bosses**.
   uncommon → epic only (55/30/15); a *wither*, *ender dragon*, *warden* or
   *elder guardian* rolls rare → ancient (25/40/25/10) and always drops one
   mythic or ancient gem, alternating.
-- **Extra drops**: a boss always drops an affixed diamond piece; an ordinary
-  mob killed by a player has a 4% chance to drop an affixed iron piece.
+- **Extra drops**: a boss always drops an affixed diamond piece (or a bow); an
+  ordinary mob killed by a player has a 4% chance to drop an affixed iron piece.
 - **`/apoth reforge`** (`register_commands`/`perform_command`, API 8): rolls
   tier and affixes onto the plain piece of gear the player holds, for 3
   experience levels; `/apoth` alone explains it. Answers are translated.
@@ -67,6 +67,15 @@ and **gems whose high tiers drop only from bosses**.
   the API's item helpers only take stacks with no components, so an affixed
   piece cannot be taken, rerolled and handed back. It rolls once onto a plain
   item instead.
+- **Affixes replace an item's base attribute modifiers.** A stack's
+  `minecraft:attribute_modifiers` component replaces the item's own defaults
+  (vanilla semantics), so an affixed diamond sword loses its innate +3 attack
+  damage and only keeps the rolled affixes. Reading an item's default
+  modifiers is not possible from the hooks this mod uses, so merging them is
+  not done; the affixes are an alternative to the base stats, not a bonus on
+  top of them.
+- **Affix pools are filtered by slot group only** (armour vs hand). A bow can
+  still roll `attack_damage`, which only matters for a melee hit with it.
 - **Affixes from chest loot tables** — only mob drops and the reforge command
   roll them. `loot_table_load` could affix dungeon loot; not done.
 - **Advanced enchanting** (Apotheosis' enchanting stats and library) and
@@ -97,26 +106,21 @@ Both halves use the id `apotheosis`.
   names and textures; `python tools/pack.py` writes `target/apotheosis.hmod`
   and `target/apotheosis.hnmod`.
 - Native: the crate is checked against the pinned Horizon commit on the build
-  VPS with `tools/vps/sync.sh full` (see `tools/vps/check.sh`); it builds as a
-  trait mod with `horizon-launcher native-build`.
+  VPS with `tools/vps/sync.sh full` (see `tools/vps/check.sh` and
+  `tools/vps/verify.sh`); it builds as a trait mod with
+  `horizon-launcher native-build`.
 
-### Build state (2026-11-13) — **not compiled yet**
+### Build state (2026-11-14)
 
-- The v0.1.0 crate type-checked against the pinned commit and its 3 tests
-  passed. **v0.2.0 has never been compiled**: every attempt waited on the
-  shared `CARGO_TARGET_DIR` lock, which other mods' builds held for the whole
-  hour (`sync.sh check`, `sync.sh test`, two manual `cargo check` runs). One
-  `cargo check -p mod-apotheosis` was left waiting on the VPS, its output in
-  `/opt/build/apoth2.log`.
-- 11 unit tests are written and none has been run: tier lines, gem bonuses,
-  gear recognition, tier scaling, the boss-only cap, affix components
-  (modifiers, lore, rarity), distinct affixes, rounded amounts, drop seeds.
-- The first thing to do: `bash tools/vps/sync.sh full` (crate check, tests,
-  dedicated-server engine without default features, client flavour). Expect
-  errors first in the hook signatures (`modify_default_components` takes no
-  `host`) or in a `JavaString` conversion.
-- What did run: all 21 content JSON files parse, and `python tools/pack.py`
-  rebuilt `target/apotheosis.hmod` and `target/apotheosis.hnmod`.
+- v0.2.0 now compiles against the pinned commit `a85af177`: the first queued
+  build caught two hook-signature errors (`perform_command` returned `()` and
+  set a nonexistent `event.ran`); both are fixed (it returns `Flow`). The
+  crate check, 11 unit tests, the dedicated-server engine without default
+  features and the client flavour are reported in the session's verification
+  note.
+- What did run locally: all 21 content JSON files parse, and
+  `python tools/pack.py` rebuilt `target/apotheosis.hmod` and
+  `target/apotheosis.hnmod`.
 
 ## Licence
 
