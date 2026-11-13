@@ -62,6 +62,17 @@ Both halves use the id `apotheosis`.
   VPS with `tools/vps/sync.sh full` (see `tools/vps/check.sh`); it builds as a
   trait mod with `horizon-launcher native-build`.
 
+### Build state (2026-11-13)
+
+- `cargo test -p mod-apotheosis` on the VPS: **3 tests pass** (tier lines for
+  the two high tiers, no line for vanilla items, boss tiers alternate), and the
+  crate type-checks against the real `horizon-client` of the pinned commit.
+- The dedicated-server engine check (`cargo check -p horizon-native-game
+  --no-default-features`) and the client-flavour check were started in the same
+  run but had not finished when the session ended (the shared build lock is
+  serialized across mods; a first build of the client is ~15 min). They are the
+  first thing to re-run: `bash tools/vps/sync.sh full`.
+
 ## Licence
 
 Apotheosis is MIT (Shadows_of_Fire). This port's own code and assets are MIT
