@@ -1,0 +1,8 @@
+id = "apotheosis"
+name = "Apotheosis (gems)"
+version = "0.1.0"
+description = "Gem tiers for Apotheosis: ruby, topaz, sapphire, jade, onyx and bloodstone, with their rarity in the tooltip. Mythic and ancient gems drop only from bosses. A clean-room Horizon slice of Apotheosis (MIT): original code and textures, see README.md."
+authors = ["Saison 2 server"]
+api = "0.2"
+side = "both"
+capabilities = ["registries"]

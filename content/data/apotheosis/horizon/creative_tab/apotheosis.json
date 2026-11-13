@@ -1,0 +1,12 @@
+{
+  "title": "itemGroup.apotheosis",
+  "icon": "apotheosis:gem_bloodstone",
+  "items": [
+    "apotheosis:gem_ruby",
+    "apotheosis:gem_topaz",
+    "apotheosis:gem_sapphire",
+    "apotheosis:gem_jade",
+    "apotheosis:gem_onyx",
+    "apotheosis:gem_bloodstone"
+  ]
+}
