@@ -153,7 +153,7 @@ Both halves use the id `apotheosis`.
 
 - v0.4.0 compiles against the pinned commit `a85af177` (`cargo check -p
   mod-apotheosis`, one warning: private `Rng` behind the public test helper).
-  **12 unit tests pass**, and `cargo check -p horizon-native-game
+  **14 unit tests pass**, and `cargo check -p horizon-native-game
   --no-default-features` (dedicated-server engine with this mod staged)
   passes, as does the client flavour (`cargo check -p horizon-native-game`,
   default features).
