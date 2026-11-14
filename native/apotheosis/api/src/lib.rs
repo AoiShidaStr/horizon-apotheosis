@@ -4,13 +4,15 @@
 //! above vanilla's, affixes on gear, higher tiers only from bosses). No
 //! Apotheosis code or asset is used: see `../../README.md` and `NOTICE.md`.
 //!
-//! Five hooks, all on the real game's trait API:
+//! Six hooks, all on the real game's trait API:
 //! - `modify_default_components`: each gem carries a real
 //!   `minecraft:attribute_modifiers` entry, so a gem in the off hand grants its
 //!   bonus (the game applies equipment modifiers itself).
 //! - `tooltip`: a gem's tier and its off-hand effect, in the tier's colour
 //!   (vanilla item rarity only goes up to epic; mythic and ancient are shown
 //!   here).
+//! - `loot_table_load`: vanilla chest loot tables gain a small chance to
+//!   contain a low-tier gem, so gems have a survival source beyond mob drops.
 //! - `loot_drops`: gear a mob drops is rolled into a rarity with affixes (real
 //!   attribute modifiers plus lore), and a boss kill adds a mythic or ancient
 //!   gem. Ordinary mobs never drop those two tiers.
@@ -430,11 +432,7 @@ impl Rng {
 
 /// What an ordinary mob killed by a player can roll: never above epic, so the
 /// two high tiers stay boss-only.
-const ORDINARY_TIERS: [(Tier, u64); 3] = [
-    (Tier::Uncommon, 55),
-    (Tier::Rare, 30),
-    (Tier::Epic, 15),
-];
+const ORDINARY_TIERS: [(Tier, u64); 3] = [(Tier::Uncommon, 55), (Tier::Rare, 30), (Tier::Epic, 15)];
 
 /// What a boss's gear rolls.
 const BOSS_TIERS: [(Tier, u64); 4] = [
@@ -460,6 +458,57 @@ const HIGH_GEMS: [&str; 4] = [
     "apotheosis:gem_bloodstone",
     "apotheosis:gem_opal",
 ];
+
+/// Low-tier gems can also turn up in vanilla's chest loot, but never the
+/// mythic or ancient gems reserved for bosses.
+const CHEST_GEMS: [(&str, u64); 4] = [
+    ("apotheosis:gem_ruby", 6),
+    ("apotheosis:gem_amber", 4),
+    ("apotheosis:gem_topaz", 2),
+    ("apotheosis:gem_amethyst", 1),
+];
+
+const CHEST_GEM_POOL: &str = "apotheosis:chest_gems";
+
+/// Adds a modest, weighted gem roll to vanilla chest tables. The name guard
+/// makes the edit safe if a table is passed through the hook more than once.
+fn add_chest_gem_pool(id: &str, table: &mut serde_json::Value) {
+    if !id.starts_with("minecraft:chests/") {
+        return;
+    }
+    let Some(pools) = table
+        .get_mut("pools")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    if pools
+        .iter()
+        .any(|pool| pool.get("name").and_then(serde_json::Value::as_str) == Some(CHEST_GEM_POOL))
+    {
+        return;
+    }
+
+    let entries: Vec<_> = CHEST_GEMS
+        .iter()
+        .map(|(item, weight)| {
+            serde_json::json!({
+                "type": "minecraft:item",
+                "name": item,
+                "weight": weight,
+            })
+        })
+        .collect();
+    pools.push(serde_json::json!({
+        "name": CHEST_GEM_POOL,
+        "rolls": 1,
+        "condition": {
+            "type": "minecraft:random_chance",
+            "chance": 0.08,
+        },
+        "entries": entries,
+    }));
+}
 
 /// Which gem a boss drops. Bosses cycle through the high gems so a session sees
 /// all four tiers-worth of them.
@@ -577,10 +626,7 @@ pub fn apply_affixes(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) {
     let data = stack.data_mut();
     data.set_other("minecraft:attribute_modifiers", Some(Tag::List(modifiers)));
     data.set_other("minecraft:lore", Some(Tag::List(lore)));
-    data.set_other(
-        "minecraft:rarity",
-        Some(string(tier.vanilla_rarity())),
-    );
+    data.set_other("minecraft:rarity", Some(string(tier.vanilla_rarity())));
 }
 
 /// A seed for one drop: the counter, the position and the mob, so two kills
@@ -636,10 +682,13 @@ impl Hooks for Apotheosis {
             colour,
         ));
         event.lines.push((
-            Text::translate_with_fallback(gem.effect_key, gem.effect, &[])
-                .with_color(0x55_55FF),
+            Text::translate_with_fallback(gem.effect_key, gem.effect, &[]).with_color(0x55_55FF),
             0x55_55FF,
         ));
+    }
+
+    fn loot_table_load(&self, event: &mut horizon_client::mod_api::LootTableLoadEvent<'_>) {
+        add_chest_gem_pool(event.id, event.table);
     }
 
     fn loot_drops(&self, _host: &mut dyn Host, event: &mut LootDropsEvent<'_>) {
@@ -689,11 +738,7 @@ impl Hooks for Apotheosis {
                 ORDINARY_GEAR[rng.below(ORDINARY_GEAR.len() as u64) as usize]
             }
         };
-        let drop = if boss {
-            true
-        } else {
-            rng.chance(4)
-        };
+        let drop = if boss { true } else { rng.chance(4) };
         if drop {
             let tier = if boss {
                 rng.tier(&BOSS_TIERS)
@@ -712,24 +757,18 @@ impl Hooks for Apotheosis {
         event.commands.push(NativeCommand::new("apoth reforge"));
     }
 
-    fn perform_command(
-        &self,
-        host: &mut dyn Host,
-        event: &mut PerformCommandEvent<'_>,
-    ) -> Flow {
+    fn perform_command(&self, host: &mut dyn Host, event: &mut PerformCommandEvent<'_>) -> Flow {
         let command = event.command.trim();
         let words: Vec<&str> = command.split_whitespace().collect();
         if words.first() != Some(&"apoth") {
             return Flow::Continue;
         }
         if words.len() < 2 {
-            host.feedback(
-                Text::translate_with_fallback(
-                    "apotheosis.command.help",
-                    "Apotheosis: /apoth reforge — roll affixes onto plain gear you hold (3 levels).",
-                    &[],
-                ),
-            );
+            host.feedback(Text::translate_with_fallback(
+                "apotheosis.command.help",
+                "Apotheosis: /apoth reforge — roll affixes onto plain gear you hold (3 levels).",
+                &[],
+            ));
             return Flow::Cancel;
         }
         if words[1] != "reforge" {
@@ -825,7 +864,10 @@ mod tests {
     #[test]
     fn every_tier_names_itself() {
         assert_eq!(tier_line("apotheosis:gem_onyx").unwrap().0, "Tier: Mythic");
-        assert_eq!(tier_line("apotheosis:gem_bloodstone").unwrap().0, "Tier: Ancient");
+        assert_eq!(
+            tier_line("apotheosis:gem_bloodstone").unwrap().0,
+            "Tier: Ancient"
+        );
     }
 
     #[test]
@@ -861,9 +903,16 @@ mod tests {
         }
         for gem in &GEMS {
             let high = gem.tier >= Tier::Mythic;
-            assert_eq!(high, HIGH_GEMS.contains(&gem.id), "{} in the wrong pool", gem.id);
+            assert_eq!(
+                high,
+                HIGH_GEMS.contains(&gem.id),
+                "{} in the wrong pool",
+                gem.id
+            );
             if !high {
-                assert!(LOW_GEMS.contains(&gem.id) || gem.tier == Tier::Rare || gem.tier == Tier::Epic);
+                assert!(
+                    LOW_GEMS.contains(&gem.id) || gem.tier == Tier::Rare || gem.tier == Tier::Epic
+                );
             }
         }
     }
@@ -973,7 +1022,40 @@ mod tests {
     #[test]
     fn a_seed_follows_its_drop() {
         let a = 1u64;
-        assert_ne!(seed_of_fake(a, [0.0, 64.0, 0.0]), seed_of_fake(a, [2.0, 64.0, 0.0]));
+        assert_ne!(
+            seed_of_fake(a, [0.0, 64.0, 0.0]),
+            seed_of_fake(a, [2.0, 64.0, 0.0])
+        );
+    }
+
+    #[test]
+    fn vanilla_chests_get_a_weighted_low_gem_pool() {
+        let mut table = serde_json::json!({"pools": []});
+        add_chest_gem_pool("minecraft:chests/simple_dungeon", &mut table);
+        let pools = table["pools"].as_array().unwrap();
+        assert_eq!(pools.len(), 1);
+        assert_eq!(pools[0]["name"], CHEST_GEM_POOL);
+        assert_eq!(pools[0]["condition"]["type"], "minecraft:random_chance");
+        assert_eq!(pools[0]["condition"]["chance"], 0.08);
+        let entries = pools[0]["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), CHEST_GEMS.len());
+        assert!(entries.iter().all(|entry| {
+            entry["name"]
+                .as_str()
+                .is_some_and(|item| CHEST_GEMS.iter().any(|(gem, _)| *gem == item))
+        }));
+    }
+
+    #[test]
+    fn chest_gem_pool_is_idempotent_and_does_not_touch_other_tables() {
+        let mut table = serde_json::json!({"pools": []});
+        add_chest_gem_pool("minecraft:chests/ancient_city", &mut table);
+        add_chest_gem_pool("minecraft:chests/ancient_city", &mut table);
+        assert_eq!(table["pools"].as_array().unwrap().len(), 1);
+
+        let mut other = serde_json::json!({"pools": []});
+        add_chest_gem_pool("minecraft:entities/zombie", &mut other);
+        assert!(other["pools"].as_array().unwrap().is_empty());
     }
 
     /// `seed_of` over a bare context, for the test above.

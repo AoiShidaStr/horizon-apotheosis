@@ -6,8 +6,8 @@ and **gems whose high tiers drop only from bosses**.
 
 > **Clean room.** Nothing here is copied from Apotheosis: neither code nor
 > art. The behaviour (tiers, gems, affixes, boss-only high tiers) comes from the
-> mod's public wiki; the code is this port's own, written against Horizon's
-> native hook API, and the textures are generated placeholders. Apotheosis' MIT
+> mod's public description; the code is this port's own, written against Horizon's
+> native hook API, and the textures are original generated 16x16 pixel art. Apotheosis' MIT
 > licence would allow reuse; this slice did not need it.
 
 ## Done
@@ -79,6 +79,9 @@ and **gems whose high tiers drop only from bosses**.
   (55/30/15); a *wither*, *ender dragon*, *warden* or *elder guardian* rolls
   rare → ancient (25/40/25/10) and always drops one high gem, cycling onyx,
   moonstone, bloodstone, opal.
+- **Gems from vanilla chests** (`loot_table_load`, API 75): every
+  `minecraft:chests/*` table has an 8% chance to roll one weighted common or
+  uncommon gem. Mythic and ancient gems remain boss-only.
 - **Extra drops**: a boss always drops an affixed diamond piece (or a bow); an
   ordinary mob killed by a player has a 4% chance to drop an affixed iron piece.
 - **`/apoth reforge`** (`register_commands`/`perform_command`, API 8): rolls
@@ -109,8 +112,9 @@ and **gems whose high tiers drop only from bosses**.
   top of them.
 - **Affix pools are filtered by slot group only** (armour vs hand). A bow can
   still roll `attack_damage`, which only matters for a melee hit with it.
-- **Affixes from chest loot tables** — only mob drops and the reforge command
-  roll them. `loot_table_load` could affix dungeon loot; not done.
+- **Affixes from chest loot tables** — chest tables can supply gems, but their
+  gear remains un-affixed; `loot_table_load` cannot roll the item components
+  the later loot generation creates.
 - **Advanced enchanting** (Apotheosis' enchanting stats and library) and
   **configurable spawners** (silk-touched spawners with a chosen mob) are not
   implemented.
@@ -147,7 +151,7 @@ Both halves use the id `apotheosis`.
 
 ### Build state (2026-11-14)
 
-- v0.3.0 compiles against the pinned commit `a85af177` (`cargo check -p
+- v0.4.0 compiles against the pinned commit `a85af177` (`cargo check -p
   mod-apotheosis`, one warning: private `Rng` behind the public test helper).
   **12 unit tests pass**, and `cargo check -p horizon-native-game
   --no-default-features` (dedicated-server engine with this mod staged)
@@ -156,12 +160,13 @@ Both halves use the id `apotheosis`.
 - `cargo horizon-mod check` passes on both packed files
   (`apotheosis.hmod`: kind `mod`, `side both`; `apotheosis.hnmod`: kind
   `native-mod`, api `native-1/a85af177…/5a64af93…`).
-- This session added the twelve gems (two per tier), gem dust, the twelve gem
-  blocks with their textures, models, loot tables and pickaxe tag, and 38
-  recipes; the boss gem drop now cycles the four high gems, ordinary mobs drop
-  a low gem, and the four mythic/ancient gems shimmer. All 143 content JSON
-  files parse, and `python tools/pack.py` rebuilt `target/apotheosis.hmod` and
-  `target/apotheosis.hnmod` (about 50 KiB and 15 KiB).
+- The content mod has twelve gems (two per tier), gem dust, twelve gem blocks
+  with textures, models, loot tables and a pickaxe tag, and 38 recipes. Mob
+  drops and all vanilla chest loot tables now provide survival gem routes;
+  chest gems are restricted to common and uncommon tiers. The four
+  mythic/ancient gems shimmer. All content JSON files parse, and
+  `python tools/pack.py` rebuilds `target/apotheosis.hmod` and
+  `target/apotheosis.hnmod`.
 - The registry check caught `horizon-mixin.toml` still naming version `0.2.0`
   after the bump ("native manifest and mixin identity/revision differ"); the
   three version fields now move together, and both packed files check clean.
