@@ -112,12 +112,22 @@ Both halves use the id `apotheosis`.
 
 ### Build state (2026-11-14)
 
-- v0.2.0 now compiles against the pinned commit `a85af177`: the first queued
-  build caught two hook-signature errors (`perform_command` returned `()` and
-  set a nonexistent `event.ran`); both are fixed (it returns `Flow`). The
-  crate check, 11 unit tests, the dedicated-server engine without default
-  features and the client flavour are reported in the session's verification
-  note.
+- v0.2.0 compiles against the pinned commit `a85af177` (`cargo check -p
+  mod-apotheosis`, one warning: private `Rng` behind the public test helper).
+  **11 unit tests pass**, and `cargo check -p horizon-native-game
+  --no-default-features` (dedicated-server engine with this mod staged)
+  passes, as does the client flavour (`cargo check -p horizon-native-game`,
+  default features).
+- `cargo horizon-mod check` passes on both packed files
+  (`apotheosis.hmod`: kind `mod`, `side both`; `apotheosis.hnmod`: kind
+  `native-mod`, api `native-1/a85af177…/5a64af93…`).
+- Fixed this session: `perform_command` now returns `Flow` and no longer sets
+  the nonexistent `event.ran`; `minecraft:shield` is recognised as gear like
+  the rest of the drop list; affixes are filtered to the piece's slot group
+  so a sword no longer rolls armour-only affixes that do nothing; the `.hnmod`
+  manifest now has `schema: 1` and `mixins` (it used an unknown
+  `horizon_mixins` field and put README/NOTICE at the archive root), which the
+  registry check rejected.
 - What did run locally: all 21 content JSON files parse, and
   `python tools/pack.py` rebuilt `target/apotheosis.hmod` and
   `target/apotheosis.hnmod`.
