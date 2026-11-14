@@ -282,11 +282,16 @@ def main():
     for species, tier, colour, attribute, amount, catalyst, name_en, name_fr, effect_en, effect_fr in GEMS:
         item = gem_item(species)
         # Item, model, texture.
-        write_json(os.path.join(decl_dir("item"), "gem_%s.json" % species), {
+        declaration = {
             "template": "minecraft:amethyst_shard",
             "max_stack_size": 16,
             "rarity": VANILLA_RARITY[tier],
-        })
+        }
+        if tier in ("mythic", "ancient"):
+            # The two tiers above vanilla's shimmer, so a high gem reads as high
+            # in the inventory before its tooltip is opened.
+            declaration["components"] = {"minecraft:enchantment_glint_override": True}
+        write_json(os.path.join(decl_dir("item"), "gem_%s.json" % species), declaration)
         write_json(os.path.join(CONTENT, "assets", ID, "items", "gem_%s.json" % species), {
             "model": {"type": "minecraft:model", "model": "%s:item/gem_%s" % (ID, species)}
         })

@@ -21,7 +21,9 @@ and **gems whose high tiers drop only from bosses**.
   items on `minecraft:amethyst_shard` that stack to 16, each with its own model,
   generated 16x16 texture, en_us/fr_fr name and tooltip. Each gem's vanilla
   rarity follows its tier (common → epic), so a ruby, a topaz and a sapphire
-  already differ in name colour.
+  already differ in name colour; the four mythic and ancient gems carry
+  `minecraft:enchantment_glint_override`, so they shimmer in the inventory
+  before their tooltip is read.
 - **Six tiers**, `Common`, `Uncommon`, `Rare`, `Epic`, `Mythic`, `Ancient`
   (`Tier` in `native/apotheosis/api/src/lib.rs`): the tier decides how many
   affixes an item rolls (0, 1, 2, 3, 4, 5) and how strong they are (×1 to ×4).
@@ -155,10 +157,13 @@ Both halves use the id `apotheosis`.
   `native-mod`, api `native-1/a85af177…/5a64af93…`).
 - This session added the twelve gems (two per tier), gem dust, the twelve gem
   blocks with their textures, models, loot tables and pickaxe tag, and 38
-  recipes; the boss gem drop now cycles the four high gems, and ordinary mobs
-  drop a low gem. All 143 content JSON files parse, and
-  `python tools/pack.py` rebuilt `target/apotheosis.hmod` and
-  `target/apotheosis.hnmod`.
+  recipes; the boss gem drop now cycles the four high gems, ordinary mobs drop
+  a low gem, and the four mythic/ancient gems shimmer. All 143 content JSON
+  files parse, and `python tools/pack.py` rebuilt `target/apotheosis.hmod` and
+  `target/apotheosis.hnmod` (50056 and 14688 bytes).
+- The registry check caught `horizon-mixin.toml` still naming version `0.2.0`
+  after the bump ("native manifest and mixin identity/revision differ"); the
+  three version fields now move together, and both packed files check clean.
 
 ## Licence
 
