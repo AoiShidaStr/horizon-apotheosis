@@ -92,6 +92,17 @@ BLOCK_HARDNESS = {
     "ancient": 4.0,
 }
 
+# A gem block glows, and a higher tier glows further: 3 at common up to 8 at
+# ancient (a torch is 14).
+BLOCK_LIGHT = {
+    "common": 3,
+    "uncommon": 4,
+    "rare": 5,
+    "epic": 6,
+    "mythic": 7,
+    "ancient": 8,
+}
+
 # The gem silhouette, 16x16. '.' is transparent, '#' is the stone; the shades
 # are filled in from the position within the shape.
 GEM_SHAPE = [
@@ -311,6 +322,7 @@ def main():
                 "hardness": BLOCK_HARDNESS[tier],
                 "explosion_resistance": BLOCK_HARDNESS[tier] * 2,
                 "sounds": "minecraft:amethyst_block",
+                "light": BLOCK_LIGHT[tier],
                 "requires_tool": True,
             },
         })

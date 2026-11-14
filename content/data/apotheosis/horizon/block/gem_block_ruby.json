@@ -5,6 +5,7 @@
     "hardness": 1.5,
     "explosion_resistance": 3.0,
     "sounds": "minecraft:amethyst_block",
+    "light": 3,
     "requires_tool": true
   }
 }

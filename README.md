@@ -62,9 +62,10 @@ and **gems whose high tiers drop only from bosses**.
   - **Each gem block**: 9 gems → 1 block, and 1 block → its 9 gems back.
 - **Twelve gem blocks** (`gem_block_<gem>`): decorative `minecraft:amethyst_block`
   templates with generated faceted textures, hardness and blast resistance
-  rising with the tier, own blockstate/model/item model, a self-drop loot table,
-  and an entry in the pickaxe tag. A Ruby Block is storage and decoration; it is
-  not a socketing table.
+  rising with the tier, a **light level from 3 (common) to 8 (ancient)**, own
+  blockstate/model/item model, a self-drop loot table, and an entry in the
+  pickaxe tag. A Ruby Block is storage, light and decoration; it is not a
+  socketing table.
 - **Affixes on looted gear** (`loot_drops`, API 75): gear a mob drops (a
   zombie's sword, a skeleton's bow…) is rolled into a rarity and carries real
   `minecraft:attribute_modifiers`, a lore that names each affix, and the
@@ -160,7 +161,7 @@ Both halves use the id `apotheosis`.
   recipes; the boss gem drop now cycles the four high gems, ordinary mobs drop
   a low gem, and the four mythic/ancient gems shimmer. All 143 content JSON
   files parse, and `python tools/pack.py` rebuilt `target/apotheosis.hmod` and
-  `target/apotheosis.hnmod` (50056 and 14688 bytes).
+  `target/apotheosis.hnmod` (about 50 KiB and 15 KiB).
 - The registry check caught `horizon-mixin.toml` still naming version `0.2.0`
   after the bump ("native manifest and mixin identity/revision differ"); the
   three version fields now move together, and both packed files check clean.
