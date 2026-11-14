@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "apotheosis:gem_block_ruby"
+  ],
+  "result": {
+    "id": "apotheosis:gem_ruby",
+    "count": 9
+  }
+}

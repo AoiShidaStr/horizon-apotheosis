@@ -136,7 +136,8 @@ pub struct Gem {
     pub effect: &'static str,
 }
 
-pub const GEMS: [Gem; 6] = [
+/// Two gems per tier, so every tier is a choice rather than a single item.
+pub const GEMS: [Gem; 12] = [
     Gem {
         id: "apotheosis:gem_ruby",
         tier: Tier::Common,
@@ -144,6 +145,14 @@ pub const GEMS: [Gem; 6] = [
         amount: 1.0,
         effect_key: "apotheosis.gem.ruby.effect",
         effect: "In the off hand: +1 Attack Damage",
+    },
+    Gem {
+        id: "apotheosis:gem_amber",
+        tier: Tier::Common,
+        attribute: "minecraft:mining_efficiency",
+        amount: 0.15,
+        effect_key: "apotheosis.gem.amber.effect",
+        effect: "In the off hand: +15% Mining Speed",
     },
     Gem {
         id: "apotheosis:gem_topaz",
@@ -154,12 +163,28 @@ pub const GEMS: [Gem; 6] = [
         effect: "In the off hand: +10% Movement Speed",
     },
     Gem {
+        id: "apotheosis:gem_amethyst",
+        tier: Tier::Uncommon,
+        attribute: "minecraft:attack_speed",
+        amount: 0.4,
+        effect_key: "apotheosis.gem.amethyst.effect",
+        effect: "In the off hand: +10% Attack Speed",
+    },
+    Gem {
         id: "apotheosis:gem_sapphire",
         tier: Tier::Rare,
         attribute: "minecraft:max_health",
         amount: 2.0,
         effect_key: "apotheosis.gem.sapphire.effect",
         effect: "In the off hand: +2 Max Health",
+    },
+    Gem {
+        id: "apotheosis:gem_peridot",
+        tier: Tier::Rare,
+        attribute: "minecraft:luck",
+        amount: 1.0,
+        effect_key: "apotheosis.gem.peridot.effect",
+        effect: "In the off hand: +1 Luck",
     },
     Gem {
         id: "apotheosis:gem_jade",
@@ -170,6 +195,14 @@ pub const GEMS: [Gem; 6] = [
         effect: "In the off hand: +2 Armor",
     },
     Gem {
+        id: "apotheosis:gem_citrine",
+        tier: Tier::Epic,
+        attribute: "minecraft:attack_knockback",
+        amount: 0.5,
+        effect_key: "apotheosis.gem.citrine.effect",
+        effect: "In the off hand: +0.5 Attack Knockback",
+    },
+    Gem {
         id: "apotheosis:gem_onyx",
         tier: Tier::Mythic,
         attribute: "minecraft:attack_damage",
@@ -178,12 +211,28 @@ pub const GEMS: [Gem; 6] = [
         effect: "In the off hand: +3 Attack Damage",
     },
     Gem {
+        id: "apotheosis:gem_moonstone",
+        tier: Tier::Mythic,
+        attribute: "minecraft:max_health",
+        amount: 3.0,
+        effect_key: "apotheosis.gem.moonstone.effect",
+        effect: "In the off hand: +3 Max Health",
+    },
+    Gem {
         id: "apotheosis:gem_bloodstone",
         tier: Tier::Ancient,
         attribute: "minecraft:max_health",
         amount: 4.0,
         effect_key: "apotheosis.gem.bloodstone.effect",
         effect: "In the off hand: +4 Max Health",
+    },
+    Gem {
+        id: "apotheosis:gem_opal",
+        tier: Tier::Ancient,
+        attribute: "minecraft:armor_toughness",
+        amount: 3.0,
+        effect_key: "apotheosis.gem.opal.effect",
+        effect: "In the off hand: +3 Armor Toughness",
     },
 ];
 
@@ -395,16 +444,29 @@ const BOSS_TIERS: [(Tier, u64); 4] = [
     (Tier::Ancient, 10),
 ];
 
-/// Which gem a boss drops. Bosses alternate mythic/ancient so a session sees
-/// both tiers.
+/// The gems an ordinary mob can drop: the low tiers, so a player finds gems by
+/// fighting before they build the reforge route.
+const LOW_GEMS: [&str; 4] = [
+    "apotheosis:gem_ruby",
+    "apotheosis:gem_amber",
+    "apotheosis:gem_topaz",
+    "apotheosis:gem_amethyst",
+];
+
+/// The gems only a boss drops: the two high tiers.
+const HIGH_GEMS: [&str; 4] = [
+    "apotheosis:gem_onyx",
+    "apotheosis:gem_moonstone",
+    "apotheosis:gem_bloodstone",
+    "apotheosis:gem_opal",
+];
+
+/// Which gem a boss drops. Bosses cycle through the high gems so a session sees
+/// all four tiers-worth of them.
 static DROPS: AtomicU64 = AtomicU64::new(0);
 
 fn boss_gem() -> &'static str {
-    if DROPS.fetch_add(1, Ordering::Relaxed) % 2 == 0 {
-        "apotheosis:gem_onyx"
-    } else {
-        "apotheosis:gem_bloodstone"
-    }
+    HIGH_GEMS[(DROPS.fetch_add(1, Ordering::Relaxed) % HIGH_GEMS.len() as u64) as usize]
 }
 
 /// A stack of one item.
@@ -613,6 +675,12 @@ impl Hooks for Apotheosis {
                 apply_affixes(stack, tier, &mut rng);
             }
         }
+        // A low gem from an ordinary mob, often enough to matter.
+        if !boss && rng.chance(12) {
+            event
+                .drops
+                .push(one(LOW_GEMS[rng.below(LOW_GEMS.len() as u64) as usize]));
+        }
         // And one of its own: a boss always, an ordinary mob rarely.
         let gear = |rng: &mut Rng| -> &'static str {
             if boss {
@@ -766,10 +834,38 @@ mod tests {
     }
 
     #[test]
-    fn bosses_alternate_the_high_tiers() {
+    fn bosses_cycle_through_the_high_gems() {
         DROPS.store(0, Ordering::Relaxed);
         assert_eq!(boss_gem(), "apotheosis:gem_onyx");
+        assert_eq!(boss_gem(), "apotheosis:gem_moonstone");
         assert_eq!(boss_gem(), "apotheosis:gem_bloodstone");
+        assert_eq!(boss_gem(), "apotheosis:gem_opal");
+        assert_eq!(boss_gem(), "apotheosis:gem_onyx");
+    }
+
+    #[test]
+    fn every_tier_has_two_gems_and_the_high_ones_are_boss_only() {
+        for tier in [
+            Tier::Common,
+            Tier::Uncommon,
+            Tier::Rare,
+            Tier::Epic,
+            Tier::Mythic,
+            Tier::Ancient,
+        ] {
+            assert_eq!(
+                GEMS.iter().filter(|g| g.tier == tier).count(),
+                2,
+                "{tier:?} should have two gems"
+            );
+        }
+        for gem in &GEMS {
+            let high = gem.tier >= Tier::Mythic;
+            assert_eq!(high, HIGH_GEMS.contains(&gem.id), "{} in the wrong pool", gem.id);
+            if !high {
+                assert!(LOW_GEMS.contains(&gem.id) || gem.tier == Tier::Rare || gem.tier == Tier::Epic);
+            }
+        }
     }
 
     #[test]

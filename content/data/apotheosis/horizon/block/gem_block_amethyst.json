@@ -1,0 +1,10 @@
+{
+  "template": "minecraft:amethyst_block",
+  "item": true,
+  "properties": {
+    "hardness": 2.0,
+    "explosion_resistance": 4.0,
+    "sounds": "minecraft:amethyst_block",
+    "requires_tool": true
+  }
+}

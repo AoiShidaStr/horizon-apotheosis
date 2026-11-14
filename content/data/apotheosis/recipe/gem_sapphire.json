@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " D ",
+    "DCD",
+    " D "
+  ],
+  "key": {
+    "D": "apotheosis:gem_dust",
+    "C": "minecraft:lapis_lazuli"
+  },
+  "result": {
+    "id": "apotheosis:gem_sapphire"
+  }
+}

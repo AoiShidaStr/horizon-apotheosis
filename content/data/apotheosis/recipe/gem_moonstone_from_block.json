@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "apotheosis:gem_block_moonstone"
+  ],
+  "result": {
+    "id": "apotheosis:gem_moonstone",
+    "count": 9
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "apotheosis:gem_block_peridot"
+  ],
+  "result": {
+    "id": "apotheosis:gem_peridot",
+    "count": 9
+  }
+}

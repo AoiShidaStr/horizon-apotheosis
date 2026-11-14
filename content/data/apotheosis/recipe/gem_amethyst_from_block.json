@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "apotheosis:gem_block_amethyst"
+  ],
+  "result": {
+    "id": "apotheosis:gem_amethyst",
+    "count": 9
+  }
+}

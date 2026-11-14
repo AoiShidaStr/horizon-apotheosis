@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "minecraft:amethyst_shard"
+  ],
+  "result": {
+    "id": "apotheosis:gem_dust",
+    "count": 2
+  }
+}
