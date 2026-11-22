@@ -12,9 +12,10 @@ and **gems whose high tiers drop only from bosses**.
 
 ## Done
 
-- **Content mod `.hmod`** (`side = "both"`, id `apotheosis`) with **25 creative
-  entries**: twelve gems, gem dust, and twelve decorative gem blocks. All of
-  them are craftable in survival (see *Recipes* below).
+- **Content mod `.hmod`** (`side = "both"`, id `apotheosis`) with **48 creative
+  entries**: twelve gems, gem dust, twelve decorative gem blocks and twenty-three
+  enchanting shelves. All of them are craftable in survival (see *Recipes*
+  below).
 - **Twelve gems, two per tier** — `gem_ruby`, `gem_amber`, `gem_topaz`,
   `gem_amethyst`, `gem_sapphire`, `gem_peridot`, `gem_jade`, `gem_citrine`,
   `gem_onyx`, `gem_moonstone`, `gem_bloodstone`, `gem_opal` — as data-driven
@@ -115,14 +116,109 @@ and **gems whose high tiers drop only from bosses**.
 - **Affixes from chest loot tables** — chest tables can supply gems, but their
   gear remains un-affixed; `loot_table_load` cannot roll the item components
   the later loot generation creates.
-- **Advanced enchanting** (Apotheosis' enchanting stats and library) and
-  **configurable spawners** (silk-touched spawners with a chosen mob) are not
-  implemented.
+- **The enchanting library**, its tomes (Scrap, Extraction) and **configurable
+  spawners** (silk-touched spawners with a chosen mob) are not implemented.
+  Enchanting stats themselves are ported (see *Apothic Enchanting* below), with
+  the limits listed there.
 - **Natural ore generation** for gems: gems come from mobs, bosses, recipes
   and reforge only.
 - Affix names, lore and command answers are translated, but an affixed item
   keeps its vanilla name: the tier shows as a lore line, not as a prefix.
 - No client-side drawing beyond the data-driven items and the tooltip lines.
+
+## Apothic Enchanting
+
+### Done
+
+- **Twenty-three shelf blocks** on `minecraft:bookshelf` templates, with original
+  generated 16x16 textures, own blockstate/model, `block.apotheosis.<shelf>`
+  names in en_us and fr_fr, an entry in the creative tab, a self-drop loot
+  table and the axe mining tag. Their stats are public Apothic Enchanting
+  values (missing `maxEterna` fields default to 30):
+
+  | shelf | Eterna | max Eterna | Quanta | Arcana | Clues |
+  | --- | --- | --- | --- | --- | --- |
+  | basic_bookshelf | 2 | 30 | 0 | 0 | 0 |
+  | hellshelf | 3 | 45 | 3 | 0 | 0 |
+  | blazing_hellshelf | 10 | 65 | 10 | 0 | -1 |
+  | glowing_hellshelf | 5 | 60 | 5 | 3.3333 | 0 |
+  | infused_hellshelf | 5 | 60 | 5 | 0 | 0 |
+  | seashelf | 3 | 45 | 0 | 3 | 0 |
+  | crystal_seashelf | 5 | 60 | 3 | 5 | 0 |
+  | heart_seashelf | 15 | 60 | 0 | 20 | 0 |
+  | infused_seashelf | 5 | 60 | 0 | 5 | 0 |
+  | deepshelf | 5 | 70 | 5 | 5 | 0 |
+  | dormant_deepshelf | 2 | 30 | 0 | 0 | 0 |
+  | echoing_deepshelf | 5 | 75 | 0 | 15 | 0 |
+  | soul_touched_deepshelf | 5 | 75 | 15 | 0 | 0 |
+  | echoing_sculkshelf | 10 | 80 | 10 | 15 | 1 |
+  | soul_touched_sculkshelf | 10 | 80 | 15 | 10 | 1 |
+  | endshelf | 5 | 90 | 5 | 5 | 0 |
+  | pearl_endshelf | 10 | 90 | 7.5 | 7.5 | 0 |
+  | draconic_endshelf | 20 | 100 | 0 | 0 | 0 |
+  | sightshelf | 0 | 30 | 0 | 0 | 1 |
+  | sightshelf_t2 | 0 | 30 | 0 | 0 | 2 |
+  | beeshelf | -30 | 0 | 100 | 0 | 0 |
+  | melonshelf | -2 | 0 | -10 | 0 | 0 |
+  | stoneshelf | -3 | 0 | 0 | -7.5 | 0 |
+
+  Vanilla `minecraft:amethyst_cluster`, `minecraft:skeleton_skull` /
+  `minecraft:wither_skeleton_skull` and `minecraft:wither_skull` are recognised
+  too (+1 Eterna/40 max, +5 Quanta, +10 Quanta respectively), as in the
+  original.
+- **Eterna at the enchanting table** (`prepare_item_enchant`, API 291). The
+  native module (`native/apotheosis/api/src/enchanting.rs`) walks vanilla's 32
+  perimeter positions two blocks out, ignores a shelf behind a non-air block,
+  and aggregates the stats: base 15 Quanta and one clue, Eterna contributions
+  applied in ascending cap order (`min(cap, current + eterna)`), uncapped for
+  the negative-cap shelves, then everything clamped to 0..100. The three offer
+  costs are then scaled from Eterna — the third offer equals Eterna, the lower
+  two take the midpoint of 20–40% and 60–80% of it — so a well-stocked table
+  offers level 45, 70 or 100 enchantments instead of vanilla's 30-level cap.
+  Each offer keeps at least its vanilla eligibility (1, 2, 3) and costs that
+  many experience levels.
+- **The shelves also feed the player's own table.** Each one is in
+  `minecraft:enchantment_power_provider`, so in single player, where Horizon
+  does not dispatch API 291, they count like bookshelves for vanilla power and
+  show the table's particles. Vanilla still caps that path at 15 providers
+  (level 30).
+- **Survival recipes** (vanilla `minecraft:crafting_shaped`): the basic
+  bookshelf is three planks, three books, three planks; every other shelf is
+  one `minecraft:bookshelf` surrounded by four of its theme catalyst — honeycomb,
+  blaze rod or powder, glowstone, nether wart, pufferfish, prismarine shard or
+  crystals, heart of the sea, sculk, echo shard, ender pearl, dragon head,
+  spyglass, emerald, melon slice or polished andesite. The custom
+  `apothic_enchanting:infusion` station does not exist in Horizon, so no recipe
+  depends on it.
+
+### Missing
+
+- **Quanta and Arcana are computed but not applied.** API 291 only hands over
+  the three costs; the finished-enchantment hook (API 209) is read-only and
+  carries neither the seed, the offers nor a mutable result, so this slice
+  cannot widen the power variance, raise the enchantment count or bias rarity.
+  Their values live in the native registry for later use and are covered by
+  tests.
+- **Enchantment levels above vanilla's maximum.** The hooks expose the offers'
+  costs, not their enchantments, so Efficiency VI or Sharpness VI cannot be
+  written onto the result. A high-Eterna table can *charge* up to 100 levels,
+  but the enchantments it grants are still vanilla's.
+- **Custom Apothic enchantments** (Life Mending, Scavenger, Knowledge of the
+  Ages, Bane of Illagers, Berserker's Fury, Crescendo of Bolts, Earth's Boon,
+  Endless Quiver, Icy Thorns, Miner's Fervor, Natural Blessing, Rebounding,
+  Reflective Defenses, Shield Bash, Stable Footing, Tempting, Chromatic,
+  Exploitation). A `.hmod` cannot declare a `data/<ns>/enchantment/` entry: the
+  content loader has no enchantment content type at API 415, and a world
+  datapack cannot add registries in Horizon. `native_enchant_effect` (API 77)
+  can give a new effect *kind* to an existing `minecraft:post_attack` entry,
+  not register the enchantment itself.
+- **Eterna above 30 in single player.** API 291 is dispatched only for a LAN
+  or dedicated host's guests (`lan_stations.rs`); the integrated single-player
+  table computes its offers locally without calling the hook. Local play gets
+  the tag-based power above, capped at vanilla's 15 providers.
+- **The enchanting library, Scrap/Extraction tomes, infusion and rectifiers.**
+  No library block, tome or infusion altar is added; the recipes stop at
+  vanilla crafting.
 
 ## Install
 

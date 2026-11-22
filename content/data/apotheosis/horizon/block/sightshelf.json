@@ -1,0 +1,10 @@
+{
+  "template": "minecraft:bookshelf",
+  "item": true,
+  "properties": {
+    "hardness": 1.5,
+    "explosion_resistance": 1.5,
+    "sounds": "minecraft:chiseled_bookshelf",
+    "requires_tool": false
+  }
+}

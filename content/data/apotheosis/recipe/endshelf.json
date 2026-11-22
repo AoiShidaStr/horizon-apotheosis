@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "building",
+  "pattern": [
+    " C ",
+    "CBC",
+    " C "
+  ],
+  "key": {
+    "B": "minecraft:bookshelf",
+    "C": "minecraft:ender_pearl"
+  },
+  "result": {
+    "id": "apotheosis:endshelf"
+  }
+}

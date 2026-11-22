@@ -18,6 +18,10 @@
 //!   gem. Ordinary mobs never drop those two tiers.
 //! - `register_commands` / `perform_command`: `/apoth reforge` rolls affixes
 //!   onto plain gear, for experience levels.
+//! - `prepare_item_enchant`: Apothic Eterna from nearby shelf blocks raises the
+//!   three enchanting offers; shelves are read through Horizon's server Host.
+mod enchanting;
+
 use horizon_client::mod_api::{
     Flow, Hooks, Host, ItemStack, LootDropsEvent, ModifyDefaultComponentsEvent, NativeCommand,
     PerformCommandEvent, RegisterCommandsEvent, Tag, Text, TooltipEvent, serde_json,
@@ -647,6 +651,14 @@ fn seed_of(context: &horizon_client::mod_api::NativeLootDrops<'_>, n: u64) -> u6
 }
 
 impl Hooks for Apotheosis {
+    fn prepare_item_enchant(
+        &self,
+        host: &mut dyn Host,
+        event: &mut horizon_client::mod_api::PrepareItemEnchantEvent<'_>,
+    ) {
+        enchanting::on_prepare_item_enchant(host, event);
+    }
+
     fn modify_default_components(&self, event: &mut ModifyDefaultComponentsEvent<'_>) {
         let Some(gem) = gem(event.item) else {
             return;
