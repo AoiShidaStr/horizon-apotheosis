@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " S ",
+    "SCS",
+    " S "
+  ],
+  "key": {
+    "S": "minecraft:prismarine_shard",
+    "C": "minecraft:cobweb"
+  },
+  "result": {
+    "id": "apotheosis:prismatic_web"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "building",
+  "pattern": [
+    " C ",
+    "CBC",
+    " C "
+  ],
+  "key": {
+    "B": "minecraft:bookshelf",
+    "C": "minecraft:prismarine_crystals"
+  },
+  "result": {
+    "id": "apotheosis:crystal_seashelf"
+  }
+}

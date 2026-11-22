@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "building",
+  "pattern": [
+    " C ",
+    "CBC",
+    " C "
+  ],
+  "key": {
+    "B": "minecraft:bookshelf",
+    "C": "minecraft:emerald"
+  },
+  "result": {
+    "id": "apotheosis:sightshelf_t2"
+  }
+}

@@ -6,6 +6,7 @@
 //!
 //! The hooks below are the real game's trait API (plus `sockets`' own
 //! `use_item_on` and `loot_function` for the tables and the chest gems):
+//! Seven hooks, all on the real game's trait API:
 //! - `modify_default_components`: each gem carries a real
 //!   `minecraft:attribute_modifiers` entry, so a gem in the off hand grants its
 //!   bonus (the game applies equipment modifiers itself).
@@ -19,10 +20,30 @@
 //!   gem. Ordinary mobs never drop those two tiers.
 //! - `register_commands` / `perform_command`: `/apoth reforge` rolls affixes
 //!   onto plain gear, for experience levels.
+//! - `prepare_item_enchant`: Apothic Eterna from nearby shelf blocks raises the
+//!   three enchanting offers; shelves are read through Horizon's server Host.
+//! - `use_item`: scrapping, superior scrapping and extraction tomes move
+//!   enchantments between the two hands, and the Prismatic Cobweb removes
+//!   curses; Horizon API 415 has no anvil hook, so a right click uses them.
+//!
+//! `attributes` holds the Apothic Attributes half: the combat, mining, bow and
+//! experience attributes affixes carry, filtered by what a piece of gear is.
+//! `affix_effects` holds the effect affixes (poison, execution, cleaving,
+//! spectral arrows, telepathy...) and the Apothic Invader boss.
+mod affix_effects;
+mod attributes;
+mod enchanting;
+
 use horizon_client::mod_api::{
-    Flow, Hooks, Host, ItemStack, LootDropsEvent, ModifyDefaultComponentsEvent, NativeCommand,
-    PerformCommandEvent, RegisterCommandsEvent, Tag, Text, TooltipEvent, serde_json,
+    ArrowLooseEvent, BreakSpeedEvent, EntityJoinLevelEvent, ExperienceOrbPickupEvent, Flow, Hooks,
+    Host, ItemDamagedEvent, ItemStack, LeftClickBlockEvent, LivingEquipmentChangeEvent,
+    LivingHealEvent, LivingIncomingDamageEvent, LivingIncomingDamageV2Event, LootDropsEvent,
+    MobSpawnedEvent, ModifyDefaultComponentsEvent, NativeCommand, OnEquipEvent, PerformCommandEvent,
+    PlaceBlockEvent, PlayerTickEvent, ProjectileLaunchEvent, RegisterCommandsEvent,
+    RightClickBlockEvent, Tag, Text, TickEvent, TooltipEvent, UseItemOnEvent, serde_json,
 };
+
+mod spawners;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 mod sockets;
@@ -267,9 +288,15 @@ pub struct Affix {
     pub operation: &'static str,
     /// A slot group: `hand`, `armor` or `any` (`EquipmentSlotGroup`).
     pub slot: &'static str,
+    /// The item classes this affix may roll on (`attributes::MELEE` and the
+    /// like), so a bow never takes an attack-damage affix.
+    pub classes: u16,
+    /// The Apothic attribute the affix feeds, when it is one of this port's
+    /// own; vanilla attributes work through the real component instead.
+    pub attr: Option<attributes::Attr>,
 }
 
-pub const AFFIXES: [Affix; 8] = [
+pub const AFFIXES: [Affix; 26] = [
     Affix {
         id: "keen",
         name_key: "apotheosis.affix.keen",
@@ -279,6 +306,8 @@ pub const AFFIXES: [Affix; 8] = [
         base: 1.0,
         operation: "add_value",
         slot: "hand",
+        classes: attributes::MELEE,
+        attr: None,
     },
     Affix {
         id: "brutal",
@@ -289,6 +318,8 @@ pub const AFFIXES: [Affix; 8] = [
         base: 2.0,
         operation: "add_value",
         slot: "hand",
+        classes: attributes::MELEE,
+        attr: None,
     },
     Affix {
         id: "swift",
@@ -299,6 +330,8 @@ pub const AFFIXES: [Affix; 8] = [
         base: 0.01,
         operation: "add_value",
         slot: "armor",
+        classes: attributes::ARMOR,
+        attr: None,
     },
     Affix {
         id: "stalwart",
@@ -309,6 +342,8 @@ pub const AFFIXES: [Affix; 8] = [
         base: 2.0,
         operation: "add_value",
         slot: "armor",
+        classes: attributes::ARMOR,
+        attr: None,
     },
     Affix {
         id: "bulwarked",
@@ -319,6 +354,8 @@ pub const AFFIXES: [Affix; 8] = [
         base: 1.0,
         operation: "add_value",
         slot: "armor",
+        classes: attributes::ARMOR | attributes::SHIELD,
+        attr: None,
     },
     Affix {
         id: "hasty",
@@ -329,6 +366,8 @@ pub const AFFIXES: [Affix; 8] = [
         base: 0.15,
         operation: "add_value",
         slot: "hand",
+        classes: attributes::TOOL,
+        attr: None,
     },
     Affix {
         id: "steadfast",
@@ -339,6 +378,8 @@ pub const AFFIXES: [Affix; 8] = [
         base: 0.1,
         operation: "add_value",
         slot: "armor",
+        classes: attributes::ARMOR,
+        attr: None,
     },
     Affix {
         id: "tough",
@@ -349,6 +390,228 @@ pub const AFFIXES: [Affix; 8] = [
         base: 1.0,
         operation: "add_value",
         slot: "armor",
+        classes: attributes::ARMOR,
+        attr: None,
+    },
+    // The Apothic attributes proper. Their values follow the public data:
+    // life steal 5-15%, armour pierce 2-12, arrow damage 15-40%.
+    Affix {
+        id: "vampiric",
+        name_key: "apotheosis.affix.vampiric",
+        name: "Vampiric",
+        attribute: "apothic_attributes:life_steal",
+        attribute_name: "Life Steal",
+        base: 0.05,
+        operation: "add_value",
+        slot: "hand",
+        classes: attributes::MELEE,
+        attr: Some(attributes::Attr::LifeSteal),
+    },
+    Affix {
+        id: "berserking",
+        name_key: "apotheosis.affix.berserking",
+        name: "Berserking",
+        attribute: "apothic_attributes:overheal",
+        attribute_name: "Overheal",
+        base: 0.05,
+        operation: "add_value",
+        slot: "hand",
+        classes: attributes::MELEE,
+        attr: Some(attributes::Attr::Overheal),
+    },
+    Affix {
+        id: "piercing",
+        name_key: "apotheosis.affix.piercing",
+        name: "Piercing",
+        attribute: "apothic_attributes:armor_pierce",
+        attribute_name: "Armor Pierce",
+        base: 2.0,
+        operation: "add_value",
+        slot: "hand",
+        classes: attributes::MELEE | attributes::RANGED,
+        attr: Some(attributes::Attr::ArmorPierce),
+    },
+    Affix {
+        id: "shredding",
+        name_key: "apotheosis.affix.shredding",
+        name: "Shredding",
+        attribute: "apothic_attributes:armor_shred",
+        attribute_name: "Armor Shred",
+        base: 0.1,
+        operation: "add_value",
+        slot: "hand",
+        classes: attributes::MELEE,
+        attr: Some(attributes::Attr::ArmorShred),
+    },
+    Affix {
+        id: "glacial",
+        name_key: "apotheosis.affix.glacial",
+        name: "Glacial",
+        attribute: "apothic_attributes:cold_damage",
+        attribute_name: "Cold Damage",
+        base: 1.0,
+        operation: "add_value",
+        slot: "hand",
+        classes: attributes::MELEE,
+        attr: Some(attributes::Attr::ColdDamage),
+    },
+    Affix {
+        id: "infernal",
+        name_key: "apotheosis.affix.infernal",
+        name: "Infernal",
+        attribute: "apothic_attributes:fire_damage",
+        attribute_name: "Fire Damage",
+        base: 1.0,
+        operation: "add_value",
+        slot: "hand",
+        classes: attributes::MELEE,
+        attr: Some(attributes::Attr::FireDamage),
+    },
+    Affix {
+        id: "murderous",
+        name_key: "apotheosis.affix.murderous",
+        name: "Murderous",
+        attribute: "apothic_attributes:crit_damage",
+        attribute_name: "Crit Damage",
+        base: 0.1,
+        operation: "add_value",
+        slot: "hand",
+        classes: attributes::MELEE,
+        attr: Some(attributes::Attr::CritDamage),
+    },
+    Affix {
+        id: "violent",
+        name_key: "apotheosis.affix.violent",
+        name: "Violent",
+        attribute: "apothic_attributes:crit_chance",
+        attribute_name: "Crit Chance",
+        base: 0.05,
+        operation: "add_value",
+        slot: "hand",
+        classes: attributes::MELEE,
+        attr: Some(attributes::Attr::CritChance),
+    },
+    Affix {
+        id: "elusive",
+        name_key: "apotheosis.affix.elusive",
+        name: "Elusive",
+        attribute: "apothic_attributes:dodge_chance",
+        attribute_name: "Dodge Chance",
+        base: 0.05,
+        operation: "add_value",
+        slot: "armor",
+        classes: attributes::ARMOR,
+        attr: Some(attributes::Attr::DodgeChance),
+    },
+    Affix {
+        id: "blessed",
+        name_key: "apotheosis.affix.blessed",
+        name: "Blessed",
+        attribute: "apothic_attributes:healing_received",
+        attribute_name: "Healing Received",
+        base: 0.1,
+        operation: "add_value",
+        slot: "armor",
+        classes: attributes::ARMOR,
+        attr: Some(attributes::Attr::HealingReceived),
+    },
+    Affix {
+        id: "elven",
+        name_key: "apotheosis.affix.elven",
+        name: "Elven",
+        attribute: "apothic_attributes:arrow_damage",
+        attribute_name: "Arrow Damage",
+        base: 0.15,
+        operation: "add_multiplied_base",
+        slot: "hand",
+        classes: attributes::RANGED,
+        attr: Some(attributes::Attr::ArrowDamage),
+    },
+    Affix {
+        id: "agile",
+        name_key: "apotheosis.affix.agile",
+        name: "Agile",
+        attribute: "apothic_attributes:draw_speed",
+        attribute_name: "Draw Speed",
+        base: 0.1,
+        operation: "add_multiplied_base",
+        slot: "hand",
+        classes: attributes::RANGED,
+        attr: Some(attributes::Attr::DrawSpeed),
+    },
+    Affix {
+        id: "streamlined",
+        name_key: "apotheosis.affix.streamlined",
+        name: "Streamlined",
+        attribute: "apothic_attributes:arrow_velocity",
+        attribute_name: "Arrow Velocity",
+        base: 0.1,
+        operation: "add_multiplied_base",
+        slot: "hand",
+        classes: attributes::RANGED,
+        attr: Some(attributes::Attr::ArrowVelocity),
+    },
+    Affix {
+        id: "experienced",
+        name_key: "apotheosis.affix.experienced",
+        name: "Experienced",
+        attribute: "apothic_attributes:experience_gained",
+        attribute_name: "Experience Gained",
+        base: 0.25,
+        operation: "add_multiplied_base",
+        slot: "hand",
+        classes: attributes::TOOL,
+        attr: Some(attributes::Attr::ExperienceGained),
+    },
+    Affix {
+        id: "destructive",
+        name_key: "apotheosis.affix.destructive",
+        name: "Destructive",
+        attribute: "apothic_attributes:mining_speed",
+        attribute_name: "Mining Speed",
+        base: 0.15,
+        operation: "add_multiplied_base",
+        slot: "hand",
+        classes: attributes::TOOL,
+        attr: Some(attributes::Attr::MiningSpeed),
+    },
+    // Slot-specific armour affixes: a boot-only and a helmet-only one, so the
+    // pool is not merely "armour" as a whole.
+    Affix {
+        id: "surefooted",
+        name_key: "apotheosis.affix.surefooted",
+        name: "Surefooted",
+        attribute: "minecraft:knockback_resistance",
+        attribute_name: "Knockback Resistance",
+        base: 0.05,
+        operation: "add_value",
+        slot: "armor",
+        classes: attributes::BOOTS,
+        attr: None,
+    },
+    Affix {
+        id: "ironforged",
+        name_key: "apotheosis.affix.ironforged",
+        name: "Ironforged",
+        attribute: "minecraft:armor",
+        attribute_name: "Armor",
+        base: 1.0,
+        operation: "add_value",
+        slot: "armor",
+        classes: attributes::HELMET,
+        attr: None,
+    },
+    Affix {
+        id: "elastic",
+        name_key: "apotheosis.affix.elastic",
+        name: "Elastic",
+        attribute: "minecraft:movement_speed",
+        attribute_name: "Movement Speed",
+        base: 0.01,
+        operation: "add_value",
+        slot: "armor",
+        classes: attributes::LEGGINGS,
+        attr: None,
     },
 ];
 
@@ -398,10 +661,10 @@ pub fn is_armor(item: &str) -> bool {
 /// counter mixed with what dropped (splitmix64). Two kills of one mob at one
 /// place in different ticks roll differently; the stream is this mod's own, not
 /// the level's.
-struct Rng(u64);
+pub(crate) struct Rng(u64);
 
 impl Rng {
-    fn new(seed: u64) -> Self {
+    pub(crate) fn new(seed: u64) -> Self {
         Self(seed)
     }
     fn next(&mut self) -> u64 {
@@ -412,15 +675,15 @@ impl Rng {
         z ^ (z >> 31)
     }
     /// A number in `0..n`, uniformly enough for a loot roll.
-    fn below(&mut self, n: u64) -> u64 {
+    pub(crate) fn below(&mut self, n: u64) -> u64 {
         if n == 0 { 0 } else { self.next() % n }
     }
     /// Whether a roll of `chance` in 100 comes up.
-    fn chance(&mut self, chance: u64) -> bool {
+    pub(crate) fn chance(&mut self, chance: u64) -> bool {
         self.below(100) < chance
     }
     /// One of `weights`' tiers, by weight.
-    fn tier(&mut self, weights: &[(Tier, u64)]) -> Tier {
+    pub(crate) fn tier(&mut self, weights: &[(Tier, u64)]) -> Tier {
         let total: u64 = weights.iter().map(|(_, w)| *w).sum();
         let mut roll = self.below(total.max(1));
         for (tier, weight) in weights {
@@ -438,7 +701,7 @@ impl Rng {
 const ORDINARY_TIERS: [(Tier, u64); 3] = [(Tier::Uncommon, 55), (Tier::Rare, 30), (Tier::Epic, 15)];
 
 /// What a boss's gear rolls.
-const BOSS_TIERS: [(Tier, u64); 4] = [
+pub(crate) const BOSS_TIERS: [(Tier, u64); 4] = [
     (Tier::Rare, 25),
     (Tier::Epic, 40),
     (Tier::Mythic, 25),
@@ -523,7 +786,7 @@ fn boss_gem() -> &'static str {
 }
 
 /// A stack of one item.
-fn one(item: &str) -> ItemStack {
+pub(crate) fn one(item: &str) -> ItemStack {
     ItemStack::new(item, 1)
 }
 
@@ -596,21 +859,26 @@ fn affix_tag(affix: &Affix, amount: f64) -> Tag {
 
 /// Rolls `tier`'s affixes onto `stack`: real `minecraft:attribute_modifiers`, a
 /// lore that says them, and the vanilla rarity that colours the name.
-pub fn apply_affixes(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) {
+pub(crate) fn apply_affixes(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) {
     let count = tier.affixes();
     if count == 0 {
         return;
     }
-    // Only affixes whose slot group matches the piece: an armour affix on a
-    // sword would show a lore line that never applies, and the other way round.
-    let armor = is_armor(&stack.item);
+    // Only affixes whose item classes include this piece: an armour affix on a
+    // sword would show a lore line that never applies, and a melee affix on a
+    // bow would pay out nothing. A piece with no matching affix gets none.
+    let class = attributes::class_of(&stack.item);
     let mut pool: Vec<usize> = (0..AFFIXES.len())
-        .filter(|i| (AFFIXES[*i].slot == "armor") == armor)
+        .filter(|i| attributes::accepts(AFFIXES[*i].classes, class))
         .collect();
     if pool.is_empty() {
-        pool = (0..AFFIXES.len()).collect();
+        return;
     }
-    let mut modifiers = Vec::with_capacity(count);
+    // The item's own modifiers come first: writing the component replaces the
+    // defaults, so an affixed sword would otherwise lose its base damage.
+    let mut modifiers = attributes::base_modifiers(&stack.item);
+    modifiers.reserve(count);
+    let mut custom = Vec::with_capacity(count);
     let mut lore = Vec::with_capacity(count + 1);
     lore.push(tier_tag(tier));
     for _ in 0..count.min(pool.len()) {
@@ -626,11 +894,18 @@ pub fn apply_affixes(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) {
             ("slot", string(affix.slot)),
         ]));
         lore.push(affix_tag(affix, amount));
+        if let Some(attr) = affix.attr {
+            custom.push((attr, amount));
+        }
     }
     let data = stack.data_mut();
     data.set_other("minecraft:attribute_modifiers", Some(Tag::List(modifiers)));
     data.set_other("minecraft:lore", Some(Tag::List(lore)));
     data.set_other("minecraft:rarity", Some(string(tier.vanilla_rarity())));
+    attributes::attach(stack, &custom);
+    // An effect affix is extra, never a replacement: the attribute lines and
+    // their count stay as they were.
+    affix_effects::add_effect_affix(stack, tier, rng);
 }
 
 /// A seed for one drop: the counter, the position and the mob, so two kills
@@ -651,7 +926,18 @@ fn seed_of(context: &horizon_client::mod_api::NativeLootDrops<'_>, n: u64) -> u6
 }
 
 impl Hooks for Apotheosis {
+    fn prepare_item_enchant(
+        &self,
+        host: &mut dyn Host,
+        event: &mut horizon_client::mod_api::PrepareItemEnchantEvent<'_>,
+    ) {
+        enchanting::on_prepare_item_enchant(host, event);
+    }
+
     fn modify_default_components(&self, event: &mut ModifyDefaultComponentsEvent<'_>) {
+        // Before anything edits them: the item's own modifiers are what an
+        // affixed copy must keep.
+        attributes::remember_default_modifiers(event);
         let Some(gem) = gem(event.item) else {
             return;
         };
@@ -668,6 +954,8 @@ impl Hooks for Apotheosis {
     }
 
     fn tooltip(&self, _host: &dyn Host, event: &mut TooltipEvent<'_>) {
+        attributes::tooltip(event);
+        spawners::on_tooltip(event);
         let Some(gem) = gem(&event.stack.item) else {
             sockets::tooltip(event);
             return;
@@ -694,19 +982,16 @@ impl Hooks for Apotheosis {
     }
 
     fn use_item(&self, host: &mut dyn Host, event: &mut horizon_client::mod_api::UseItemEvent<'_>) -> Flow {
-        sockets::use_item(host, event)
+        // Two right-click gestures share this hook: socketing and sigils (gem or
+        // sigil in the main hand) first, then the enchanting tomes and cobweb.
+        match sockets::use_item(host, event) {
+            Flow::Continue => enchanting::on_use_item(host, event),
+            Flow::Cancel => Flow::Cancel,
+        }
     }
 
     fn inventory_tick(&self, host: &mut dyn Host, event: &mut horizon_client::mod_api::InventoryTickEvent) {
         sockets::inventory_tick(host, event);
-    }
-
-    fn use_item_on(
-        &self,
-        host: &mut dyn Host,
-        event: &mut horizon_client::mod_api::UseItemOnEvent<'_>,
-    ) -> Flow {
-        sockets::use_item_on(host, event)
     }
 
     fn loot_table_load(&self, event: &mut horizon_client::mod_api::LootTableLoadEvent<'_>) {
@@ -717,15 +1002,20 @@ impl Hooks for Apotheosis {
         sockets::loot_function(event)
     }
 
-    fn loot_drops(&self, _host: &mut dyn Host, event: &mut LootDropsEvent<'_>) {
-        let Some((_, kind)) = event.context.entity else {
+    fn loot_drops(&self, host: &mut dyn Host, event: &mut LootDropsEvent<'_>) {
+        // A silk-touched spawner's own drop first, so telepathy carries it too.
+        spawners::on_loot_drops(event);
+        // Telepathy moves a tool's drops to the player, festive may double a
+        // kill's gear: both happen on their own, kill or use.
+        affix_effects::loot_drops(host, event);
+        let Some((id, kind)) = event.context.entity else {
             return;
         };
         // A player's use (shears, a brush) is not a kill.
         if event.context.used {
             return;
         }
-        let boss = BOSSES.contains(&kind);
+        let boss = BOSSES.contains(&kind) || affix_effects::is_boss(host, id);
         let killed_by_player = event.context.player.is_some();
         if !boss && !killed_by_player {
             return;
@@ -785,6 +1075,134 @@ impl Hooks for Apotheosis {
                 sockets::roll_dropped_purity(stack, &mut rng, boss);
             }
         }
+    }
+
+    fn living_incoming_damage(&self, event: &mut LivingIncomingDamageEvent<'_>) -> Flow {
+        if attributes::incoming_damage(event) {
+            Flow::Cancel
+        } else {
+            Flow::Continue
+        }
+    }
+
+    fn living_incoming_damage_v2(
+        &self,
+        host: &mut dyn Host,
+        event: &mut LivingIncomingDamageV2Event<'_>,
+    ) -> Flow {
+        if attributes::incoming_damage_v2(host, event) {
+            return Flow::Cancel;
+        }
+        affix_effects::on_hit(host, event);
+        Flow::Continue
+    }
+
+    fn item_damaged(&self, host: &mut dyn Host, event: &mut ItemDamagedEvent<'_>) -> Flow {
+        affix_effects::item_damaged(host, event)
+    }
+
+    fn projectile_launch(&self, host: &mut dyn Host, event: &mut ProjectileLaunchEvent<'_>) {
+        attributes::projectile_launch(event);
+        affix_effects::projectile_launch(host, event);
+    }
+
+    fn entity_join_level(&self, _host: &mut dyn Host, event: &mut EntityJoinLevelEvent<'_>) -> Flow {
+        affix_effects::entity_join_level(event)
+    }
+
+    fn mob_spawned(&self, host: &mut dyn Host, event: &mut MobSpawnedEvent<'_>) {
+        affix_effects::mob_spawned(host, event);
+    }
+
+    fn living_heal(&self, event: &mut LivingHealEvent) -> Flow {
+        attributes::living_heal(event);
+        Flow::Continue
+    }
+
+    fn experience_orb_pickup(
+        &self,
+        host: &mut dyn Host,
+        event: &mut ExperienceOrbPickupEvent<'_>,
+    ) -> Flow {
+        attributes::orb(host, event);
+        Flow::Continue
+    }
+
+    fn break_speed(&self, host: &dyn Host, event: &mut BreakSpeedEvent) {
+        attributes::break_speed(host, event);
+    }
+
+    fn arrow_loose(&self, host: &mut dyn Host, event: &mut ArrowLooseEvent<'_>) -> Flow {
+        attributes::arrow_loose(host, event);
+        Flow::Continue
+    }
+
+    fn living_equipment_change(
+        &self,
+        _host: &mut dyn Host,
+        event: &mut LivingEquipmentChangeEvent<'_>,
+    ) {
+        attributes::equipment_changed(event);
+    }
+
+    fn on_equip(&self, host: &mut dyn Host, event: &mut OnEquipEvent<'_>) {
+        attributes::equipped(host, event);
+    }
+
+    fn player_tick(&self, host: &mut dyn Host, event: &mut PlayerTickEvent) {
+        attributes::tick(host, event);
+    }
+
+    fn tick(&self, host: &mut dyn Host, _event: &mut TickEvent) {
+        spawners::on_tick(host);
+    }
+
+    fn right_click_block(&self, host: &mut dyn Host, event: &mut RightClickBlockEvent) -> Flow {
+        match spawners::on_right_click(host, event.pos) {
+            Flow::Continue => enchanting::on_right_click_block(host, event),
+            Flow::Cancel => Flow::Cancel,
+        }
+    }
+
+    fn block_entity(
+        &self,
+        _host: &mut dyn Host,
+        event: &mut horizon_client::mod_api::BlockEntityEvent<'_>,
+    ) -> Option<(String, horizon_client::mod_api::Compound)> {
+        enchanting::on_block_entity(event)
+    }
+
+    fn block_entity_ticks(
+        &self,
+        _host: &dyn Host,
+        event: &mut horizon_client::mod_api::BlockEntityTicksEvent<'_>,
+    ) {
+        enchanting::on_block_entity_ticks(event);
+    }
+
+    fn block_entity_tick(
+        &self,
+        host: &mut dyn Host,
+        event: &mut horizon_client::mod_api::BlockEntityTickEvent<'_>,
+    ) {
+        enchanting::on_block_entity_tick(host, event);
+    }
+
+    fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
+        // The Apotheosis tables (reforge, salvage, gem cutting) first, then a
+        // spawner modifier on a spawner block.
+        match sockets::use_item_on(host, event) {
+            Flow::Continue => spawners::on_use_item_on(host, event),
+            Flow::Cancel => Flow::Cancel,
+        }
+    }
+
+    fn left_click_block(&self, host: &mut dyn Host, event: &mut LeftClickBlockEvent) -> Flow {
+        spawners::on_left_click(host, event.pos)
+    }
+
+    fn place_block(&self, host: &mut dyn Host, event: &mut PlaceBlockEvent<'_>) {
+        spawners::on_place(host, event);
     }
 
     fn register_commands(&self, _host: &mut dyn Host, event: &mut RegisterCommandsEvent<'_>) {

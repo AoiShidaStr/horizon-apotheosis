@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "building",
+  "pattern": [
+    " C ",
+    "CBC",
+    " C "
+  ],
+  "key": {
+    "B": "minecraft:bookshelf",
+    "C": "minecraft:blaze_powder"
+  },
+  "result": {
+    "id": "apotheosis:blazing_hellshelf"
+  }
+}
