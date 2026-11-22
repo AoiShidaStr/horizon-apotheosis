@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " L ",
+    "LBL",
+    " L "
+  ],
+  "key": {
+    "L": "apotheosis:luminous_crystal_shard",
+    "B": "minecraft:blaze_powder"
+  },
+  "result": {
+    "id": "apotheosis:sigil_of_rebirth"
+  }
+}

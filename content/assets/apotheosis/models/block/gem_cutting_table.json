@@ -1,0 +1,8 @@
+{
+  "parent": "minecraft:block/cube_bottom_top",
+  "textures": {
+    "top": "apotheosis:block/gem_cutting_table",
+    "side": "apotheosis:block/gem_cutting_table_side",
+    "bottom": "apotheosis:block/gem_cutting_table_side"
+  }
+}

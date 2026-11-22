@@ -4,6 +4,8 @@
 //! above vanilla's, affixes on gear, higher tiers only from bosses). No
 //! Apotheosis code or asset is used: see `../../README.md` and `NOTICE.md`.
 //!
+//! The hooks below are the real game's trait API (plus `sockets`' own
+//! `use_item_on` and `loot_function` for the tables and the chest gems):
 //! Seven hooks, all on the real game's trait API:
 //! - `modify_default_components`: each gem carries a real
 //!   `minecraft:attribute_modifiers` entry, so a gem in the off hand grants its
@@ -760,6 +762,7 @@ fn add_chest_gem_pool(id: &str, table: &mut serde_json::Value) {
                 "type": "minecraft:item",
                 "name": item,
                 "weight": weight,
+                "functions": [{ "function": "apotheosis:gem_purity" }],
             })
         })
         .collect();
@@ -994,6 +997,10 @@ impl Hooks for Apotheosis {
         add_chest_gem_pool(event.id, event.table);
     }
 
+    fn loot_function(&self, event: &mut horizon_client::mod_api::LootFunctionEvent<'_>) {
+        sockets::loot_function(event)
+    }
+
     fn loot_drops(&self, host: &mut dyn Host, event: &mut LootDropsEvent<'_>) {
         // A silk-touched spawner's own drop first, so telepathy carries it too.
         spawners::on_loot_drops(event);
@@ -1151,7 +1158,12 @@ impl Hooks for Apotheosis {
     }
 
     fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
-        spawners::on_use_item_on(host, event)
+        // The Apotheosis tables (reforge, salvage, gem cutting) first, then a
+        // spawner modifier on a spawner block.
+        match sockets::use_item_on(host, event) {
+            Flow::Continue => spawners::on_use_item_on(host, event),
+            Flow::Cancel => Flow::Cancel,
+        }
     }
 
     fn left_click_block(&self, host: &mut dyn Host, event: &mut LeftClickBlockEvent) -> Flow {

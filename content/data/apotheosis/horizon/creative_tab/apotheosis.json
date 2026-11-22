@@ -58,6 +58,13 @@
     "apotheosis:scrap_tome",
     "apotheosis:improved_scrap_tome",
     "apotheosis:extraction_tome",
-    "apotheosis:prismatic_web"
+    "apotheosis:prismatic_web",
+    "apotheosis:sigil_of_socketing",
+    "apotheosis:sigil_of_withdrawal",
+    "apotheosis:sigil_of_rebirth",
+    "apotheosis:sigil_of_enhancement",
+    "apotheosis:gem_cutting_table",
+    "apotheosis:salvaging_table",
+    "apotheosis:reforging_table"
   ]
 }

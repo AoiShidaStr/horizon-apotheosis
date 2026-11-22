@@ -98,12 +98,236 @@ MESSAGES = {
         "Some of it did not fit in your inventory.",
         "Une partie n'a pas tenu dans l'inventaire.",
     ),
+    "apotheosis.socket.max": (
+        "That piece already has all %s sockets.",
+        "Cette pièce a déjà tous ses sockets (%s).",
+    ),
+    "apotheosis.socket.added": (
+        "Socket added: %s/%s.",
+        "Socket ajouté : %s/%s.",
+    ),
+    "apotheosis.socket.none": (
+        "That piece has no gem in its sockets.",
+        "Cette pièce n'a aucune gemme sertie.",
+    ),
+    "apotheosis.socket.withdrawn": (
+        "%s gem(s) taken back out.",
+        "%s gemme(s) retirée(s).",
+    ),
+    "apotheosis.seal.no_piece": (
+        "Hold an affixed piece in your off hand to use a sigil on it.",
+        "Tenez un objet affixé en main secondaire pour y utiliser un sceau.",
+    ),
+    "apotheosis.enhance.done": ("Enhanced: %s.", "Amélioré : %s."),
+    "apotheosis.enhance.max": (
+        "That piece is already ancient.",
+        "Cette pièce est déjà ancienne.",
+    ),
+    "apotheosis.cut.no_dust": (
+        "The gem cutting table needs %s gem dust.",
+        "La table de taille demande %s poussière de gemme.",
+    ),
+    "apotheosis.table.reforge.hint": (
+        "The reforging table works on the piece of gear in your hand.",
+        "La table de recréation agit sur l'équipement tenu en main.",
+    ),
+    "apotheosis.table.salvage.hint": (
+        "The salvaging table breaks down the affixed piece in your hand.",
+        "La table de récupération recycle l'objet affixé tenu en main.",
+    ),
+    "apotheosis.table.cut.hint": (
+        "The gem cutting table sharpens the gem in your hand.",
+        "La table de taille aiguise la gemme tenue en main.",
+    ),
     "apotheosis.command.help": (
         "Apotheosis: /apoth reforge — roll affixes onto the gear you hold (3 levels); "
         "/apoth salvage — break an affixed piece into rarity materials.",
         "Apothéose : /apoth reforge — relance les affixes de l'équipement tenu "
         "(3 niveaux) ; /apoth salvage — recycle un objet affixé en matériaux de rareté.",
     ),
+}
+
+# A sigil: id, the rarity its item shows, English and French names and
+# descriptions, the wax colour and the symbol drawn on it.
+SEALS = [
+    ("sigil_of_socketing", "common", "Sigil of Socketing",
+     "Sceau de sertissage", "Adds one socket to an item",
+     "Ajoute un socket à un objet", 0xC98A3A, "plus"),
+    ("sigil_of_withdrawal", "uncommon", "Sigil of Withdrawal",
+     "Sceau de retrait", "Removes all socketed gems from an item",
+     "Retire toutes les gemmes serties d'un objet", 0x8A9BA8, "minus"),
+    ("sigil_of_rebirth", "rare", "Sigil of Rebirth",
+     "Sceau de renaissance", "Rerolls an affixed item's rarity and affixes",
+     "Relance la rareté et les affixes d'un objet affixé", 0x9A4FD0, "star"),
+    ("sigil_of_enhancement", "epic", "Sigil of Enhancement",
+     "Sceau d'amélioration", "Raises an affixed item's rarity by one step",
+     "Augmente la rareté d'un objet affixé d'un cran", 0xD8483F, "arrow"),
+]
+
+SEAL_RECIPES = {
+    "sigil_of_socketing": {
+        "type": "minecraft:crafting_shaped",
+        "category": "misc",
+        "pattern": [" S ", "SGS", " S "],
+        "key": {"S": ID + ":mysterious_scrap_metal", "G": "minecraft:gold_ingot"},
+        "result": {"id": ID + ":sigil_of_socketing"},
+    },
+    "sigil_of_withdrawal": {
+        "type": "minecraft:crafting_shaped",
+        "category": "misc",
+        "pattern": [" F ", "FIF", " F "],
+        "key": {"F": ID + ":timeworn_fabric", "I": "minecraft:iron_ingot"},
+        "result": {"id": ID + ":sigil_of_withdrawal"},
+    },
+    "sigil_of_rebirth": {
+        "type": "minecraft:crafting_shaped",
+        "category": "misc",
+        "pattern": [" L ", "LBL", " L "],
+        "key": {"L": ID + ":luminous_crystal_shard", "B": "minecraft:blaze_powder"},
+        "result": {"id": ID + ":sigil_of_rebirth"},
+    },
+    "sigil_of_enhancement": {
+        "type": "minecraft:crafting_shaped",
+        "category": "misc",
+        "pattern": [" A ", "AEA", " A "],
+        "key": {"A": ID + ":arcane_sands", "E": "minecraft:emerald"},
+        "result": {"id": ID + ":sigil_of_enhancement"},
+    },
+}
+
+# A working table: id, English and French names, the base and emblem colours,
+# and its recipe.
+TABLES = [
+    ("gem_cutting_table", "Gem Cutting Table", "Table de taille de gemme",
+     0x5A3E7A, 0xC9A6F2),
+    ("salvaging_table", "Salvaging Table", "Table de récupération",
+     0x5B5F63, 0xC2CBD2),
+    ("reforging_table", "Reforging Table", "Table de recréation",
+     0x6B4A2A, 0xE8C36A),
+]
+
+TABLE_RECIPES = {
+    "gem_cutting_table": {
+        "type": "minecraft:crafting_shaped",
+        "category": "misc",
+        "pattern": ["I I", "ADA", "I I"],
+        "key": {"I": "minecraft:iron_ingot", "A": "minecraft:amethyst_shard",
+                "D": ID + ":gem_dust"},
+        "result": {"id": ID + ":gem_cutting_table"},
+    },
+    "salvaging_table": {
+        "type": "minecraft:crafting_shaped",
+        "category": "misc",
+        "pattern": ["III", "I I", "PPP"],
+        "key": {"I": "minecraft:iron_ingot", "P": "minecraft:oak_planks"},
+        "result": {"id": ID + ":salvaging_table"},
+    },
+    "reforging_table": {
+        "type": "minecraft:crafting_shaped",
+        "category": "misc",
+        "pattern": ["GGG", "GSG", "SSS"],
+        "key": {"G": "minecraft:gold_ingot", "S": ID + ":mysterious_scrap_metal"},
+        "result": {"id": ID + ":reforging_table"},
+    },
+}
+
+# The symbols stamped on a sigil, 7x7, 'x' the symbol.
+SEAL_GLYPHS = {
+    "plus": [
+        ".......",
+        "...x...",
+        "...x...",
+        ".xxxxx.",
+        "...x...",
+        "...x...",
+        ".......",
+    ],
+    "minus": [
+        ".......",
+        ".......",
+        ".......",
+        ".xxxxx.",
+        ".......",
+        ".......",
+        ".......",
+    ],
+    "star": [
+        "...x...",
+        "...x...",
+        ".xxxxx.",
+        "..xxx..",
+        ".xx.xx.",
+        ".x...x.",
+        ".......",
+    ],
+    "arrow": [
+        "...x...",
+        "..xxx..",
+        ".x.x.x.",
+        "...x...",
+        "...x...",
+        "...x...",
+        ".......",
+    ],
+}
+
+# The table top, 16x16: '#' the rim, '+' the field, 'x' the emblem, and any
+# other character leaves the texture's own field.
+TABLE_EMBLEMS = {
+    "gem_cutting_table": [
+        "................",
+        "................",
+        "......xxxx......",
+        ".....x....x.....",
+        "....x..xx..x....",
+        "....x.x..x.x....",
+        "....x.x..x.x....",
+        "....x..xx..x....",
+        ".....x....x.....",
+        "......xxxx......",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+    ],
+    "salvaging_table": [
+        "................",
+        "................",
+        "....xxxxxxxx....",
+        "....x......x....",
+        "....x.x..x.x....",
+        "....x..xx..x....",
+        "....x.x..x.x....",
+        "....x......x....",
+        "....xxxxxxxx....",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+    ],
+    "reforging_table": [
+        "................",
+        "................",
+        "...xxxxxxxxxx...",
+        "...x........x...",
+        "...x..xxxx..x...",
+        "...x..x..x..x...",
+        "...x..x..x..x...",
+        "...x..xxxx..x...",
+        "...x........x...",
+        "...xxxxxxxxxx...",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+    ],
 }
 
 # What each material is crafted from, so a player can reach the first one
@@ -326,6 +550,72 @@ def pearl_pixels():
                       shade(rgb, 0.62), shade(rgb, 0.4))
 
 
+def seal_pixels(colour, glyph):
+    """A wax disc with a stamped symbol."""
+    pixels = blank()
+    for y in range(16):
+        for x in range(16):
+            dx, dy = x - 7.5, y - 7.5
+            d = (dx * dx + dy * dy) ** 0.5
+            if d <= 5.1:
+                pixels[y][x] = shade(colour, 1.18 if dx + dy < -1 else 1.0)
+            elif d <= 6.1:
+                pixels[y][x] = shade(colour, 0.62)
+    for gy, row in enumerate(SEAL_GLYPHS[glyph]):
+        for gx, ch in enumerate(row):
+            if ch == "x":
+                pixels[4 + gy][4 + gx] = shade(0xFFF3D6, 1.0)
+    return pixels
+
+
+def table_pixels(base, emblem, shape):
+    """A full table top: a rim, a checkered field and a stamped emblem."""
+    pixels = blank()
+    field = shade(base, 1.0)
+    weave = shade(base, 0.9)
+    rim = shade(base, 1.35)
+    dark = shade(base, 0.55)
+    for y in range(16):
+        for x in range(16):
+            pixels[y][x] = field if (x + y) % 2 else weave
+    for i in range(16):
+        pixels[0][i] = pixels[15][i] = rim
+        pixels[i][0] = pixels[i][15] = rim
+        pixels[1][i] = pixels[14][i] = field
+        pixels[i][1] = pixels[i][14] = field
+    pixels[0][0] = pixels[0][15] = pixels[15][0] = pixels[15][15] = dark
+    ink = shade(emblem, 1.0)
+    edge = shade(emblem, 0.55)
+    for y, row in enumerate(shape):
+        for x, ch in enumerate(row):
+            if ch == "x":
+                pixels[y][x] = ink
+                for (nx, ny) in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                    if 0 <= nx < 16 and 0 <= ny < 16 and shape[ny][nx] != "x":
+                        if pixels[ny][nx] != ink and pixels[ny][nx] != rim:
+                            pixels[ny][nx] = edge
+    return pixels
+
+
+def table_side_pixels(base):
+    """The table's sides: stacked boards with a rim, under the top."""
+    pixels = blank()
+    seam = shade(base, 0.5)
+    rim = shade(base, 1.2)
+    for y in range(16):
+        for x in range(16):
+            pixels[y][x] = shade(base, 0.82 if (y // 4) % 2 else 0.7)
+    for y in (3, 7, 11):
+        for x in range(16):
+            pixels[y][x] = seam
+    for i in range(16):
+        pixels[0][i] = rim
+        pixels[15][i] = seam
+        pixels[i][0] = rim
+        pixels[i][15] = seam
+    return pixels
+
+
 TEXTURES = {
     "mysterious_scrap_metal": scrap_pixels,
     "timeworn_fabric": fabric_pixels,
@@ -333,6 +623,15 @@ TEXTURES = {
     "arcane_sands": sand_pixels,
     "godforged_pearl": pearl_pixels,
 }
+
+for (_seal, _rarity, _en, _fr, _den, _dfr, _colour, _glyph) in SEALS:
+    TEXTURES[_seal] = (lambda c=_colour, g=_glyph: seal_pixels(c, g))
+
+for (_table, _en, _fr, _base, _emblem) in TABLES:
+    TEXTURES[_table] = (
+        lambda b=_base, e=_emblem, s=TABLE_EMBLEMS[_table]: table_pixels(b, e, s)
+    )
+    TEXTURES[_table + "_side"] = (lambda b=_base: table_side_pixels(b))
 
 
 def png(path, pixels):
@@ -403,6 +702,71 @@ def main():
         en["apotheosis.material.%s.note" % material] = note_en
         fr["apotheosis.material.%s.note" % material] = FRENCH_NOTES[material]
 
+    for (seal, rarity, name_en, name_fr, desc_en, desc_fr, _colour, _glyph) in SEALS:
+        write_json(os.path.join(CONTENT, "data", ID, "horizon", "item", seal + ".json"), {
+            "template": "minecraft:paper",
+            "max_stack_size": 16,
+            "rarity": rarity,
+        })
+        write_json(os.path.join(CONTENT, "assets", ID, "items", seal + ".json"), {
+            "model": {"type": "minecraft:model", "model": "%s:item/%s" % (ID, seal)}
+        })
+        write_json(os.path.join(CONTENT, "assets", ID, "models", "item", seal + ".json"), {
+            "parent": "minecraft:item/generated",
+            "textures": {"layer0": "%s:item/%s" % (ID, seal)},
+        })
+        png(os.path.join(CONTENT, "assets", ID, "textures", "item", seal + ".png"),
+            TEXTURES[seal]())
+        write_json(os.path.join(CONTENT, "data", ID, "recipe", seal + ".json"),
+                   SEAL_RECIPES[seal])
+        en["item.%s.%s" % (ID, seal)] = name_en
+        fr["item.%s.%s" % (ID, seal)] = name_fr
+        en["item.%s.%s.desc" % (ID, seal)] = desc_en
+        fr["item.%s.%s.desc" % (ID, seal)] = desc_fr
+
+    for (table, name_en, name_fr, _base, _emblem) in TABLES:
+        write_json(os.path.join(CONTENT, "data", ID, "horizon", "block", table + ".json"), {
+            # A plain block, not the crafting table: a template with a use of
+            # its own would open its menu before the click reached the mod.
+            "template": "minecraft:oak_planks",
+            "item": True,
+            "properties": {
+                "hardness": 2.5,
+                "explosion_resistance": 6.0,
+                "requires_tool": True,
+            },
+        })
+        write_json(os.path.join(CONTENT, "assets", ID, "items", table + ".json"), {
+            "model": {"type": "minecraft:model", "model": "%s:block/%s" % (ID, table)}
+        })
+        write_json(os.path.join(CONTENT, "assets", ID, "blockstates", table + ".json"), {
+            "variants": {"": {"model": "%s:block/%s" % (ID, table)}}
+        })
+        write_json(os.path.join(CONTENT, "assets", ID, "models", "block", table + ".json"), {
+            "parent": "minecraft:block/cube_bottom_top",
+            "textures": {
+                "top": "%s:block/%s" % (ID, table),
+                "side": "%s:block/%s_side" % (ID, table),
+                "bottom": "%s:block/%s_side" % (ID, table),
+            },
+        })
+        png(os.path.join(CONTENT, "assets", ID, "textures", "block", table + ".png"),
+            TEXTURES[table]())
+        png(os.path.join(CONTENT, "assets", ID, "textures", "block", table + "_side.png"),
+            TEXTURES[table + "_side"]())
+        write_json(os.path.join(CONTENT, "data", ID, "loot_table", "blocks", table + ".json"), {
+            "type": "minecraft:block",
+            "pools": [{
+                "rolls": 1,
+                "bonus_rolls": 0,
+                "entries": [{"type": "minecraft:item", "name": "%s:%s" % (ID, table)}],
+            }],
+        })
+        write_json(os.path.join(CONTENT, "data", ID, "recipe", table + ".json"),
+                   TABLE_RECIPES[table])
+        en["block.%s.%s" % (ID, table)] = name_en
+        fr["block.%s.%s" % (ID, table)] = name_fr
+
     for key, (text_en, text_fr) in MESSAGES.items():
         en[key] = text_en
         fr[key] = text_fr
@@ -417,15 +781,36 @@ def main():
         item = "%s:%s" % (ID, material)
         if item not in items:
             items.append(item)
+    for (seal, *_rest) in SEALS:
+        item = "%s:%s" % (ID, seal)
+        if item not in items:
+            items.append(item)
+    for (table, *_rest) in TABLES:
+        item = "%s:%s" % (ID, table)
+        if item not in items:
+            items.append(item)
     tab["items"] = items
     write_json(tab_path, tab)
+
+    # The tables are mined with a pickaxe like the gem blocks beside them.
+    tag_path = os.path.join(CONTENT, "data", "minecraft", "tags", "block", "mineable",
+                            "pickaxe.json")
+    tag = read_json(tag_path, {"values": []})
+    values = list(tag.get("values", []))
+    for (table, *_rest) in TABLES:
+        block = "%s:%s" % (ID, table)
+        if block not in values:
+            values.append(block)
+    tag["values"] = values
+    write_json(tag_path, tag)
 
     for lang, table in (("en_us", en), ("fr_fr", fr)):
         path = os.path.join(CONTENT, "assets", ID, "lang", lang + ".json")
         existing = read_json(path, {})
         existing.update(table)
         write_json(path, existing)
-    print("wrote %d salvage materials" % len(MATERIALS))
+    print("wrote %d salvage materials, %d sigils, %d tables"
+          % (len(MATERIALS), len(SEALS), len(TABLES)))
 
 
 if __name__ == "__main__":
