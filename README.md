@@ -190,6 +190,56 @@ and **gems whose high tiers drop only from bosses**.
   files by `python tools/gen_attributes.py` (merges, never replaces; the
   creative tab and tags are checked and left untouched, no item is added).
 
+### Effets d'affixes et boss Apothic Invader
+
+#### Done
+
+- **Fourteen effect affixes** (`native/apotheosis/api/src/affix_effects.rs`,
+  `EFFECT_AFFIXES`) on top of the attribute ones, with upstream ids, item
+  classes and epic+ rarities: Venomous, Withering, Weakening, Ensnaring,
+  Blinding (helmet), Executing, Cleaving, Thunderstruck, Retreating (shield),
+  Durable, Telepathic, Spectral and Magical (ranged), Festive.
+- **Their payouts run in the real hooks**: poison/wither/weakness/slowness on
+  the victim, blindness on the attacker, execution under the rolled health
+  share, a cleave to nearby foes, real lightning, a knockback away from the
+  attacker, less durability wear, drops straight to the inventory, a free
+  spectral arrow, extra magic damage, and doubled kill loot.
+- They are **extra affixes**, never replacements: `apply_affixes` still rolls
+  the same number of attribute modifiers and lore lines, then adds at most one
+  effect affix from epic up. The roll is stored in
+  `minecraft:custom_data` under `apotheosis:effects` and read back per hit.
+  Tooltips show the effect line in green, translated in en_us and fr_fr.
+- **Apothic Invader boss**: `entity_join_level` queues fresh joins and
+  `mob_spawned` consumes the one matching a natural spawn. An overworld spawn
+  must be at night and on the surface (column heightmap); Nether and End
+  spawns only need to be natural. A 2 % roll converts it.
+- The invader gets a **generated name** (30 % prefix, 80 % suffix, translated
+  word by word so FR/EN both read naturally), more health (20/40/70/110 by
+  rarity), affixed diamond gear in five slots from the boss tier table, the
+  persistent `apotheosis:boss` tag, and a broadcast announcement.
+- Its death is recognised by the tag: the existing `loot_drops` boss path
+  drops a high gem and rolls boss-tier affixes on its gear.
+- Names and descriptions for the 14 effect affixes, the boss words, titles
+  and 24 base mob names are merged into `en_us.json` and `fr_fr.json` by
+  `python tools/gen_attributes.py` (idempotent, shared files untouched).
+
+#### Missing
+
+- Effects only use vanilla effect ids; Apothic's own bleeding, sundering,
+  grievous and knowledge effects have no equivalent here.
+- A mob's `active_effects` are merged into its NBT; a mod-added effect or a
+  client-side effect icon beyond vanilla's is not shown.
+- Retreating fires on any hit with a shield in the off hand, not only on an
+  actual shield block: the hook API does not expose the block event.
+- Magical adds its share as damage instead of adding vanilla's magic damage
+  tags to the arrow's damage source, so armour is not literally bypassed.
+- Telepathy and Festive act on the killer's main hand; a projectile kill reads
+  the bow still in hand, not the arrow's own affixes.
+- A boss roll is per natural spawn, not per dimension tier: the frontier /
+  ascent / summit / pinnacle chances are collapsed to 2 % for this slice.
+- Invader names are generated server-side from translated components; there
+  is no name-preserving save/load beyond the `CustomName` NBT.
+
 ### Missing
 
 - The attributes only exist on affixed gear: there is no attribute screen, no
@@ -419,6 +469,9 @@ Both halves use the id `apotheosis`.
 - v0.4.0 compiles against the pinned commit `a85af177` (`cargo check -p
   mod-apotheosis`, one warning: private `Rng` behind the public test helper).
   **All unit tests pass** (see each section), and `cargo check -p horizon-native-game
+
+  mod-apotheosis`, no warnings).
+  **34 unit tests pass**, and `cargo check -p horizon-native-game
   --no-default-features` (dedicated-server engine with this mod staged)
   passes, as does the client flavour (`cargo check -p horizon-native-game`,
   default features).
