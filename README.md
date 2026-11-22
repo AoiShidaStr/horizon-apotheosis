@@ -12,9 +12,10 @@ and **gems whose high tiers drop only from bosses**.
 
 ## Done
 
-- **Content mod `.hmod`** (`side = "both"`, id `apotheosis`) with **25 creative
-  entries**: twelve gems, gem dust, and twelve decorative gem blocks. All of
-  them are craftable in survival (see *Recipes* below).
+- **Content mod `.hmod`** (`side = "both"`, id `apotheosis`) with **30 creative
+  entries**: twelve gems, gem dust, twelve decorative gem blocks and five
+  rarity salvage materials. All of them are craftable or salvageable in
+  survival (see *Recipes* below).
 - **Twelve gems, two per tier** — `gem_ruby`, `gem_amber`, `gem_topaz`,
   `gem_amethyst`, `gem_sapphire`, `gem_peridot`, `gem_jade`, `gem_citrine`,
   `gem_onyx`, `gem_moonstone`, `gem_bloodstone`, `gem_opal` — as data-driven
@@ -86,23 +87,65 @@ and **gems whose high tiers drop only from bosses**.
   ordinary mob killed by a player has a 4% chance to drop an affixed iron piece.
 - **`/apoth reforge`** (`register_commands`/`perform_command`, API 8): rolls
   tier and affixes onto the plain piece of gear the player holds, for 3
-  experience levels; `/apoth` alone explains it. Answers are translated.
+  experience levels; on an already-affixed piece it rerolls that piece instead.
+  `/apoth salvage` breaks an affixed piece into rarity materials; `/apoth`
+  alone explains both. Answers are translated.
+
+## Gemmes, sockets, reforge et recyclage
+
+### Done
+
+- **Sockets (0 to 3, by rarity)** stored in the item's `minecraft:custom_data`
+  (`apotheosis:sockets`, `apotheosis:socketed`): Common 0, Uncommon 0–1, Rare
+  0–2, Epic 1–3, Mythic 2–3, Ancient 3. The tooltip (`tooltip`, API 12) shows
+  `Sockets: n/total` and one line per socketed gem: purity, bonus and
+  attribute, coloured by the gem's purity.
+- **Socketing by right click** (`use_item`, API 13): gem in the main hand, a
+  piece with free sockets in the off hand, right click. The gem is consumed
+  (`inventory_tick`, API 39, through `Host::carried_stack`) and its bonus
+  becomes a real `minecraft:attribute_modifiers` entry on the piece
+  (`apotheosis:socket_<n>_<gem>`, `add_value`, `hand` or `armor` slot), beside
+  the affixes' entries, so the game applies it when the piece is worn. An
+  unsocketed gem keeps the off-hand bonus the content mod gives it.
+- **Purity** Cracked, Chipped, Flawed, Normal, Flawless, Perfect (×0.2, ×0.4,
+  ×0.7, ×1, ×1.4, ×2 on the gem's bonus), rolled where the gem drops
+  (`loot_drops`): ordinary loot 30/40/20/8/2/1, boss gems 5/20/35/28/10/2.
+  Shown in the gem's tooltip. A gem in the main hand with 4 gem dust in the
+  off hand, right-clicked, is polished one step up (4 dust per step, Perfect
+  is the ceiling).
+- **Reforging an affixed piece**: `/apoth reforge` on an affixed piece held in
+  the main hand rerolls its rarity and affixes for 3 levels, keeping the piece
+  and the gems in its sockets; the work is done on the next inventory tick, so
+  the stack the command saw is the stack that is rewritten.
+- **Salvaging**: `/apoth salvage` on an affixed piece breaks it into 1–4 of its
+  rarity's material, gem dust (1–4 by rarity) and gives back every socketed
+  gem at the purity it had.
+- **Five rarity materials** with Apotheosis' ids — `mysterious_scrap_metal`
+  (common), `timeworn_fabric` (uncommon), `luminous_crystal_shard` (rare),
+  `arcane_sands` (epic), `godforged_pearl` (mythic and ancient) — each with its
+  own item declaration, model, 16×16 texture drawn by `tools/gen_sockets.py`,
+  en_us/fr_fr name, a crafting recipe (iron nuggets and flint, string and
+  leather, amethyst and glowstone, soul sand and lapis, gold around an ender
+  pearl), a 1 → 3 gem dust recipe, and a place in the creative tab.
+
+### Missing
+
+- **No socketing, reforging or salvaging table.** The three actions run from a
+  right click and from two commands; no block, menu or sealing sigil was
+  added, so there is no screen that shows a piece's sockets or picks which gem
+  to pull out.
+- **No way to remove a socketed gem** other than salvaging the whole piece,
+  and no socket protection or sigil.
+- **Gear affixed before this slice** carries no `apotheosis:tier`, so it can be
+  neither reforged nor salvaged; only pieces rolled (or dropped) after the
+  update can.
+- **Purity only scales a socketed gem.** An unsocketed gem's off-hand bonus is
+  its flat value; there is no purity-scaled off-hand bonus.
+- **Chest gems are Normal purity**: `loot_table_load` cannot write the purity
+  component, so only gems from mob and boss kills roll one.
 
 ## Missing
 
-- **Sockets on gear.** Gems give their bonus from the off hand; there is no
-  socket slot in a piece of gear, no gem application screen and no way (in the
-  current hook API) to rewrite an arbitrary stack in a player's inventory, so a
-  gem cannot be fused into a sword. Gem dust, the gem-cutting and salvaging
-  tables, and the Apotheosis GUI are missing with it; dust is a plain crafting
-  ingredient here.
-- **Gem purity.** The original rolls each gem at a purity (Cracked → Perfect)
-  that scales its bonus; this slice's tier is fixed per gem type and there are
-  no purity rolls or upgrade recipes.
-- **Reforging an already-affixed item.** `/apoth reforge` takes *plain* gear:
-  the API's item helpers only take stacks with no components, so an affixed
-  piece cannot be taken, rerolled and handed back. It rolls once onto a plain
-  item instead.
 - **Affixes replace an item's base attribute modifiers.** A stack's
   `minecraft:attribute_modifiers` component replaces the item's own defaults
   (vanilla semantics), so an affixed diamond sword loses its innate +3 attack
@@ -142,18 +185,22 @@ Both halves use the id `apotheosis`.
 
 - Content: `python tools/gen_content.py` regenerates the item and block data,
   models, blockstates, loot tables, recipes, tags, names and textures;
-  `python tools/pack.py` writes `target/apotheosis.hmod` and
+  `python tools/gen_sockets.py` adds the rarity salvage materials, their
+  textures, recipes, names and creative-tab entries without touching the gem
+  entries; `python tools/pack.py` writes `target/apotheosis.hmod` and
   `target/apotheosis.hnmod`.
 - Native: the crate is checked against the pinned Horizon commit on the build
   VPS with `tools/vps/sync.sh full` (see `tools/vps/check.sh` and
   `tools/vps/verify.sh`); it builds as a trait mod with
   `horizon-launcher native-build`.
 
-### Build state (2026-11-14)
+### Build state (2026-11-22)
 
 - v0.4.0 compiles against the pinned commit `a85af177` (`cargo check -p
   mod-apotheosis`, one warning: private `Rng` behind the public test helper).
-  **14 unit tests pass**, and `cargo check -p horizon-native-game
+  **24 unit tests pass** (nine of them in the new `sockets` module: purity
+  steps, socket counts, socketing, reforge and salvage yields), and
+  `cargo check -p horizon-native-game
   --no-default-features` (dedicated-server engine with this mod staged)
   passes, as does the client flavour (`cargo check -p horizon-native-game`,
   default features).
@@ -161,8 +208,9 @@ Both halves use the id `apotheosis`.
   (`apotheosis.hmod`: kind `mod`, `side both`; `apotheosis.hnmod`: kind
   `native-mod`, api `native-1/a85af177…/5a64af93…`).
 - The content mod has twelve gems (two per tier), gem dust, twelve gem blocks
-  with textures, models, loot tables and a pickaxe tag, and 38 recipes. Mob
-  drops and all vanilla chest loot tables now provide survival gem routes;
+  with textures, models, loot tables and a pickaxe tag, five rarity salvage
+  materials, and 48 recipes. Mob drops and all vanilla chest loot tables now
+  provide survival gem routes;
   chest gems are restricted to common and uncommon tiers. The four
   mythic/ancient gems shimmer. All content JSON files parse, and
   `python tools/pack.py` rebuilds `target/apotheosis.hmod` and

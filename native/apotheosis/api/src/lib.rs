@@ -24,6 +24,8 @@ use horizon_client::mod_api::{
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod sockets;
+
 pub fn hooks() -> Box<dyn Hooks> {
     Box::new(Apotheosis)
 }
@@ -665,6 +667,7 @@ impl Hooks for Apotheosis {
 
     fn tooltip(&self, _host: &dyn Host, event: &mut TooltipEvent<'_>) {
         let Some(gem) = gem(&event.stack.item) else {
+            sockets::tooltip(event);
             return;
         };
         let (text, colour) = (format!("Tier: {}", gem.tier.name()), gem.tier.colour());
@@ -685,6 +688,15 @@ impl Hooks for Apotheosis {
             Text::translate_with_fallback(gem.effect_key, gem.effect, &[]).with_color(0x55_55FF),
             0x55_55FF,
         ));
+        sockets::tooltip(event);
+    }
+
+    fn use_item(&self, host: &mut dyn Host, event: &mut horizon_client::mod_api::UseItemEvent<'_>) -> Flow {
+        sockets::use_item(host, event)
+    }
+
+    fn inventory_tick(&self, host: &mut dyn Host, event: &mut horizon_client::mod_api::InventoryTickEvent) {
+        sockets::inventory_tick(host, event);
     }
 
     fn loot_table_load(&self, event: &mut horizon_client::mod_api::LootTableLoadEvent<'_>) {
@@ -719,9 +731,11 @@ impl Hooks for Apotheosis {
             if boss {
                 let tier = rng.tier(&BOSS_TIERS);
                 apply_affixes(stack, tier, &mut rng);
+                sockets::after_affixes(stack, tier, &mut rng);
             } else if rng.chance(35) {
                 let tier = rng.tier(&ORDINARY_TIERS);
                 apply_affixes(stack, tier, &mut rng);
+                sockets::after_affixes(stack, tier, &mut rng);
             }
         }
         // A low gem from an ordinary mob, often enough to matter.
@@ -748,13 +762,21 @@ impl Hooks for Apotheosis {
             let item = gear(&mut rng);
             let mut stack = one(item);
             apply_affixes(&mut stack, tier, &mut rng);
+            sockets::after_affixes(&mut stack, tier, &mut rng);
             event.drops.push(stack);
+        }
+        // A gem's purity is rolled where it drops; the gear above is done.
+        for stack in event.drops.iter_mut() {
+            if stack.data().is_none() {
+                sockets::roll_dropped_purity(stack, &mut rng, boss);
+            }
         }
     }
 
     fn register_commands(&self, _host: &mut dyn Host, event: &mut RegisterCommandsEvent<'_>) {
         event.commands.push(NativeCommand::new("apoth"));
         event.commands.push(NativeCommand::new("apoth reforge"));
+        event.commands.push(NativeCommand::new("apoth salvage"));
     }
 
     fn perform_command(&self, host: &mut dyn Host, event: &mut PerformCommandEvent<'_>) -> Flow {
@@ -766,9 +788,13 @@ impl Hooks for Apotheosis {
         if words.len() < 2 {
             host.feedback(Text::translate_with_fallback(
                 "apotheosis.command.help",
-                "Apotheosis: /apoth reforge — roll affixes onto plain gear you hold (3 levels).",
+                "Apotheosis: /apoth reforge — roll affixes onto the gear you hold (3 levels); /apoth salvage — break an affixed piece into rarity materials.",
                 &[],
             ));
+            return Flow::Cancel;
+        }
+        if words[1] == "salvage" {
+            sockets::begin_salvage(host, event.player.uuid);
             return Flow::Cancel;
         }
         if words[1] != "reforge" {
@@ -807,9 +833,38 @@ fn reforge(host: &mut dyn Host, player: u128, xp_level: i32) {
         return;
     }
     if !plain || count == 0 {
+        // An affixed piece is rerolled in place, on its next inventory tick.
+        if host
+            .held_stack(player)
+            .is_some_and(|stack| sockets::can_reforge(&stack))
+        {
+            if xp_level < REFORGE_COST {
+                host.feedback(Text::translate_with_fallback(
+                    "apotheosis.reforge.levels",
+                    "Reforging costs 3 experience levels.",
+                    &[],
+                ));
+                return;
+            }
+            if !host.give_levels(player, -REFORGE_COST) {
+                host.feedback(Text::translate_with_fallback(
+                    "apotheosis.reforge.levels",
+                    "Reforging costs 3 experience levels.",
+                    &[],
+                ));
+                return;
+            }
+            sockets::begin_reforge(player);
+            host.feedback(Text::translate_with_fallback(
+                "apotheosis.reforge.rerolled",
+                "Reforged: the piece in your hand rolls again.",
+                &[],
+            ));
+            return;
+        }
         host.feedback(Text::translate_with_fallback(
             "apotheosis.reforge.already",
-            "That piece is already affixed; reforging takes plain gear.",
+            "That piece is neither plain gear nor an affixed piece of this mod.",
             &[],
         ));
         return;
@@ -835,6 +890,7 @@ fn reforge(host: &mut dyn Host, player: u128, xp_level: i32) {
     let tier = rng.tier(&ORDINARY_TIERS);
     let mut stack = one(&item);
     apply_affixes(&mut stack, tier, &mut rng);
+    sockets::after_affixes(&mut stack, tier, &mut rng);
     if host.give_stack(player, stack).is_some() {
         // No room: hand the plain piece back rather than lose it.
         let _ = host.give_stack(player, one(&item));
