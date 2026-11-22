@@ -267,5 +267,13 @@
   "apotheosis.spawner.tooltip.ranges": "Player range %s · nearby max %s · spawn range %s",
   "apotheosis.spawner.tooltip.health": "Mob health: %s×",
   "apotheosis.spawner.tooltip.echo": "Echo: %s",
-  "apotheosis.spawner.tooltip.options": "Options: %s"
+  "apotheosis.spawner.tooltip.options": "Options: %s",
+  "block.apotheosis.enchantment_library": "Enchantment Library",
+  "apotheosis.library.not_enchanted": "That book carries no enchantment.",
+  "apotheosis.library.absorbed": "Stored %s levels; the library holds %s points.",
+  "apotheosis.library.empty": "The library holds no points yet: store enchanted books first.",
+  "apotheosis.library.offer": "Offer: %s %s (%s points stored). Right-click with a book to take it.",
+  "apotheosis.library.withdrawn": "Took %s %s for %s points.",
+  "apotheosis.library.no_room": "No room for the book; nothing was taken.",
+  "apotheosis.library.usage": "Hold an enchanted book to store it, or a book to take an enchantment out."
 }
