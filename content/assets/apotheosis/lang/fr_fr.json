@@ -83,5 +83,17 @@
   "block.apotheosis.sightshelf_t2": "Bibliothèque clairvoyante II",
   "block.apotheosis.soul_touched_deepshelf": "Bibliothèque des profondeurs touchée par l’âme",
   "block.apotheosis.soul_touched_sculkshelf": "Bibliothèque de sculk touchée par l’âme",
-  "block.apotheosis.stoneshelf": "Bibliothèque de pierre"
+  "block.apotheosis.stoneshelf": "Bibliothèque de pierre",
+  "item.apotheosis.scrap_tome": "Livre de Démantèlement",
+  "item.apotheosis.improved_scrap_tome": "Livre de Démantèlement Amélioré",
+  "item.apotheosis.extraction_tome": "Livre d'Extraction",
+  "item.apotheosis.prismatic_web": "Toile Prismatique",
+  "apotheosis.tome.no_target": "La main secondaire doit tenir un objet enchanté ou maudit.",
+  "apotheosis.tome.not_enchanted": "Cet objet n'a aucun enchantement.",
+  "apotheosis.tome.no_curse": "Cet objet ne porte aucune malédiction.",
+  "apotheosis.tome.levels": "Il vous faut %s niveaux d'expérience.",
+  "apotheosis.tome.no_room": "Pas de place pour le livre ; rien n'a été modifié.",
+  "apotheosis.tome.scrapped": "%s enchantements démantelés.",
+  "apotheosis.tome.extracted": "%s enchantements extraits.",
+  "apotheosis.tome.cleansed": "Malédictions retirées."
 }

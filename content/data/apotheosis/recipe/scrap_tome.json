@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "BBB",
+    "BAB",
+    "BBB"
+  ],
+  "key": {
+    "B": "minecraft:book",
+    "A": "minecraft:anvil"
+  },
+  "result": {
+    "id": "apotheosis:scrap_tome",
+    "count": 8
+  }
+}

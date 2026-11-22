@@ -12,10 +12,10 @@ and **gems whose high tiers drop only from bosses**.
 
 ## Done
 
-- **Content mod `.hmod`** (`side = "both"`, id `apotheosis`) with **48 creative
-  entries**: twelve gems, gem dust, twelve decorative gem blocks and twenty-three
-  enchanting shelves. All of them are craftable in survival (see *Recipes*
-  below).
+- **Content mod `.hmod`** (`side = "both"`, id `apotheosis`) with **52 creative
+  entries**: twelve gems, gem dust, twelve decorative gem blocks, twenty-three
+  enchanting shelves and four tome/cobweb items. All of them are craftable in
+  survival (see *Recipes* below).
 - **Twelve gems, two per tier** — `gem_ruby`, `gem_amber`, `gem_topaz`,
   `gem_amethyst`, `gem_sapphire`, `gem_peridot`, `gem_jade`, `gem_citrine`,
   `gem_onyx`, `gem_moonstone`, `gem_bloodstone`, `gem_opal` — as data-driven
@@ -116,10 +116,10 @@ and **gems whose high tiers drop only from bosses**.
 - **Affixes from chest loot tables** — chest tables can supply gems, but their
   gear remains un-affixed; `loot_table_load` cannot roll the item components
   the later loot generation creates.
-- **The enchanting library**, its tomes (Scrap, Extraction) and **configurable
-  spawners** (silk-touched spawners with a chosen mob) are not implemented.
-  Enchanting stats themselves are ported (see *Apothic Enchanting* below), with
-  the limits listed there.
+- **The enchanting library** and **configurable spawners** (silk-touched
+  spawners with a chosen mob) are not implemented. Enchanting stats and the
+  tomes are ported (see *Apothic Enchanting* below), with the limits listed
+  there.
 - **Natural ore generation** for gems: gems come from mobs, bosses, recipes
   and reforge only.
 - Affix names, lore and command answers are translated, but an affixed item
@@ -191,6 +191,26 @@ and **gems whose high tiers drop only from bosses**.
   spyglass, emerald, melon slice or polished andesite. The custom
   `apothic_enchanting:infusion` station does not exist in Horizon, so no recipe
   depends on it.
+- **Three tomes and the Prismatic Cobweb** (`use_item`, API 13), used on a
+  right click: hold the tome in one hand and the enchanted item in the other.
+  API 415 has no anvil hook, so this replaces the original's anvil step. Each
+  one consumes the tome and charges experience levels (nothing in creative):
+  - scrap tome, 6 levels per enchantment kept: keeps `ceil(n/2)` of them with
+    a seeded draw (same player and item give the same result) and puts them in
+    an enchanted book;
+  - superior scrap tome, 10 levels per enchantment: keeps all of them in a
+    book;
+  - extraction tome, 16 levels per enchantment: moves all of them into a book
+    and leaves the item in hand stripped;
+  - Prismatic Cobweb, 30 levels: removes `minecraft:binding_curse` and
+    `minecraft:vanishing_curse` and keeps the rest on the item.
+
+  A scrapped item is only taken once the book fits in the inventory, and an
+  extraction restores the item if the book cannot be given. All four have
+  original 16x16 textures, en_us/fr_fr names, creative-tab entries and vanilla
+  shaped recipes: eight books around an anvil give eight scrap tomes, diamonds
+  or netherite scraps upgrade one to the superior or extraction tome, and four
+  prismarine shards around a cobweb give the Prismatic Cobweb.
 
 ### Missing
 
@@ -217,9 +237,10 @@ and **gems whose high tiers drop only from bosses**.
   or dedicated host's guests (`lan_stations.rs`); the integrated single-player
   table computes its offers locally without calling the hook. Local play gets
   the tag-based power above, capped at vanilla's 15 providers.
-- **The enchanting library, Scrap/Extraction tomes, infusion and rectifiers.**
-  No library block, tome or infusion altar is added; the recipes stop at
-  vanilla crafting.
+- **The enchanting library, infusion and rectifiers.** No library block or
+  infusion altar is added; the recipes stop at vanilla crafting. The tomes are
+  used by a right click rather than in an anvil, since API 415 has no anvil
+  hook.
 
 ## Install
 

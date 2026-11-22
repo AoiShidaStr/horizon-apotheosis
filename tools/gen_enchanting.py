@@ -92,6 +92,120 @@ def shelf_pixels(rgb):
     return pixels
 
 
+BOOK_SCRAP = (0x7A, 0x4B, 0x2E)
+BOOK_IMPROVED = (0x8E, 0x2F, 0x3C)
+BOOK_EXTRACTION = (0x2E, 0x6E, 0x7E)
+
+
+def book_pixels(rgb, emblem):
+    """Draw a closed 16x16 tome: coloured cover, pale pages and an emblem."""
+    cover = rgb + (255,)
+    dark = tuple(int(c * .55) for c in rgb) + (255,)
+    light = tuple(min(255, int(c * 1.3)) for c in rgb) + (255,)
+    page = (236, 226, 198, 255)
+    edge = (198, 186, 160, 255)
+    pixels = [[(0, 0, 0, 0)] * 16 for _ in range(16)]
+    for y in range(1, 15):
+        pixels[y][1] = dark
+        for x in range(2, 12):
+            pixels[y][x] = cover
+        pixels[y][12] = page
+        pixels[y][13] = page
+        pixels[y][14] = edge
+    for x in range(1, 16):
+        pixels[0][x] = dark
+        pixels[15][x] = dark
+    for y in range(1, 15):
+        pixels[y][2] = light
+        pixels[y][3] = dark
+    for x, y in ((6, 4), (7, 4), (8, 4), (9, 4),
+                 (5, 5), (6, 5), (7, 5), (8, 5), (9, 5), (10, 5),
+                 (5, 6), (6, 6), (7, 6), (8, 6), (9, 6), (10, 6),
+                 (6, 7), (7, 7), (8, 7), (9, 7)):
+        pixels[y][x] = emblem + (255,)
+    for x in range(5, 11):
+        pixels[11][x] = (214, 178, 74, 255)
+    return pixels
+
+
+def web_pixels():
+    """Draw a prismarine cobweb: eight radial strands and three rings."""
+    clear = (0, 0, 0, 0)
+    teal = (0x3A, 0xC6, 0xB4, 255)
+    light = (0xA8, 0xF0, 0xE4, 255)
+    dark = (0x1E, 0x7D, 0x74, 255)
+    pixels = [[clear] * 16 for _ in range(16)]
+    for dx, dy in ((0, -1), (1, -1), (1, 0), (1, 1),
+                   (0, 1), (-1, 1), (-1, 0), (-1, -1)):
+        for step in range(8):
+            x, y = 8 + dx * step, 8 + dy * step
+            if 0 <= x < 16 and 0 <= y < 16 and pixels[y][x] == clear:
+                pixels[y][x] = light if step < 3 else teal
+    for radius in (2, 4, 6):
+        for dx in range(-radius, radius + 1):
+            dy = radius - abs(dx)
+            for sign in (1, -1):
+                for x, y in ((8 + dx, 8 + dy * sign),
+                             (8 + dy * sign, 8 + dx)):
+                    if 0 <= x < 16 and 0 <= y < 16:
+                        pixels[y][x] = dark if radius == 2 else teal
+    for x, y in ((7, 8), (8, 7), (8, 8), (9, 8), (8, 9)):
+        pixels[y][x] = light
+    return pixels
+
+
+# id, English name, French name, stack size, rarity, texture, recipe
+ITEMS = [
+    ("scrap_tome", "Tome of Scrapping", "Livre de Démantèlement", 16, "common",
+     book_pixels(BOOK_SCRAP, (216, 216, 208)), {
+         "type": "minecraft:crafting_shaped", "category": "misc",
+         "pattern": ["BBB", "BAB", "BBB"],
+         "key": {"B": "minecraft:book", "A": "minecraft:anvil"},
+         "result": {"id": "apotheosis:scrap_tome", "count": 8},
+     }),
+    ("improved_scrap_tome", "Tome of Superior Scrapping", "Livre de Démantèlement Amélioré",
+     16, "rare", book_pixels(BOOK_IMPROVED, (214, 178, 74)), {
+         "type": "minecraft:crafting_shaped", "category": "misc",
+         "pattern": [" D ", "DTD", " D "],
+         "key": {"D": "minecraft:diamond", "T": "apotheosis:scrap_tome"},
+         "result": {"id": "apotheosis:improved_scrap_tome"},
+     }),
+    ("extraction_tome", "Tome of Extraction", "Livre d'Extraction",
+     16, "epic", book_pixels(BOOK_EXTRACTION, (238, 238, 246)), {
+         "type": "minecraft:crafting_shaped", "category": "misc",
+         "pattern": [" N ", "NTN", " N "],
+         "key": {"N": "minecraft:netherite_scrap", "T": "apotheosis:scrap_tome"},
+         "result": {"id": "apotheosis:extraction_tome"},
+     }),
+    ("prismatic_web", "Prismatic Cobweb", "Toile Prismatique",
+     64, "rare", web_pixels(), {
+         "type": "minecraft:crafting_shaped", "category": "misc",
+         "pattern": [" S ", "SCS", " S "],
+         "key": {"S": "minecraft:prismarine_shard", "C": "minecraft:cobweb"},
+         "result": {"id": "apotheosis:prismatic_web"},
+     }),
+]
+
+MESSAGES = [
+    ("apotheosis.tome.no_target", "Offhand must hold an enchanted item or a cursed item.",
+     "La main secondaire doit tenir un objet enchanté ou maudit."),
+    ("apotheosis.tome.not_enchanted", "That item has no enchantments.",
+     "Cet objet n'a aucun enchantement."),
+    ("apotheosis.tome.no_curse", "That item carries no curse.",
+     "Cet objet ne porte aucune malédiction."),
+    ("apotheosis.tome.levels", "You need %s experience levels.",
+     "Il vous faut %s niveaux d'expérience."),
+    ("apotheosis.tome.no_room", "No room for the book; nothing was changed.",
+     "Pas de place pour le livre ; rien n'a été modifié."),
+    ("apotheosis.tome.scrapped", "Scrapped %s enchantments.",
+     "%s enchantements démantelés."),
+    ("apotheosis.tome.extracted", "Extracted %s enchantments.",
+     "%s enchantements extraits."),
+    ("apotheosis.tome.cleansed", "Curses removed.",
+     "Malédictions retirées."),
+]
+
+
 def write_png(path, pixels):
     rows = []
     for line in pixels:
@@ -180,6 +294,31 @@ def main():
             entries.append(item)
     write_json(tab_path, tab)
 
+    for item_id, name_en, name_fr, stack, rarity, pixels, recipe in ITEMS:
+        item = f"{ID}:{item_id}"
+        write_json(os.path.join(CONTENT, "data", ID, "horizon", "item", item_id + ".json"), {
+            "template": "minecraft:book" if "tome" in item_id else "minecraft:string",
+            "max_stack_size": stack,
+            "rarity": rarity,
+        })
+        write_json(os.path.join(CONTENT, "assets", ID, "models", "item", item_id + ".json"), {
+            "parent": "minecraft:item/generated",
+            "textures": {"layer0": f"{ID}:item/{item_id}"},
+        })
+        write_json(os.path.join(CONTENT, "assets", ID, "items", item_id + ".json"), {
+            "model": {"type": "minecraft:model", "model": f"{ID}:item/{item_id}"},
+        })
+        write_png(os.path.join(CONTENT, "assets", ID, "textures", "item", item_id + ".png"), pixels)
+        write_json(os.path.join(CONTENT, "data", ID, "recipe", item_id + ".json"), recipe)
+        en[f"item.{ID}.{item_id}"] = name_en
+        fr[f"item.{ID}.{item_id}"] = name_fr
+        if item not in entries:
+            entries.append(item)
+    write_json(tab_path, tab)
+    for key, fallback_en, fallback_fr in MESSAGES:
+        en[key] = fallback_en
+        fr[key] = fallback_fr
+
     for locale, additions in (("en_us", en), ("fr_fr", fr)):
         path = os.path.join(CONTENT, "assets", ID, "lang", locale + ".json")
         existing = {}
@@ -188,7 +327,7 @@ def main():
                 existing = json.load(f)
         existing.update(additions)
         write_json(path, existing)
-    print(f"wrote {len(SHELVES)} enchanting shelves with original 16x16 textures")
+    print(f"wrote {len(SHELVES)} enchanting shelves and {len(ITEMS)} items with original 16x16 textures")
 
 
 if __name__ == "__main__":

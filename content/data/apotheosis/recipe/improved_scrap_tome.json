@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " D ",
+    "DTD",
+    " D "
+  ],
+  "key": {
+    "D": "minecraft:diamond",
+    "T": "apotheosis:scrap_tome"
+  },
+  "result": {
+    "id": "apotheosis:improved_scrap_tome"
+  }
+}

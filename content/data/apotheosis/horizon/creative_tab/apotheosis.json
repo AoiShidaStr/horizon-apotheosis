@@ -49,6 +49,10 @@
     "apotheosis:sightshelf_t2",
     "apotheosis:soul_touched_deepshelf",
     "apotheosis:soul_touched_sculkshelf",
-    "apotheosis:stoneshelf"
+    "apotheosis:stoneshelf",
+    "apotheosis:scrap_tome",
+    "apotheosis:improved_scrap_tome",
+    "apotheosis:extraction_tome",
+    "apotheosis:prismatic_web"
   ]
 }
