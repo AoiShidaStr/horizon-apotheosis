@@ -667,6 +667,7 @@ impl Hooks for Apotheosis {
     }
 
     fn tooltip(&self, _host: &dyn Host, event: &mut TooltipEvent<'_>) {
+        spawners::on_tooltip(event);
         let Some(gem) = gem(&event.stack.item) else {
             return;
         };

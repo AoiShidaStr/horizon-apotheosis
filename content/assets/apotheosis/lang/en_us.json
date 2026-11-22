@@ -69,5 +69,12 @@
   "apotheosis.spawner.flag.silent": "silent",
   "apotheosis.spawner.flag.redstone_control": "redstone controlled",
   "apotheosis.spawner.flag.youthful": "young mobs",
-  "apotheosis.spawner.flag.burning": "burning mobs"
+  "apotheosis.spawner.flag.burning": "burning mobs",
+  "apotheosis.spawner.tooltip.mob": "Mob: %s",
+  "apotheosis.spawner.tooltip.delay": "Delay: %s–%s ticks",
+  "apotheosis.spawner.tooltip.wave": "Mobs per wave: %s",
+  "apotheosis.spawner.tooltip.ranges": "Player range %s · nearby max %s · spawn range %s",
+  "apotheosis.spawner.tooltip.health": "Mob health: %s×",
+  "apotheosis.spawner.tooltip.echo": "Echo: %s",
+  "apotheosis.spawner.tooltip.options": "Options: %s"
 }

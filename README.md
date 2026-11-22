@@ -150,6 +150,20 @@ and **gems whose high tiers drop only from bosses**.
   on every click on a spawner: the mob, the two delays, the mobs per wave, the
   player range, the mobs allowed nearby, the spawn range, then the flags that
   are on. Both languages ship the line (`tools/gen_spawners.py`).
+- **A carried spawner says what it holds** (`tooltip` API 12), on the client
+  and with no command at all: the item's own `minecraft:block_entity_data`
+  gives one line per fact — the mob, the delays, the mobs per wave, the three
+  ranges, the mob health and the echo while a modifier moved them, and the
+  flags that are on. Both languages ship these lines too.
+- **A read is a one-tick probe, gated on the block.** Each read names its
+  probe, so two reads never answer for each other and an old probe is never
+  read as the new one; every command is written `execute in <dimension> if
+  block <pos> minecraft:spawner run …`, so a spawner broken between the click
+  and the tick, a chunk that is not loaded, or another block that took the
+  position fails quietly instead of writing into the log or into that block;
+  a probe that a killed command left behind is swept; a failed read also drops
+  what an older read had cached for that position, so a new spawner never
+  inherits the old one's data.
 
 ### Missing
 
@@ -160,16 +174,16 @@ and **gems whose high tiers drop only from bosses**.
   reading that item back (`item_entities`, API 42), and writes it with
   `/data merge block` (`run_command`, API 21). The read therefore happens on
   the game tick after the click, never on a client, and it needs the player
-  to be in a server world; a spawner's tooltip and a creative-side preview
-  are not possible without the hook.
+  to be in a server world. Replacing `read` and `write` is all it takes when
+  the hook lands.
 - **The off-hand inverter is best effort.** Reading another hand needs
   `player_equipment`, which is pending at 415, so the quartz has to be the
   item actually used on the spawner; a quartz held only in the off hand is
   not seen.
 - **No spawner screen, no mob capture item, no "spawner module"**: Apothic
   Spawners' GUI and its extra mob sources (a captured mob's equipment and
-  loot) are not ported. The stats are shown as an action bar line, not a
-  screen.
+  loot) are not ported. The stats are shown as an action bar line and as the
+  carried spawner's tooltip, not in a screen.
 - **The Apotheosis bosses** are another chantier's, not this one's.
 
 ## Install

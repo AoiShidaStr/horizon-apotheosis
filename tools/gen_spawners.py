@@ -19,12 +19,23 @@ CONTENT = os.path.join(ROOT, "content")
 # Every line a player sees from the native half. The stats line is the action
 # bar message shown when a spawner is clicked, built with `%s` arguments in
 # this order: the mob, the shortest delay, the longest one, the mobs per wave,
-# the player range, the most mobs nearby, the spawn range.
+# the player range, the most mobs nearby, the spawn range. The tooltip keys are
+# the lines a carried spawner shows, one per fact, so a long line stays
+# readable in a narrow tooltip.
 EN = {
     "apotheosis.spawner.stats": (
         "Spawner: %s · delay %s–%s ticks · %s per wave · "
         "player range %s · nearby max %s · spawn range %s"
     ),
+    "apotheosis.spawner.tooltip.mob": "Mob: %s",
+    "apotheosis.spawner.tooltip.delay": "Delay: %s–%s ticks",
+    "apotheosis.spawner.tooltip.wave": "Mobs per wave: %s",
+    "apotheosis.spawner.tooltip.ranges": (
+        "Player range %s · nearby max %s · spawn range %s"
+    ),
+    "apotheosis.spawner.tooltip.health": "Mob health: %s×",
+    "apotheosis.spawner.tooltip.echo": "Echo: %s",
+    "apotheosis.spawner.tooltip.options": "Options: %s",
     "apotheosis.spawner.flag.ignore_players": "ignores players",
     "apotheosis.spawner.flag.ignore_light": "ignores light",
     "apotheosis.spawner.flag.ignore_conditions": "ignores conditions",
@@ -40,6 +51,15 @@ FR = {
         "Spawner : %s · délai %s–%s ticks · %s par vague · "
         "portée joueur %s · proches max %s · portée d'apparition %s"
     ),
+    "apotheosis.spawner.tooltip.mob": "Mob : %s",
+    "apotheosis.spawner.tooltip.delay": "Délai : %s–%s ticks",
+    "apotheosis.spawner.tooltip.wave": "Mobs par vague : %s",
+    "apotheosis.spawner.tooltip.ranges": (
+        "Portée joueur %s · proches max %s · portée d'apparition %s"
+    ),
+    "apotheosis.spawner.tooltip.health": "Vie des mobs : %s×",
+    "apotheosis.spawner.tooltip.echo": "Écho : %s",
+    "apotheosis.spawner.tooltip.options": "Options : %s",
     "apotheosis.spawner.flag.ignore_players": "ignore les joueurs",
     "apotheosis.spawner.flag.ignore_light": "ignore la lumière",
     "apotheosis.spawner.flag.ignore_conditions": "ignore les conditions",

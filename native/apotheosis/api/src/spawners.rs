@@ -12,7 +12,12 @@
 //! by copying it into a probe item entity with `/data modify` and reading that
 //! item back, and written with `/data merge block`.
 //!
-//! Six hooks, all on the real game's trait API:
+//! A carried spawner is another matter: its data travels in the item's own
+//! `minecraft:block_entity_data` component, so the tooltip reads it on the
+//! client with no command at all.
+//!
+//! Seven hooks, all on the real game's trait API:
+//! - `tooltip`: a carried spawner shows its mob and its stats (API 12).
 //! - `right_click_block`: a click on a spawner asks for its stats (API 21).
 //! - `use_item_on`: a modifier item on a spawner changes a stat (API 13).
 //! - `left_click_block`: the data of a spawner is read before it breaks (API 30).
@@ -21,7 +26,8 @@
 //! - `tick`: the queued reads, writes and messages run where commands may (API 1).
 
 use horizon_client::mod_api::{
-    Flow, Host, ItemStack, LootDropsEvent, PlaceBlockEvent, Tag, Text, UseItemOnEvent,
+    Flow, Host, ItemStack, LootDropsEvent, PlaceBlockEvent, Tag, Text, TooltipEvent,
+    UseItemOnEvent,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -33,6 +39,10 @@ const CUSTOM_DATA: &str = "minecraft:custom_data";
 const BLOCK_ENTITY_DATA: &str = "minecraft:block_entity_data";
 /// The tag the probe item entity carries, so it is found again.
 const PROBE: &str = "apoth_spawner_probe";
+/// The key the probe item carries its own name under: a read can leave a probe
+/// behind (a killed server, a command that failed), and the exact one has to be
+/// read back, not a stale one that sits in the same block.
+const PROBE_KEY: &str = "apoth_probe";
 const PROBE_ITEM: &str = "minecraft:stone";
 /// How many queued actions one tick takes at most.
 const BATCH: usize = 64;
@@ -652,25 +662,44 @@ pub fn spawner_item(tag: &Tag) -> ItemStack {
 // Action bar
 // ---------------------------------------------------------------------------
 
+/// The mob's name: the game's own name for that entity, which is translated
+/// into the player's language, and a readable fallback for an id the game does
+/// not know.
+fn mob_text(stats: &Stats) -> Text {
+    if stats.mob.is_empty() {
+        return Text::literal("?");
+    }
+    let (key, fallback) = match stats.mob.split_once(':') {
+        Some((namespace, path)) => (
+            format!("entity.{namespace}.{path}"),
+            path.replace('_', " "),
+        ),
+        None => (
+            format!("entity.{}", stats.mob),
+            stats.mob.replace('_', " "),
+        ),
+    };
+    Text::translate_with_fallback(&key, &fallback, &[])
+}
+
+fn ticks(stats: &Stats, stat: Stat) -> Text {
+    Text::literal((stats.get(stat) as i32).to_string())
+}
+
 /// The line a spawner's stats are shown as: the mob, the delays, the wave, the
 /// ranges, and the flags that are on.
 pub fn summary(stats: &Stats) -> Text {
-    let mob = match stats.mob.rsplit_once(':') {
-        Some((_, path)) => path.replace('_', " "),
-        None if stats.mob.is_empty() => "?".to_owned(),
-        None => stats.mob.clone(),
-    };
     let mut line = Text::translate_with_fallback(
         "apotheosis.spawner.stats",
         "Spawner: %s · delay %s–%s ticks · %s per wave · player range %s · nearby max %s · spawn range %s",
         &[
-            Text::literal(mob),
-            Text::literal((stats.get(Stat::MinDelay) as i32).to_string()),
-            Text::literal((stats.get(Stat::MaxDelay) as i32).to_string()),
-            Text::literal((stats.get(Stat::SpawnCount) as i32).to_string()),
-            Text::literal((stats.get(Stat::PlayerRange) as i32).to_string()),
-            Text::literal((stats.get(Stat::MaxNearby) as i32).to_string()),
-            Text::literal((stats.get(Stat::SpawnRange) as i32).to_string()),
+            mob_text(stats),
+            ticks(stats, Stat::MinDelay),
+            ticks(stats, Stat::MaxDelay),
+            ticks(stats, Stat::SpawnCount),
+            ticks(stats, Stat::PlayerRange),
+            ticks(stats, Stat::MaxNearby),
+            ticks(stats, Stat::SpawnRange),
         ],
     );
     for flag in Flag::ALL {
@@ -682,6 +711,108 @@ pub fn summary(stats: &Stats) -> Text {
         line = line.append(Text::translate_with_fallback(key, fallback, &[]));
     }
     line
+}
+
+// ---------------------------------------------------------------------------
+// Tooltip
+// ---------------------------------------------------------------------------
+
+/// The colour of the mob's line: aqua, the colour vanilla writes a spawner's
+/// own line in.
+pub const MOB_COLOUR: u32 = 0x55_FF_FF;
+/// The colour of a stat's line.
+pub const STAT_COLOUR: u32 = 0xAA_AA_AA;
+/// The colour of the line that lists the flags.
+pub const FLAG_COLOUR: u32 = 0x55_FF_55;
+
+/// A carried spawner's tooltip: one line per fact, so a narrow tooltip still
+/// reads well. The mob, the two delays, the wave, the three ranges, the mob
+/// health and the echo while they are not the vanilla ones, then the flags.
+pub fn tooltip(stats: &Stats) -> Vec<(Text, u32)> {
+    let mut lines = Vec::with_capacity(7);
+    let mut line = |key: &str, fallback: &str, args: &[Text], colour: u32| {
+        let text = Text::translate_with_fallback(key, fallback, args);
+        lines.push((text.with_color(colour), colour));
+    };
+    line(
+        "apotheosis.spawner.tooltip.mob",
+        "Mob: %s",
+        &[mob_text(stats)],
+        MOB_COLOUR,
+    );
+    line(
+        "apotheosis.spawner.tooltip.delay",
+        "Delay: %s–%s ticks",
+        &[ticks(stats, Stat::MinDelay), ticks(stats, Stat::MaxDelay)],
+        STAT_COLOUR,
+    );
+    line(
+        "apotheosis.spawner.tooltip.wave",
+        "Mobs per wave: %s",
+        &[ticks(stats, Stat::SpawnCount)],
+        STAT_COLOUR,
+    );
+    line(
+        "apotheosis.spawner.tooltip.ranges",
+        "Player range %s · nearby max %s · spawn range %s",
+        &[
+            ticks(stats, Stat::PlayerRange),
+            ticks(stats, Stat::MaxNearby),
+            ticks(stats, Stat::SpawnRange),
+        ],
+        STAT_COLOUR,
+    );
+    // Only worth a line when a modifier moved it away from vanilla.
+    if stats.get(Stat::InitialHealth) < 0.999 {
+        line(
+            "apotheosis.spawner.tooltip.health",
+            "Mob health: %s×",
+            &[Text::literal(fmt_float(stats.get(Stat::InitialHealth)))],
+            STAT_COLOUR,
+        );
+    }
+    if stats.get(Stat::Echoing) > 0.0 {
+        line(
+            "apotheosis.spawner.tooltip.echo",
+            "Echo: %s",
+            &[ticks(stats, Stat::Echoing)],
+            STAT_COLOUR,
+        );
+    }
+    // The flags, as one list: an empty line would say nothing.
+    let mut flags: Option<Text> = None;
+    for flag in Flag::ALL {
+        if !stats.flag(flag) {
+            continue;
+        }
+        let (key, fallback) = flag.label();
+        let label = Text::translate_with_fallback(key, fallback, &[]);
+        flags = Some(match flags {
+            None => label,
+            Some(joined) => joined.append(Text::literal(" · ")).append(label),
+        });
+    }
+    if let Some(flags) = flags {
+        line(
+            "apotheosis.spawner.tooltip.options",
+            "Options: %s",
+            &[flags],
+            FLAG_COLOUR,
+        );
+    }
+    lines
+}
+
+/// An item tooltip, on the client: a spawner item that carries a block
+/// entity's data says which mob it will spawn and with which stats.
+pub fn on_tooltip(event: &mut TooltipEvent<'_>) {
+    if event.stack.item.as_ref() != SPAWNER {
+        return;
+    }
+    let Some(data) = event.stack.data().and_then(|d| d.other(BLOCK_ENTITY_DATA)) else {
+        return;
+    };
+    event.lines.extend(tooltip(&Stats::from_tag(data)));
 }
 
 // ---------------------------------------------------------------------------
@@ -720,6 +851,8 @@ struct Cached {
 static QUEUE: Mutex<Vec<Queued>> = Mutex::new(Vec::new());
 static CACHED: Mutex<Vec<Cached>> = Mutex::new(Vec::new());
 static TICKS: AtomicU64 = AtomicU64::new(0);
+/// How many probes have been made, so each one can be named.
+static PROBES: AtomicU64 = AtomicU64::new(0);
 
 fn push(dimension: &str, pos: [i32; 3], job: Job) {
     let Ok(mut queue) = QUEUE.lock() else {
@@ -743,6 +876,25 @@ pub fn cached_drop(dimension: &str, pos: [i32; 3]) -> Option<Tag> {
         .iter()
         .position(|entry| entry.dimension == dimension && entry.pos == pos)?;
     Some(cached.remove(index).tag)
+}
+
+/// Drops what was read for `dimension`/`pos`: the block there is not the
+/// spawner that was read any more, so its data must not come back.
+fn forget(dimension: &str, pos: [i32; 3]) {
+    let Ok(mut cached) = CACHED.lock() else {
+        return;
+    };
+    cached.retain(|entry| !(entry.dimension == dimension && entry.pos == pos));
+}
+
+/// What a probe found, or nothing when the spawner was gone or its chunk was
+/// not loaded: a stale entry at that position would hand a fresh spawner's
+/// break the old one's data, so a failed read takes it out.
+fn settle(dimension: &str, pos: [i32; 3], tag: Option<Tag>, tick: u64) {
+    match tag {
+        Some(tag) => remember(dimension, pos, tag, tick),
+        None => forget(dimension, pos),
+    }
 }
 
 /// A right click on a block: on a spawner it asks for the stats, unless a
@@ -856,9 +1008,11 @@ pub fn on_tick(host: &mut dyn Host) {
     for entry in &queued {
         match &entry.job {
             Job::Probe => {
-                if let Some(tag) = read(host, &entry.dimension, entry.pos) {
-                    remember(&entry.dimension, entry.pos, tag, tick);
-                }
+                // A spawner broken between the click and this tick, or a chunk
+                // that is not loaded, is not read: nothing of it is left to
+                // drop, and what an older read cached goes with it.
+                let tag = read(host, &entry.dimension, entry.pos);
+                settle(&entry.dimension, entry.pos, tag, tick);
             }
             Job::Restore(tag) => {
                 write(host, &entry.dimension, entry.pos, &mergeable(tag));
@@ -927,52 +1081,93 @@ fn read_stats(host: &mut dyn Host, dimension: &str, pos: [i32; 3]) -> Option<Sta
     read(host, dimension, pos).map(|tag| Stats::from_tag(&tag))
 }
 
+/// The name this read's probe is given. A counter, so two reads never answer
+/// for each other, and a probe an interrupted read left behind is never taken
+/// for the one this read just made.
+fn probe_tag() -> String {
+    format!("{PROBE}_{}", PROBES.fetch_add(1, Ordering::Relaxed))
+}
+
+/// The commands one read runs: put a probe in the spawner's own block, copy
+/// the block entity's data into it, then take it out again.
+///
+/// The first two are gated on the block still being a spawner, so a spawner
+/// broken between the click and this tick, or a chunk that is not loaded,
+/// fails quietly instead of writing an error into the log.
+fn read_commands(dimension: &str, pos: [i32; 3], probe: &str) -> [String; 3] {
+    let [x, y, z] = pos;
+    let gate = format!("execute in {dimension} if block {x} {y} {z} {SPAWNER} run");
+    let summon = format!(
+        "{gate} summon minecraft:item {} {} {} \
+         {{Item:{{id:\"{PROBE_ITEM}\",count:1b,components:{{\"{CUSTOM_DATA}\":\
+         {{\"{PROBE_KEY}\":\"{probe}\"}}}}}},NoGravity:1b,Invulnerable:1b,Age:-32768s,\
+         PickupDelay:32767s,Tags:[\"{PROBE}\",\"{probe}\"]}}",
+        f64::from(x) + 0.5,
+        f64::from(y) + 0.5,
+        f64::from(z) + 0.5
+    );
+    let copy = format!(
+        "{gate} data modify entity @e[type=item,tag={probe},limit=1] \
+         Item.components.\"{CUSTOM_DATA}\".spawner set from block {x} {y} {z}"
+    );
+    let kill = format!("execute in {dimension} run kill @e[type=item,tag={probe}]");
+    [summon, copy, kill]
+}
+
+/// Kills the probes of earlier reads in this dimension: one left behind by a
+/// command that never ran would sit in the spawner for good.
+fn sweep_command(dimension: &str) -> String {
+    format!("execute in {dimension} run kill @e[type=item,tag={PROBE}]")
+}
+
 /// A spawner's saved data, through a probe item entity: Horizon 415 has no
 /// block entity NBT helper, but `/data modify ... set from block` copies the
 /// data and `item_entities` reads the item back. The probe lives for the one
-/// tick of the call.
+/// tick of the call, and it is found by the name it carries, not by where it
+/// stands.
 fn read(host: &mut dyn Host, dimension: &str, pos: [i32; 3]) -> Option<Tag> {
-    let [x, y, z] = pos;
-    let (cx, cy, cz) = (
-        f64::from(x) + 0.5,
-        f64::from(y) + 0.5,
-        f64::from(z) + 0.5,
-    );
-    let summon = format!(
-        "execute in {dimension} run summon minecraft:item {cx} {cy} {cz} \
-         {{Item:{{id:\"{PROBE_ITEM}\",count:1b}},NoGravity:1b,Age:-32768s,PickupDelay:32767s,Tags:[\"{PROBE}\"]}}"
-    );
-    if !host.run_command(&summon) {
-        return None;
-    }
-    let copy = format!(
-        "execute in {dimension} run data modify entity @e[tag={PROBE},limit=1] \
-         Item.components.\"{CUSTOM_DATA}\".spawner set from block {x} {y} {z}"
-    );
-    let copied = host.run_command(&copy);
+    let probe = probe_tag();
+    let [summon, copy, kill] = read_commands(dimension, pos, &probe);
     let mut found = None;
-    if copied {
+    if host.run_command(&summon) && host.run_command(&copy) {
+        let [x, y, z] = pos;
+        let (cx, cy, cz) = (
+            f64::from(x) + 0.5,
+            f64::from(y) + 0.5,
+            f64::from(z) + 0.5,
+        );
         let near = |d: f64| -> [f64; 3] { [cx + d, cy + d, cz + d] };
         for entity in host.item_entities(dimension, near(-1.0), near(1.0)) {
             let Some(data) = entity.stack.data().and_then(|d| d.other(CUSTOM_DATA)) else {
                 continue;
             };
+            if data.get(PROBE_KEY).and_then(tag_string).as_deref() != Some(probe.as_str()) {
+                continue;
+            }
             if let Some(tag) = data.get("spawner") {
                 found = Some(tag.clone());
                 break;
             }
         }
     }
-    let clear = format!("execute in {dimension} run kill @e[tag={PROBE}]");
-    host.run_command(&clear);
+    host.run_command(&kill);
+    host.run_command(&sweep_command(dimension));
     found
 }
 
-fn write(host: &mut dyn Host, dimension: &str, pos: [i32; 3], snbt: &str) -> bool {
+/// The `/data merge block` that puts `snbt` into a spawner, gated on the block
+/// still being one: a spawner broken between the click and this tick leaves
+/// nothing for the merge to land in.
+fn merge_command(dimension: &str, pos: [i32; 3], snbt: &str) -> String {
     let [x, y, z] = pos;
-    host.run_command(&format!(
-        "execute in {dimension} run data merge block {x} {y} {z} {snbt}"
-    ))
+    format!(
+        "execute in {dimension} if block {x} {y} {z} {SPAWNER} run \
+         data merge block {x} {y} {z} {snbt}"
+    )
+}
+
+fn write(host: &mut dyn Host, dimension: &str, pos: [i32; 3], snbt: &str) -> bool {
+    host.run_command(&merge_command(dimension, pos, snbt))
 }
 
 // ---------------------------------------------------------------------------
@@ -1230,6 +1425,127 @@ mod tests {
         let tag = cached_drop("minecraft:overworld", [1, 2, 3]).expect("cached");
         assert_eq!(tag.get("a"), Some(&Tag::Int(1)));
         assert!(cached_drop("minecraft:overworld", [1, 2, 3]).is_none());
+    }
+
+    #[test]
+    fn a_read_names_its_probe_and_gates_its_commands_on_the_spawner() {
+        let [summon, copy, kill] = read_commands(
+            "minecraft:overworld",
+            [10, 64, -3],
+            "apoth_spawner_probe_7",
+        );
+        assert!(
+            summon.starts_with(
+                "execute in minecraft:overworld if block 10 64 -3 minecraft:spawner run \
+                 summon minecraft:item 10.5 64.5 -2.5"
+            ),
+            "{summon}"
+        );
+        // The probe carries its own name, so a probe left behind by an earlier
+        // read is never mistaken for this one.
+        assert!(summon.contains("apoth_probe\":\"apoth_spawner_probe_7"), "{summon}");
+        assert!(!summon.contains("apoth_spawner_probe_6"), "{summon}");
+        assert!(
+            copy.contains("if block 10 64 -3 minecraft:spawner run data modify entity"),
+            "{copy}"
+        );
+        assert!(copy.contains("@e[type=item,tag=apoth_spawner_probe_7,limit=1]"), "{copy}");
+        assert!(copy.ends_with("set from block 10 64 -3"), "{copy}");
+        // The probe goes even when the block is not a spawner any more.
+        assert!(
+            kill.ends_with("kill @e[type=item,tag=apoth_spawner_probe_7]"),
+            "{kill}"
+        );
+        assert!(!kill.contains("if block"), "{kill}");
+    }
+
+    #[test]
+    fn every_read_finds_a_probe_name_of_its_own() {
+        let first = probe_tag();
+        let second = probe_tag();
+        assert_ne!(first, second);
+        assert!(first.starts_with(PROBE), "{first}");
+        assert!(sweep_command("minecraft:the_end").ends_with("kill @e[type=item,tag=apoth_spawner_probe]"));
+    }
+
+    #[test]
+    fn a_merge_only_lands_in_a_spawner() {
+        let merge = merge_command("minecraft:the_nether", [1, 2, 3], "{MinSpawnDelay:20}");
+        assert!(
+            merge.starts_with(
+                "execute in minecraft:the_nether if block 1 2 3 minecraft:spawner run \
+                 data merge block 1 2 3 "
+            ),
+            "{merge}"
+        );
+        assert!(merge.ends_with("{MinSpawnDelay:20}"), "{merge}");
+    }
+
+    #[test]
+    fn a_failed_read_takes_the_old_entry_out() {
+        let (dimension, pos) = ("minecraft:overworld", [21, 22, 23]);
+        remember(dimension, pos, tag([("a", Tag::Int(1))]), 10);
+        // The spawner that was read is gone: its data must not come back for
+        // whatever stands there now.
+        settle(dimension, pos, None, 11);
+        assert!(cached_drop(dimension, pos).is_none());
+        // A fresh read of that block replaces what an older one left.
+        remember(dimension, pos, tag([("a", Tag::Int(1))]), 12);
+        settle(dimension, pos, Some(tag([("a", Tag::Int(2))])), 13);
+        let cached = cached_drop(dimension, pos).expect("cached");
+        assert_eq!(cached.get("a"), Some(&Tag::Int(2)));
+    }
+
+    #[test]
+    fn a_read_that_waited_too_long_for_its_break_is_forgotten() {
+        let (dimension, pos) = ("minecraft:overworld", [31, 32, 33]);
+        remember(dimension, pos, tag([("a", Tag::Int(1))]), 0);
+        forget_old(CACHE_TICKS - 1);
+        assert!(cached_drop(dimension, pos).is_some());
+        remember(dimension, pos, tag([("a", Tag::Int(1))]), 0);
+        forget_old(CACHE_TICKS);
+        assert!(cached_drop(dimension, pos).is_none());
+    }
+
+    #[test]
+    fn the_tooltip_says_which_mob_and_which_stats() {
+        let mut stats = Stats::default();
+        stats.mob = "minecraft:zombie".into();
+        stats.set(Stat::MinDelay, 60.0);
+        stats.set_flag(Flag::Burning, true);
+        let lines = tooltip(&stats);
+        assert_eq!(lines[0].1, MOB_COLOUR);
+        assert_eq!(lines[1].1, STAT_COLOUR);
+        let rendered = lines
+            .iter()
+            .map(|(text, _)| format!("{:?}", text.spans))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("zombie"), "{rendered}");
+        assert!(rendered.contains("60"), "{rendered}");
+        assert!(rendered.contains("burning"), "{rendered}");
+        assert!(rendered.contains("Mob: "), "{rendered}");
+        // Neither line appears while health and echo are the vanilla ones.
+        assert!(!rendered.contains("Echo"), "{rendered}");
+        assert!(!rendered.contains("health"), "{rendered}");
+        assert_eq!(lines.last().expect("a flag line").1, FLAG_COLOUR);
+    }
+
+    #[test]
+    fn a_tooltip_shows_the_health_and_the_echo_once_a_modifier_moved_them() {
+        let mut stats = Stats::default();
+        stats.mob = "minecraft:cow".into();
+        stats.set_flag(Flag::Silent, true);
+        stats.set(Stat::InitialHealth, 0.8);
+        stats.set(Stat::Echoing, 2.0);
+        let rendered = tooltip(&stats)
+            .iter()
+            .map(|(text, _)| format!("{:?}", text.spans))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("0.8"), "{rendered}");
+        assert!(rendered.contains("Echo"), "{rendered}");
+        assert!(rendered.contains("silent"), "{rendered}");
     }
 
     #[test]
