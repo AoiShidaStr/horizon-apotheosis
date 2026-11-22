@@ -519,6 +519,20 @@ a85af177 and covered by unit tests only.
   carried spawner's tooltip, not in a screen.
 - **The Apotheosis bosses** are another chantier's, not this one's.
 
+## Known issues (review of 2026-11-22, not fixed yet)
+
+An independent review found these item duplication or loss risks in the
+sockets, sigils, reforge and salvage code. They are **not fixed** in 0.5.0;
+avoid these actions on a shared server until they are:
+
+- `sockets.rs:924`: consume_seal() retire le sigil de la pile qui occupe la case sélectionnée au moment du tick, pas de celle qui a été cliquée : use_seal() (l.837-868) ne mémorise ni la case ni l'objet, et add_socket/withdraw/rebirth/enhance ne vérifient même pas que `main` est encore un sigil avant d'appeler consume_seal (l.947, 978, 991, 1025).
+- `sockets.rs:1170`: polish() ne vérifie pas que la pile de la main (relue au tick, l.810) est encore une gemme : il applique set_purity() à n'importe quel objet et retire 4 gem dust de la main gauche. Le contrôle de use_item (l.751-757) porte sur la pile du clic, perdue entre-temps.
+- `sockets.rs:976`: withdraw() retire les gemmes des chambres et les donne avec `let _ = host.give_stack(...)` : l'échec (inventaire plein) est ignoré, alors que la pièce a déjà été réécrite sans ses chambres (l.968-971) et que le sigil est consommé (l.978).
+- `sockets.rs:1238`: salvage() rend les gemmes serties avec `let _ = host.give_stack(player, gem)` : une gemme qui ne rentre pas est perdue, et seul le matériau est contrôlé (`if given < count`, l.1249). La pièce est détruite avant (l.1229).
+- `sockets.rs:819`: Les actions différées relisent la pièce de la main gauche au tick (l.819)` et l'appliquent sans vérifier que c'est celle validée au clic (use_seal l.847-857, use_item l.743-756) : sertir, polir, ajouter une chambre, améliorer ou reroll agissent sur la pièce qui s'y trouve alors, et le consommable (gemme, poudre, sigil) est débité quand même.
+- `lib.rs:1259`: La reforge d'une pièce affixée débite les 3 niveaux (l.1251) puis pose juste `Action::Reforge` ; sockets::reforge (l.1192-1201) ne rend les niveaux que si la pile tenue n'est pas reforgable. Une autre pièce affixée tenue au tick est donc rerollée à la place de celle payée.
+- `lib.rs:1199`: `/apoth salvage` valide la pièce au moment de la commande (begin_salvage, sockets.rs:763-776, contrôle `has_affixes` sur held_stack) puis salvage() (sockets.rs:1216) détruit la pile tenue au tick suivant, sans revérifier que c'est la même.
+
 ## Install
 
 Both halves use the id `apotheosis`.
