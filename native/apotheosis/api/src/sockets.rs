@@ -760,10 +760,7 @@ pub fn use_item(host: &mut dyn Host, event: &mut UseItemEvent<'_>) -> Flow {
         set_pending(player.uuid, Action::Socket);
         return Flow::Cancel;
     }
-    if &*off.item == "apotheosis:gem_dust"
-        && off.count >= POLISH_COST
-        && purity_of(&event.stack) < Purity::Perfect
-    {
+    if can_polish(&event.stack, &off) {
         set_pending(player.uuid, Action::Polish);
         return Flow::Cancel;
     }
@@ -1179,11 +1176,17 @@ fn socket(host: &mut dyn Host, slot: i32, main: &ItemStack, off: &ItemStack) {
     ));
 }
 
+fn can_polish(main: &ItemStack, off: &ItemStack) -> bool {
+    &*off.item == "apotheosis:gem_dust"
+        && off.count >= POLISH_COST
+        && purity_of(main) < Purity::Perfect
+}
+
 fn polish(host: &mut dyn Host, slot: i32, main: &ItemStack, off: &ItemStack) {
-    let purity = purity_of(main);
-    if &*off.item != "apotheosis:gem_dust" || off.count < POLISH_COST || purity == Purity::Perfect {
+    if !can_polish(main, off) {
         return;
     }
+    let purity = purity_of(main);
     let mut improved = main.clone();
     set_purity(&mut improved, purity.next());
     write_slot(host, slot, improved);
@@ -1368,6 +1371,13 @@ mod tests {
         assert_eq!(socket_slot_group("minecraft:shield"), "hand");
         assert_eq!(socket_slot_group("minecraft:diamond_chestplate"), "armor");
         assert_eq!(socket_slot_group("minecraft:diamond_sword"), "hand");
+    }
+
+    #[test]
+    fn polishing_rejects_a_non_gem_in_the_main_hand() {
+        let sword = ItemStack::new("minecraft:diamond_sword", 1);
+        let dust = ItemStack::new("apotheosis:gem_dust", POLISH_COST);
+        assert!(!can_polish(&sword, &dust));
     }
 
     #[test]
