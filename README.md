@@ -1,8 +1,21 @@
-# Apotheosis (gems + affixes) for Horizon
+# Apotheosis for Horizon
 
-A Horizon slice of [Apotheosis](https://github.com/Shadows-of-Fire/Apotheosis)
-by Shadows_of_Fire (MIT). Saison 2 runs it for **item rarities with affixes**
-and **gems whose high tiers drop only from bosses**.
+A clean-room Horizon port of [Apotheosis](https://github.com/Shadows-of-Fire/Apotheosis)
+by Shadows_of_Fire (MIT) and its 1.21 companions **Apothic Enchanting**,
+**Apothic Attributes** and **Apothic Spawners**, as the Saison 1 server ran them
+on NeoForge 1.21.1. Version 0.5.0 targets Horizon a85af177 (native hook API 415).
+
+| Part | Section |
+| --- | --- |
+| Gems, rarities, affixes from loot, `/apoth` | *Done* / *Missing* below |
+| Sockets, gem purity, sigils, reforging, salvaging, gem cutting | *Gemmes, sockets, reforge et recyclage* |
+| Apothic attributes, 40 affixes, affix effects, Apothic Invader bosses | *Apothic Attributes et affixes* |
+| Enchanting shelves and Eterna, tomes, Prismatic Web, Enchantment Library | *Apothic Enchanting* |
+| Silk-touch spawners and Apothic spawner modifiers | *Apothic Spawners* |
+
+In-game test plan (French): [`TEST-EN-JEU.md`](TEST-EN-JEU.md). Nothing in this
+port has been played in game yet: every part is type-checked against Horizon
+a85af177 and covered by unit tests only.
 
 > **Clean room.** Nothing here is copied from Apotheosis: neither code nor
 > art. The behaviour (tiers, gems, affixes, boss-only high tiers) comes from the

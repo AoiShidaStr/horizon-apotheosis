@@ -1,7 +1,7 @@
 id = "apotheosis"
-name = "Apotheosis (gems)"
-version = "0.4.0"
-description = "Gem tiers for Apotheosis: twelve gems, two per tier, each granting a real attribute bonus from the off hand, with its rarity in the tooltip. Gem dust and decorative gem blocks make every gem craftable; the two highest tiers drop only from bosses, and looted gear rolls rarity affixes. A clean-room Horizon slice of Apotheosis (MIT): original code and textures, see README.md."
+name = "Apotheosis"
+version = "0.5.0"
+description = "Apotheosis, Apothic Enchanting, Apothic Attributes and Apothic Spawners for Horizon: affixed gear in six rarities with 40 affixes and Apothic attributes (crit, life steal, dodge, armour pierce...), gems with purity and sockets, sigils, reforging, salvaging and gem cutting tables, rarity materials, Apothic Invader bosses, 23 enchanting shelves with Eterna, tomes, the Prismatic Web and the Enchantment Library, and silk-touch spawners with Apothic modifiers. A clean-room port: original code and textures, see README.md."
 authors = ["Saison 2 server"]
 api = "0.2"
 side = "both"
