@@ -260,5 +260,12 @@
   "apotheosis.cut.no_dust": "La table de taille demande %s poussière de gemme.",
   "apotheosis.table.reforge.hint": "La table de recréation agit sur l'équipement tenu en main.",
   "apotheosis.table.salvage.hint": "La table de récupération recycle l'objet affixé tenu en main.",
-  "apotheosis.table.cut.hint": "La table de taille aiguise la gemme tenue en main."
+  "apotheosis.table.cut.hint": "La table de taille aiguise la gemme tenue en main.",
+  "apotheosis.spawner.tooltip.mob": "Mob : %s",
+  "apotheosis.spawner.tooltip.delay": "Délai : %s–%s ticks",
+  "apotheosis.spawner.tooltip.wave": "Mobs par vague : %s",
+  "apotheosis.spawner.tooltip.ranges": "Portée joueur %s · proches max %s · portée d'apparition %s",
+  "apotheosis.spawner.tooltip.health": "Vie des mobs : %s×",
+  "apotheosis.spawner.tooltip.echo": "Écho : %s",
+  "apotheosis.spawner.tooltip.options": "Options : %s"
 }
