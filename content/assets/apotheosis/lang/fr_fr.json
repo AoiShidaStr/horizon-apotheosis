@@ -60,5 +60,14 @@
   "item.apotheosis.gem_opal": "Opale",
   "block.apotheosis.gem_block_opal": "Bloc d'opale",
   "apotheosis.gem.opal.effect": "En main secondaire : +3 solidité d'armure",
-  "item.apotheosis.gem_dust": "Poussière de gemme"
+  "item.apotheosis.gem_dust": "Poussière de gemme",
+  "apotheosis.spawner.stats": "Spawner : %s · délai %s–%s ticks · %s par vague · portée joueur %s · proches max %s · portée d'apparition %s",
+  "apotheosis.spawner.flag.ignore_players": "ignore les joueurs",
+  "apotheosis.spawner.flag.ignore_light": "ignore la lumière",
+  "apotheosis.spawner.flag.ignore_conditions": "ignore les conditions",
+  "apotheosis.spawner.flag.no_ai": "mobs sans IA",
+  "apotheosis.spawner.flag.silent": "silencieux",
+  "apotheosis.spawner.flag.redstone_control": "commandé par redstone",
+  "apotheosis.spawner.flag.youthful": "mobs juvéniles",
+  "apotheosis.spawner.flag.burning": "mobs en feu"
 }

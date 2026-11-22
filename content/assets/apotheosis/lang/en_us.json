@@ -60,5 +60,14 @@
   "item.apotheosis.gem_opal": "Opal",
   "block.apotheosis.gem_block_opal": "Opal Block",
   "apotheosis.gem.opal.effect": "In the off hand: +3 Armor Toughness",
-  "item.apotheosis.gem_dust": "Gem Dust"
+  "item.apotheosis.gem_dust": "Gem Dust",
+  "apotheosis.spawner.stats": "Spawner: %s · delay %s–%s ticks · %s per wave · player range %s · nearby max %s · spawn range %s",
+  "apotheosis.spawner.flag.ignore_players": "ignores players",
+  "apotheosis.spawner.flag.ignore_light": "ignores light",
+  "apotheosis.spawner.flag.ignore_conditions": "ignores conditions",
+  "apotheosis.spawner.flag.no_ai": "mobs have no AI",
+  "apotheosis.spawner.flag.silent": "silent",
+  "apotheosis.spawner.flag.redstone_control": "redstone controlled",
+  "apotheosis.spawner.flag.youthful": "young mobs",
+  "apotheosis.spawner.flag.burning": "burning mobs"
 }
