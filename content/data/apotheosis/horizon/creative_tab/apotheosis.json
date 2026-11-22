@@ -49,6 +49,11 @@
     "apotheosis:sightshelf_t2",
     "apotheosis:soul_touched_deepshelf",
     "apotheosis:soul_touched_sculkshelf",
-    "apotheosis:stoneshelf"
+    "apotheosis:stoneshelf",
+    "apotheosis:mysterious_scrap_metal",
+    "apotheosis:timeworn_fabric",
+    "apotheosis:luminous_crystal_shard",
+    "apotheosis:arcane_sands",
+    "apotheosis:godforged_pearl"
   ]
 }
