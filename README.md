@@ -175,8 +175,9 @@ and **gems whose high tiers drop only from bosses**.
   costs are then scaled from Eterna — the third offer equals Eterna, the lower
   two take the midpoint of 20–40% and 60–80% of it — so a well-stocked table
   offers level 45, 70 or 100 enchantments instead of vanilla's 30-level cap.
-  Each offer keeps at least its vanilla eligibility (1, 2, 3) and costs that
-  many experience levels.
+  Each offer keeps at least its vanilla eligibility (1, 2, 3), costs that many
+  experience levels, and is never lowered below what vanilla had already
+  computed for the table.
 - **The shelves also feed the player's own table.** Each one is in
   `minecraft:enchantment_power_provider`, so in single player, where Horizon
   does not dispatch API 291, they count like bookshelves for vanilla power and

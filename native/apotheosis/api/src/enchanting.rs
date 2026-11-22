@@ -116,7 +116,7 @@ fn apply_costs(costs: &mut [i32; 3], eterna: f32) {
     let factors = [(0.2_f32, 0.4_f32), (0.6, 0.8)];
     for (slot, cost) in costs.iter_mut().enumerate() {
         let min_cost = slot as i32 + 1;
-        *cost = match slot {
+        let scaled = match slot {
             2 => eterna.max(min_cost),
             0 | 1 => {
                 let (low, high) = factors[slot];
@@ -126,6 +126,9 @@ fn apply_costs(costs: &mut [i32; 3], eterna: f32) {
             }
             _ => *cost,
         };
+        // Eterna raises offers; it must not undercut a table that vanilla
+        // already made expensive through its ordinary bookshelves.
+        *cost = (*cost).max(scaled);
     }
 }
 
@@ -163,6 +166,13 @@ mod tests {
         let mut costs = [1, 2, 3];
         apply_costs(&mut costs, 45.0);
         assert_eq!(costs, [13, 31, 45]);
+    }
+
+    #[test]
+    fn vanilla_offers_are_never_lowered() {
+        let mut costs = [8, 16, 30];
+        apply_costs(&mut costs, 0.0);
+        assert_eq!(costs, [8, 16, 30]);
     }
 
     #[test]
