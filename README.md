@@ -70,10 +70,10 @@ and **gems whose high tiers drop only from bosses**.
 - **Affixes on looted gear** (`loot_drops`, API 75): gear a mob drops (a
   zombie's sword, a skeleton's bow…) is rolled into a rarity and carries real
   `minecraft:attribute_modifiers`, a lore that names each affix, and the
-  `minecraft:rarity` that colours its name. Eight affixes: Keen, Brutal, Swift,
-  Stalwart, Bulwarked, Hasty, Steadfast, Tough — over attack damage, speed,
-  max health, armor, armor toughness, mining efficiency and knockback
-  resistance. Distinct affixes per item, scaled by tier.
+  `minecraft:rarity` that colours its name. 26 affixes (see *Apothic
+  Attributes et affixes* below), each rolled only onto gear it can affect.
+  Distinct affixes per item, scaled by tier; an affixed copy keeps the item's
+  own base modifiers in front of the rolled ones.
 - **Gems from mobs**: an ordinary mob killed by a player has a 12% chance to
   drop one of the four low gems (ruby, amber, topaz, amethyst). **High tiers
   stay boss-only**: an ordinary mob's gear rolls uncommon → epic only
@@ -88,6 +88,59 @@ and **gems whose high tiers drop only from bosses**.
 - **`/apoth reforge`** (`register_commands`/`perform_command`, API 8): rolls
   tier and affixes onto the plain piece of gear the player holds, for 3
   experience levels; `/apoth` alone explains it. Answers are translated.
+
+## Apothic Attributes et affixes
+
+### Done
+
+- **Fifteen attributes** (`native/apotheosis/api/src/attributes.rs`), stored on
+  an affixed stack in `minecraft:custom_data` under `apotheosis:attributes`
+  and read back by the hooks: crit chance and crit damage, life steal,
+  overheal, dodge chance, armor pierce, armor shred, fire and cold damage,
+  experience gained, healing received, arrow damage and velocity, bow draw
+  speed, and mining speed.
+- **They do something in play**:
+  - *Damage*: `living_incoming_damage_v2` scales an attacker's hit by crit,
+    fire, cold, pierce and shred (the victim's armor absorption is reduced by
+    shred and then by pierce); `living_incoming_damage` applies the victim's
+    dodge and rolls the crit chance. Dodge is the only case that cancels the
+    hit (flow `Cancel`), so a dodged arrow is not a free hit.
+  - *Life steal and overheal*: the damage actually dealt heals the attacker by
+    the life-steal share, above max health through absorption for overheal.
+  - *Bow*: `arrow_loose` remembers the shooter's arrow-damage multiplier for
+    that shot (five seconds), `living_incoming_damage` spends it; draw speed
+    scales the charge needed to loose, so a faster bow fires sooner.
+  - *Healing*: `living_heal` scales incoming healing by *healing received*
+    and refunds the **overheal** share, up to the missing health.
+  - *Mining*: `break_speed` scales the break speed of the held tool.
+  - *Experience*: `experience_orb_pickup` adds the experience-gained share to
+    the orb's value.
+- **Tooltips** name each attribute and its value in blue under the affix
+  lore, translated in en_us and fr_fr.
+- **Affixes are filtered by item class**: sword and axe (melee), bow and
+  crossbow (ranged), helmet, chestplate, leggings and boots separately, tool,
+  shield. A bow can no longer roll `attack_damage`; a chestplate cannot roll a
+  bow affix; an item with no matching affix rolls none rather than falling
+  back to the whole pool.
+- **Base modifiers are merged**: `modify_default_components` records each
+  item's own `minecraft:attribute_modifiers` before anything edits them, and
+  `apply_affixes` writes them ahead of the rolled ones, so an affixed diamond
+  sword keeps its innate attack damage.
+- **Names** for all 15 attributes and 18 new affixes are added to the shared
+  files by `python tools/gen_attributes.py` (merges, never replaces; the
+  creative tab and tags are checked and left untouched, no item is added).
+
+### Missing
+
+- The attributes only exist on affixed gear: there is no attribute screen, no
+  per-player attribute page and no way to put them on an arbitrary item.
+- Overheal is modelled as `minecraft:absorption`; the original keeps a
+  separate overheal pool with its own decay and display.
+- Armor pierce and shred lower the damage reduction computed by this mod, not
+  vanilla's armor points, so the armour bar does not move.
+- Dodge is rolled server-side per hit; there is no client animation or sound.
+- The mining-speed attribute is applied through `break_speed` only, so it does
+  not show on the held tool's vanilla `mining_efficiency` line.
 
 ## Missing
 
@@ -104,15 +157,6 @@ and **gems whose high tiers drop only from bosses**.
   the API's item helpers only take stacks with no components, so an affixed
   piece cannot be taken, rerolled and handed back. It rolls once onto a plain
   item instead.
-- **Affixes replace an item's base attribute modifiers.** A stack's
-  `minecraft:attribute_modifiers` component replaces the item's own defaults
-  (vanilla semantics), so an affixed diamond sword loses its innate +3 attack
-  damage and only keeps the rolled affixes. Reading an item's default
-  modifiers is not possible from the hooks this mod uses, so merging them is
-  not done; the affixes are an alternative to the base stats, not a bonus on
-  top of them.
-- **Affix pools are filtered by slot group only** (armour vs hand). A bow can
-  still roll `attack_damage`, which only matters for a melee hit with it.
 - **Affixes from chest loot tables** — chest tables can supply gems, but their
   gear remains un-affixed; `loot_table_load` cannot roll the item components
   the later loot generation creates.
@@ -246,11 +290,11 @@ Both halves use the id `apotheosis`.
   `tools/vps/verify.sh`); it builds as a trait mod with
   `horizon-launcher native-build`.
 
-### Build state (2026-11-14)
+### Build state (2026-11-22)
 
 - v0.4.0 compiles against the pinned commit `a85af177` (`cargo check -p
   mod-apotheosis`, one warning: private `Rng` behind the public test helper).
-  **14 unit tests pass**, and `cargo check -p horizon-native-game
+  **23 unit tests pass**, and `cargo check -p horizon-native-game
   --no-default-features` (dedicated-server engine with this mod staged)
   passes, as does the client flavour (`cargo check -p horizon-native-game`,
   default features).
