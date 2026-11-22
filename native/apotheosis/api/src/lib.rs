@@ -19,9 +19,12 @@
 //! - `register_commands` / `perform_command`: `/apoth reforge` rolls affixes
 //!   onto plain gear, for experience levels.
 use horizon_client::mod_api::{
-    Flow, Hooks, Host, ItemStack, LootDropsEvent, ModifyDefaultComponentsEvent, NativeCommand,
-    PerformCommandEvent, RegisterCommandsEvent, Tag, Text, TooltipEvent, serde_json,
+    Flow, Hooks, Host, ItemStack, LeftClickBlockEvent, LootDropsEvent, ModifyDefaultComponentsEvent,
+    NativeCommand, PerformCommandEvent, PlaceBlockEvent, RegisterCommandsEvent,
+    RightClickBlockEvent, Tag, Text, TickEvent, TooltipEvent, UseItemOnEvent, serde_json,
 };
+
+mod spawners;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub fn hooks() -> Box<dyn Hooks> {
@@ -692,6 +695,7 @@ impl Hooks for Apotheosis {
     }
 
     fn loot_drops(&self, _host: &mut dyn Host, event: &mut LootDropsEvent<'_>) {
+        spawners::on_loot_drops(event);
         let Some((_, kind)) = event.context.entity else {
             return;
         };
@@ -750,6 +754,26 @@ impl Hooks for Apotheosis {
             apply_affixes(&mut stack, tier, &mut rng);
             event.drops.push(stack);
         }
+    }
+
+    fn tick(&self, host: &mut dyn Host, _event: &mut TickEvent) {
+        spawners::on_tick(host);
+    }
+
+    fn right_click_block(&self, host: &mut dyn Host, event: &mut RightClickBlockEvent) -> Flow {
+        spawners::on_right_click(host, event.pos)
+    }
+
+    fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
+        spawners::on_use_item_on(host, event)
+    }
+
+    fn left_click_block(&self, host: &mut dyn Host, event: &mut LeftClickBlockEvent) -> Flow {
+        spawners::on_left_click(host, event.pos)
+    }
+
+    fn place_block(&self, host: &mut dyn Host, event: &mut PlaceBlockEvent<'_>) {
+        spawners::on_place(host, event);
     }
 
     fn register_commands(&self, _host: &mut dyn Host, event: &mut RegisterCommandsEvent<'_>) {
