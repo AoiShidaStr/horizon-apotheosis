@@ -65,8 +65,8 @@ and **gems whose high tiers drop only from bosses**.
   templates with generated faceted textures, hardness and blast resistance
   rising with the tier, a **light level from 3 (common) to 8 (ancient)**, own
   blockstate/model/item model, a self-drop loot table, and an entry in the
-  pickaxe tag. A Ruby Block is storage, light and decoration; it is not a
-  socketing table.
+  pickaxe tag. A Ruby Block is storage, light and decoration; the working
+  tables are blocks of their own.
 - **Affixes on looted gear** (`loot_drops`, API 75): gear a mob drops (a
   zombie's sword, a skeleton's bow…) is rolled into a rarity and carries real
   `minecraft:attribute_modifiers`, a lore that names each affix, and the
@@ -120,6 +120,34 @@ and **gems whose high tiers drop only from bosses**.
 - **Salvaging**: `/apoth salvage` on an affixed piece breaks it into 1–4 of its
   rarity's material, gem dust (1–4 by rarity) and gives back every socketed
   gem at the purity it had.
+- **Four sigils** (`sigil_of_socketing`, `sigil_of_withdrawal`,
+  `sigil_of_rebirth`, `sigil_of_enhancement`), each a stackable item with its
+  own 16×16 wax-seal texture, en_us/fr_fr name and description line, a shaped
+  recipe from the rarity materials (iron and gold, fabric and iron, crystal and
+  blaze powder, arcane sands and an emerald), and a place in the creative tab.
+  A sigil is used with the affixed piece in the **off hand** and the sigil in
+  the **main hand**, right click: socketing adds one socket up to the maximum,
+  withdrawal takes every socketed gem back out at the purity it had, rebirth
+  rerolls the piece's rarity and affixes (gems kept), enhancement moves the
+  rarity one step up (Common→…→Ancient) and rerolls at the new tier. The sigil
+  is used up on the next inventory tick, so a hand that changed costs nothing.
+- **Three working tables as blocks**, with Apotheosis' ids
+  (`gem_cutting_table`, `salvaging_table`, `reforging_table`): a real block
+  declaration (oak planks template, own top and side textures, `cube_bottom_top`
+  model), item, blockstate, block loot table, pickaxe tag, shaped recipe (iron
+  and amethyst around gem dust, iron and planks, gold and scrap metal), and the
+  creative tab. Right click with the piece in hand (`use_item_on`, API 13): the
+  reforging table does what `/apoth reforge` does (3 levels), the salvaging
+  table what `/apoth salvage` does, and the gem cutting table spends 4 gem dust
+  from the inventory to raise the held gem's purity one step
+  (`Host::take_items`, refunded if the dust is not all there). The click is
+  always claimed, so a misclick shows the table's hint instead of opening
+  something else.
+- **Chest gems roll their purity** (`loot_function`, API 133): the gem pool
+  `loot_table_load` adds to vanilla chests carries the mod's own
+  `apotheosis:gem_purity` function, which draws from the loot roll's seed with
+  the ordinary weights and writes `apotheosis:gem_purity` into the stack's
+  `minecraft:custom_data` component.
 - **Five rarity materials** with Apotheosis' ids — `mysterious_scrap_metal`
   (common), `timeworn_fabric` (uncommon), `luminous_crystal_shard` (rare),
   `arcane_sands` (epic), `godforged_pearl` (mythic and ancient) — each with its
@@ -130,19 +158,22 @@ and **gems whose high tiers drop only from bosses**.
 
 ### Missing
 
-- **No socketing, reforging or salvaging table.** The three actions run from a
-  right click and from two commands; no block, menu or sealing sigil was
-  added, so there is no screen that shows a piece's sockets or picks which gem
-  to pull out.
-- **No way to remove a socketed gem** other than salvaging the whole piece,
-  and no socket protection or sigil.
+- **No real menu screens.** The tables are blocks that act on the held stack
+  on a right click; none opens a GUI, so there is no grid to place a piece and
+  a gem in, no preview of the result, and no slot-level picking of which gem to
+  pull out. A chest-style server menu (API 10) could show one, at the cost of
+  modelling every click by hand.
+- **The other 1.21 sigils are not ported**: `sigil_of_unnaming` (this port never
+  writes a custom name onto an affixed piece), `sigil_of_malice` and
+  `sigil_of_supremacy` (no overcharged-affix state), and the augmenting table
+  they feed (no per-affix level).
+- **A socket, once added, is permanent**: no sigil takes one away, only the
+  gems can be withdrawn.
 - **Gear affixed before this slice** carries no `apotheosis:tier`, so it can be
   neither reforged nor salvaged; only pieces rolled (or dropped) after the
   update can.
 - **Purity only scales a socketed gem.** An unsocketed gem's off-hand bonus is
   its flat value; there is no purity-scaled off-hand bonus.
-- **Chest gems are Normal purity**: `loot_table_load` cannot write the purity
-  component, so only gems from mob and boss kills roll one.
 
 ## Missing
 
@@ -198,8 +229,9 @@ Both halves use the id `apotheosis`.
 
 - v0.4.0 compiles against the pinned commit `a85af177` (`cargo check -p
   mod-apotheosis`, one warning: private `Rng` behind the public test helper).
-  **24 unit tests pass** (nine of them in the new `sockets` module: purity
-  steps, socket counts, socketing, reforge and salvage yields), and
+  **27 unit tests pass** (twelve of them in the `sockets` module: purity steps,
+  socket counts, socketing, reforge and salvage yields, the sigil and table
+  ids, the rarity ladder, and the chest gem purity draw), and
   `cargo check -p horizon-native-game
   --no-default-features` (dedicated-server engine with this mod staged)
   passes, as does the client flavour (`cargo check -p horizon-native-game`,
@@ -209,10 +241,10 @@ Both halves use the id `apotheosis`.
   `native-mod`, api `native-1/a85af177…/5a64af93…`).
 - The content mod has twelve gems (two per tier), gem dust, twelve gem blocks
   with textures, models, loot tables and a pickaxe tag, five rarity salvage
-  materials, and 48 recipes. Mob drops and all vanilla chest loot tables now
-  provide survival gem routes;
-  chest gems are restricted to common and uncommon tiers. The four
-  mythic/ancient gems shimmer. All content JSON files parse, and
+  materials, four sigils, the three working tables, and 55 recipes. Mob drops
+  and all vanilla chest loot tables now provide survival gem routes; chest
+  gems are restricted to common and uncommon tiers and roll a purity from the
+  table's own seed. The four mythic/ancient gems shimmer. All content JSON files parse, and
   `python tools/pack.py` rebuilds `target/apotheosis.hmod` and
   `target/apotheosis.hnmod`.
 - The registry check caught `horizon-mixin.toml` still naming version `0.2.0`

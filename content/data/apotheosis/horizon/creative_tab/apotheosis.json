@@ -31,6 +31,13 @@
     "apotheosis:timeworn_fabric",
     "apotheosis:luminous_crystal_shard",
     "apotheosis:arcane_sands",
-    "apotheosis:godforged_pearl"
+    "apotheosis:godforged_pearl",
+    "apotheosis:sigil_of_socketing",
+    "apotheosis:sigil_of_withdrawal",
+    "apotheosis:sigil_of_rebirth",
+    "apotheosis:sigil_of_enhancement",
+    "apotheosis:gem_cutting_table",
+    "apotheosis:salvaging_table",
+    "apotheosis:reforging_table"
   ]
 }

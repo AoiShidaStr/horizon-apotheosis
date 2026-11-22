@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " F ",
+    "FIF",
+    " F "
+  ],
+  "key": {
+    "F": "apotheosis:timeworn_fabric",
+    "I": "minecraft:iron_ingot"
+  },
+  "result": {
+    "id": "apotheosis:sigil_of_withdrawal"
+  }
+}

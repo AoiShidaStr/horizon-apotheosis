@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "III",
+    "I I",
+    "PPP"
+  ],
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "P": "minecraft:oak_planks"
+  },
+  "result": {
+    "id": "apotheosis:salvaging_table"
+  }
+}

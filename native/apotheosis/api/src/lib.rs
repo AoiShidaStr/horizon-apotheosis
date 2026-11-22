@@ -4,7 +4,8 @@
 //! above vanilla's, affixes on gear, higher tiers only from bosses). No
 //! Apotheosis code or asset is used: see `../../README.md` and `NOTICE.md`.
 //!
-//! Six hooks, all on the real game's trait API:
+//! The hooks below are the real game's trait API (plus `sockets`' own
+//! `use_item_on` and `loot_function` for the tables and the chest gems):
 //! - `modify_default_components`: each gem carries a real
 //!   `minecraft:attribute_modifiers` entry, so a gem in the off hand grants its
 //!   bonus (the game applies equipment modifiers itself).
@@ -498,6 +499,7 @@ fn add_chest_gem_pool(id: &str, table: &mut serde_json::Value) {
                 "type": "minecraft:item",
                 "name": item,
                 "weight": weight,
+                "functions": [{ "function": "apotheosis:gem_purity" }],
             })
         })
         .collect();
@@ -699,8 +701,20 @@ impl Hooks for Apotheosis {
         sockets::inventory_tick(host, event);
     }
 
+    fn use_item_on(
+        &self,
+        host: &mut dyn Host,
+        event: &mut horizon_client::mod_api::UseItemOnEvent<'_>,
+    ) -> Flow {
+        sockets::use_item_on(host, event)
+    }
+
     fn loot_table_load(&self, event: &mut horizon_client::mod_api::LootTableLoadEvent<'_>) {
         add_chest_gem_pool(event.id, event.table);
+    }
+
+    fn loot_function(&self, event: &mut horizon_client::mod_api::LootFunctionEvent<'_>) {
+        sockets::loot_function(event)
     }
 
     fn loot_drops(&self, _host: &mut dyn Host, event: &mut LootDropsEvent<'_>) {

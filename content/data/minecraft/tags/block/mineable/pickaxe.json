@@ -11,6 +11,9 @@
     "apotheosis:gem_block_onyx",
     "apotheosis:gem_block_moonstone",
     "apotheosis:gem_block_bloodstone",
-    "apotheosis:gem_block_opal"
+    "apotheosis:gem_block_opal",
+    "apotheosis:gem_cutting_table",
+    "apotheosis:salvaging_table",
+    "apotheosis:reforging_table"
   ]
 }
