@@ -21,14 +21,18 @@
 //!
 //! `attributes` holds the Apothic Attributes half: the combat, mining, bow and
 //! experience attributes affixes carry, filtered by what a piece of gear is.
+//! `affix_effects` holds the effect affixes (poison, execution, cleaving,
+//! spectral arrows, telepathy...) and the Apothic Invader boss.
+mod affix_effects;
 mod attributes;
 
 use horizon_client::mod_api::{
-    ArrowLooseEvent, BreakSpeedEvent, ExperienceOrbPickupEvent, Flow, Hooks, Host, ItemStack,
-    LivingEquipmentChangeEvent, LivingHealEvent, LivingIncomingDamageEvent,
-    LivingIncomingDamageV2Event, LootDropsEvent, ModifyDefaultComponentsEvent, NativeCommand,
-    OnEquipEvent, PerformCommandEvent, PlayerTickEvent, RegisterCommandsEvent, Tag, Text,
-    TooltipEvent, serde_json,
+    ArrowLooseEvent, BreakSpeedEvent, EntityJoinLevelEvent, ExperienceOrbPickupEvent, Flow, Hooks,
+    Host, ItemDamagedEvent, ItemStack, LivingEquipmentChangeEvent, LivingHealEvent,
+    LivingIncomingDamageEvent, LivingIncomingDamageV2Event, LootDropsEvent, MobSpawnedEvent,
+    ModifyDefaultComponentsEvent, NativeCommand, OnEquipEvent, PerformCommandEvent,
+    PlayerTickEvent, ProjectileLaunchEvent, RegisterCommandsEvent, Tag, Text, TooltipEvent,
+    serde_json,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -645,10 +649,10 @@ pub fn is_armor(item: &str) -> bool {
 /// counter mixed with what dropped (splitmix64). Two kills of one mob at one
 /// place in different ticks roll differently; the stream is this mod's own, not
 /// the level's.
-struct Rng(u64);
+pub(crate) struct Rng(u64);
 
 impl Rng {
-    fn new(seed: u64) -> Self {
+    pub(crate) fn new(seed: u64) -> Self {
         Self(seed)
     }
     fn next(&mut self) -> u64 {
@@ -659,15 +663,15 @@ impl Rng {
         z ^ (z >> 31)
     }
     /// A number in `0..n`, uniformly enough for a loot roll.
-    fn below(&mut self, n: u64) -> u64 {
+    pub(crate) fn below(&mut self, n: u64) -> u64 {
         if n == 0 { 0 } else { self.next() % n }
     }
     /// Whether a roll of `chance` in 100 comes up.
-    fn chance(&mut self, chance: u64) -> bool {
+    pub(crate) fn chance(&mut self, chance: u64) -> bool {
         self.below(100) < chance
     }
     /// One of `weights`' tiers, by weight.
-    fn tier(&mut self, weights: &[(Tier, u64)]) -> Tier {
+    pub(crate) fn tier(&mut self, weights: &[(Tier, u64)]) -> Tier {
         let total: u64 = weights.iter().map(|(_, w)| *w).sum();
         let mut roll = self.below(total.max(1));
         for (tier, weight) in weights {
@@ -685,7 +689,7 @@ impl Rng {
 const ORDINARY_TIERS: [(Tier, u64); 3] = [(Tier::Uncommon, 55), (Tier::Rare, 30), (Tier::Epic, 15)];
 
 /// What a boss's gear rolls.
-const BOSS_TIERS: [(Tier, u64); 4] = [
+pub(crate) const BOSS_TIERS: [(Tier, u64); 4] = [
     (Tier::Rare, 25),
     (Tier::Epic, 40),
     (Tier::Mythic, 25),
@@ -769,7 +773,7 @@ fn boss_gem() -> &'static str {
 }
 
 /// A stack of one item.
-fn one(item: &str) -> ItemStack {
+pub(crate) fn one(item: &str) -> ItemStack {
     ItemStack::new(item, 1)
 }
 
@@ -842,7 +846,7 @@ fn affix_tag(affix: &Affix, amount: f64) -> Tag {
 
 /// Rolls `tier`'s affixes onto `stack`: real `minecraft:attribute_modifiers`, a
 /// lore that says them, and the vanilla rarity that colours the name.
-pub fn apply_affixes(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) {
+pub(crate) fn apply_affixes(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) {
     let count = tier.affixes();
     if count == 0 {
         return;
@@ -886,6 +890,9 @@ pub fn apply_affixes(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) {
     data.set_other("minecraft:lore", Some(Tag::List(lore)));
     data.set_other("minecraft:rarity", Some(string(tier.vanilla_rarity())));
     attributes::attach(stack, &custom);
+    // An effect affix is extra, never a replacement: the attribute lines and
+    // their count stay as they were.
+    affix_effects::add_effect_affix(stack, tier, rng);
 }
 
 /// A seed for one drop: the counter, the position and the mob, so two kills
@@ -954,15 +961,18 @@ impl Hooks for Apotheosis {
         add_chest_gem_pool(event.id, event.table);
     }
 
-    fn loot_drops(&self, _host: &mut dyn Host, event: &mut LootDropsEvent<'_>) {
-        let Some((_, kind)) = event.context.entity else {
+    fn loot_drops(&self, host: &mut dyn Host, event: &mut LootDropsEvent<'_>) {
+        // Telepathy moves a tool's drops to the player, festive may double a
+        // kill's gear: both happen on their own, kill or use.
+        affix_effects::loot_drops(host, event);
+        let Some((id, kind)) = event.context.entity else {
             return;
         };
         // A player's use (shears, a brush) is not a kill.
         if event.context.used {
             return;
         }
-        let boss = BOSSES.contains(&kind);
+        let boss = BOSSES.contains(&kind) || affix_effects::is_boss(host, id);
         let killed_by_player = event.context.player.is_some();
         if !boss && !killed_by_player {
             return;
@@ -1029,7 +1039,24 @@ impl Hooks for Apotheosis {
         event: &mut LivingIncomingDamageV2Event<'_>,
     ) -> Flow {
         attributes::incoming_damage_v2(host, event);
+        affix_effects::on_hit(host, event);
         Flow::Continue
+    }
+
+    fn item_damaged(&self, host: &mut dyn Host, event: &mut ItemDamagedEvent<'_>) -> Flow {
+        affix_effects::item_damaged(host, event)
+    }
+
+    fn projectile_launch(&self, host: &mut dyn Host, event: &mut ProjectileLaunchEvent<'_>) {
+        affix_effects::projectile_launch(host, event);
+    }
+
+    fn entity_join_level(&self, _host: &mut dyn Host, event: &mut EntityJoinLevelEvent<'_>) -> Flow {
+        affix_effects::entity_join_level(event)
+    }
+
+    fn mob_spawned(&self, host: &mut dyn Host, event: &mut MobSpawnedEvent<'_>) {
+        affix_effects::mob_spawned(host, event);
     }
 
     fn living_heal(&self, event: &mut LivingHealEvent) -> Flow {
