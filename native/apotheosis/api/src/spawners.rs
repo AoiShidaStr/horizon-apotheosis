@@ -869,7 +869,8 @@ fn push(dimension: &str, pos: [i32; 3], job: Job) {
 }
 
 /// The data of the spawner that `dimension`/`pos` holds, as it was read for a
-/// break, if it is still waiting for its drop.
+/// break, if it is still waiting for its drop. Takes the entry out: a read
+/// answers one break, and no other.
 pub fn cached_drop(dimension: &str, pos: [i32; 3]) -> Option<Tag> {
     let mut cached = CACHED.lock().ok()?;
     let index = cached
@@ -885,6 +886,35 @@ fn forget(dimension: &str, pos: [i32; 3]) {
         return;
     };
     cached.retain(|entry| !(entry.dimension == dimension && entry.pos == pos));
+}
+
+/// What a break at `dimension`/`pos` takes from the read that waited there: the
+/// data itself for a silk-touch tool, and nothing at all for any other tool.
+///
+/// Either way the read ends with the break. A pickaxe that breaks a zombie
+/// spawner leaves nothing behind, so the pig spawner placed on that spot in the
+/// next minute starts from its own read instead of handing its silk-touch drop
+/// the zombie's mob and stats.
+pub fn taken_by_break(dimension: &str, pos: [i32; 3], silk: i32) -> Option<Tag> {
+    let tag = cached_drop(dimension, pos);
+    match silk {
+        1.. => tag,
+        _ => None,
+    }
+}
+
+/// A block put at `dimension`/`pos`: whatever a read waited for there belongs to
+/// a spawner that is not there any more, so it goes. A spawner item that carries
+/// data answers with it, for the merge that puts it back.
+pub fn placed_data(dimension: &str, pos: [i32; 3], stack: &ItemStack) -> Option<Tag> {
+    forget(dimension, pos);
+    if stack.item.as_ref() != SPAWNER {
+        return None;
+    }
+    stack
+        .data()
+        .and_then(|d| d.other(BLOCK_ENTITY_DATA))
+        .cloned()
 }
 
 /// What a probe found, or nothing when the spawner was gone or its chunk was
@@ -955,31 +985,25 @@ pub fn on_left_click(host: &mut dyn Host, pos: [i32; 3]) -> Flow {
     Flow::Continue
 }
 
-/// A spawner item placed: its data goes back into the block, for a player who
-/// may not set a spawner's data themselves.
+/// A block placed: any read that waited at that position ends here, since the
+/// block it was read from is gone. A spawner item then gets its data back, for a
+/// player who may not set a spawner's data themselves.
 pub fn on_place(host: &mut dyn Host, event: &PlaceBlockEvent<'_>) {
-    if event.stack.item.as_ref() != SPAWNER {
-        return;
-    }
-    let Some(data) = event.stack.data().and_then(|d| d.other(BLOCK_ENTITY_DATA)) else {
+    let Some(data) = placed_data(host.dimension(), event.pos, event.stack) else {
         return;
     };
-    push(host.dimension(), event.pos, Job::Restore(data.clone()));
+    push(host.dimension(), event.pos, Job::Restore(data));
 }
 
 /// A broken spawner that a silk-touch tool broke: it drops itself with its mob
-/// and its stats.
+/// and its stats. A break with any other tool takes nothing and still ends the
+/// read, so the block that comes next at that position cannot inherit it.
 pub fn on_loot_drops(event: &mut LootDropsEvent<'_>) {
     let Some((pos, _)) = event.context.block else {
         return;
     };
-    let Some(tool) = event.context.tool else {
-        return;
-    };
-    if silk_touch(tool) < 1 {
-        return;
-    }
-    let Some(tag) = cached_drop(event.context.dimension, pos) else {
+    let silk = event.context.tool.map(silk_touch).unwrap_or(0);
+    let Some(tag) = taken_by_break(event.context.dimension, pos, silk) else {
         return;
     };
     event.drops.push(spawner_item(&tag));
@@ -1504,6 +1528,52 @@ mod tests {
         assert!(cached_drop(dimension, pos).is_some());
         remember(dimension, pos, tag([("a", Tag::Int(1))]), 0);
         forget_old(CACHE_TICKS);
+        assert!(cached_drop(dimension, pos).is_none());
+    }
+
+    fn mob_spawner(mob: &str) -> Tag {
+        tag([(
+            "SpawnData",
+            tag([("entity", tag([("id", text(mob))]))]),
+        )])
+    }
+
+    #[test]
+    fn a_break_without_silk_touch_ends_the_read_at_that_spot() {
+        let (dimension, pos) = ("minecraft:overworld", [41, 42, 43]);
+        remember(dimension, pos, mob_spawner("minecraft:zombie"), 5);
+        // A plain pickaxe breaks the zombie spawner: nothing is taken from it,
+        // and its read must not wait there for whatever is put in its place.
+        assert!(taken_by_break(dimension, pos, 0).is_none());
+        assert!(cached_drop(dimension, pos).is_none());
+        // A pig spawner bought and placed on that spot is read on its own
+        // click, and its silk break takes the pig's data, not the zombie's.
+        remember(dimension, pos, mob_spawner("minecraft:pig"), 9);
+        let taken = taken_by_break(dimension, pos, 1).expect("the pig's read");
+        assert_eq!(
+            spawn_entity(&taken).as_deref(),
+            Some("minecraft:pig"),
+            "{taken:?}"
+        );
+    }
+
+    #[test]
+    fn a_block_placed_where_a_spawner_was_read_ends_the_read() {
+        let (dimension, pos) = ("minecraft:overworld", [51, 52, 53]);
+        remember(dimension, pos, mob_spawner("minecraft:zombie"), 5);
+        // Anything put there ends the read: the spawner that was read is gone,
+        // so its data cannot come back through a later silk-touch break.
+        assert!(placed_data(dimension, pos, &ItemStack::new("minecraft:stone", 1)).is_none());
+        assert!(cached_drop(dimension, pos).is_none());
+        // A spawner item placed there still hands its own data back for the
+        // merge, and the read that waited there is gone all the same.
+        remember(dimension, pos, mob_spawner("minecraft:zombie"), 6);
+        let carried = spawner_item(&mob_spawner("minecraft:cow"));
+        let data = placed_data(dimension, pos, &carried).expect("the item's own data");
+        assert_eq!(
+            data.get("id").and_then(tag_string).as_deref(),
+            Some(BLOCK_ENTITY_ID)
+        );
         assert!(cached_drop(dimension, pos).is_none());
     }
 
