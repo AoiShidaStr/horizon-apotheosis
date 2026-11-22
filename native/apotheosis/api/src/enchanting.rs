@@ -62,8 +62,12 @@ const OFFSETS: &[(i32, i32)] = &[
     (0, -2), (0, 2), (1, -2), (1, 2), (2, -1), (2, 0), (2, 1),
 ];
 
+/// The stats of the shelf block id `name` (`apotheosis:deepshelf`,
+/// `minecraft:amethyst_cluster`): `Host::block` gives a qualified id, the
+/// table above keeps the bare ones.
 fn shelf_stats(name: &str) -> Option<ShelfStats> {
-    SHELVES.iter().find(|(id, _)| *id == name).map(|(_, stats)| *stats)
+    let id = name.rsplit(':').next().unwrap_or(name);
+    SHELVES.iter().find(|(shelf, _)| *shelf == id).map(|(_, stats)| *stats)
 }
 
 fn aggregate(stats: impl IntoIterator<Item = ShelfStats>) -> ShelfStats {
@@ -845,6 +849,15 @@ pub(super) fn on_block_entity_tick(host: &mut dyn Host, event: &mut BlockEntityT
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn qualified_block_ids_find_their_shelf() {
+        // `host.block` answers `namespace:path`, the table lists bare paths.
+        assert_eq!(shelf_stats("apotheosis:deepshelf").unwrap().eterna, 5.0);
+        assert_eq!(shelf_stats("minecraft:amethyst_cluster").unwrap().eterna, 1.0);
+        assert_eq!(shelf_stats("apotheosis:stoneshelf").unwrap().eterna, -3.0);
+        assert_eq!(shelf_stats("minecraft:air"), None);
+    }
 
     #[test]
     fn upstream_shelf_stats_keep_their_caps_and_modifiers() {

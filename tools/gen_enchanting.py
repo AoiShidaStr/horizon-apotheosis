@@ -330,7 +330,22 @@ def main():
     # The power-provider tag makes the shelves count at the player's own table;
     # the native hook adds Apotheosis Eterna for LAN guests, the only path
     # Horizon API 291 dispatches today. Bookshelves are axe-mined in vanilla.
-    merge_values(os.path.join(CONTENT, "data", "minecraft", "tags", "block", "enchantment_power_provider.json"), shelf_items)
+    # A shelf whose Eterna is negative must not count as a vanilla power
+    # provider: the game would treat it as a bookshelf and raise the offers,
+    # the opposite of what the native hook does with it.
+    negative = {f"{ID}:{shelf}" for shelf, eterna, *_ in SHELVES if eterna < 0}
+    power_path = os.path.join(CONTENT, "data", "minecraft", "tags", "block", "enchantment_power_provider.json")
+    if os.path.exists(power_path):
+        with open(power_path, encoding="utf-8") as f:
+            power = json.load(f)
+    else:
+        power = {"values": []}
+    values = [entry for entry in power.setdefault("values", []) if entry not in negative]
+    for item in shelf_items:
+        if item not in negative and item not in values:
+            values.append(item)
+    power["values"] = values
+    write_json(power_path, power)
     merge_values(os.path.join(CONTENT, "data", "minecraft", "tags", "block", "mineable", "axe.json"), axes)
     tab_path = os.path.join(CONTENT, "data", ID, "horizon", "creative_tab", ID + ".json")
     if os.path.exists(tab_path):

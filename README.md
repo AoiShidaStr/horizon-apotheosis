@@ -355,11 +355,13 @@ and **gems whose high tiers drop only from bosses**.
   Each offer keeps at least its vanilla eligibility (1, 2, 3), costs that many
   experience levels, and is never lowered below what vanilla had already
   computed for the table.
-- **The shelves also feed the player's own table.** Each one is in
-  `minecraft:enchantment_power_provider`, so in single player, where Horizon
-  does not dispatch API 291, they count like bookshelves for vanilla power and
-  show the table's particles. Vanilla still caps that path at 15 providers
-  (level 30).
+- **The shelves also feed the player's own table.** Each shelf with positive
+  Eterna is in `minecraft:enchantment_power_provider`, so in single player,
+  where Horizon does not dispatch API 291, it counts like a bookshelf for
+  vanilla power and shows the table's particles. The negative-Eterna shelves
+  (bee, melon and stone) are deliberately left out: the game would otherwise
+  treat them as bookshelves and raise the offers they are meant to lower.
+  Vanilla still caps that path at 15 providers (level 30).
 - **Survival recipes** (vanilla `minecraft:crafting_shaped`): the basic
   bookshelf is three planks, three books, three planks; every other shelf is
   one `minecraft:bookshelf` surrounded by four of its theme catalyst — honeycomb,
