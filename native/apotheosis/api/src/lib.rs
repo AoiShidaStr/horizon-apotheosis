@@ -28,11 +28,13 @@ mod enchanting;
 
 use horizon_client::mod_api::{
     ArrowLooseEvent, BreakSpeedEvent, ExperienceOrbPickupEvent, Flow, Hooks, Host, ItemStack,
-    LivingEquipmentChangeEvent, LivingHealEvent, LivingIncomingDamageEvent,
+    LeftClickBlockEvent, LivingEquipmentChangeEvent, LivingHealEvent, LivingIncomingDamageEvent,
     LivingIncomingDamageV2Event, LootDropsEvent, ModifyDefaultComponentsEvent, NativeCommand,
-    OnEquipEvent, PerformCommandEvent, PlayerTickEvent, RegisterCommandsEvent, Tag, Text,
-    TooltipEvent, serde_json,
+    OnEquipEvent, PerformCommandEvent, PlaceBlockEvent, PlayerTickEvent, RegisterCommandsEvent,
+    RightClickBlockEvent, Tag, Text, TickEvent, TooltipEvent, UseItemOnEvent, serde_json,
 };
+
+mod spawners;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 mod sockets;
@@ -978,6 +980,7 @@ impl Hooks for Apotheosis {
     }
 
     fn loot_drops(&self, _host: &mut dyn Host, event: &mut LootDropsEvent<'_>) {
+        spawners::on_loot_drops(event);
         let Some((_, kind)) = event.context.entity else {
             return;
         };
@@ -1101,6 +1104,26 @@ impl Hooks for Apotheosis {
 
     fn player_tick(&self, host: &mut dyn Host, event: &mut PlayerTickEvent) {
         attributes::tick(host, event);
+    }
+
+    fn tick(&self, host: &mut dyn Host, _event: &mut TickEvent) {
+        spawners::on_tick(host);
+    }
+
+    fn right_click_block(&self, host: &mut dyn Host, event: &mut RightClickBlockEvent) -> Flow {
+        spawners::on_right_click(host, event.pos)
+    }
+
+    fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
+        spawners::on_use_item_on(host, event)
+    }
+
+    fn left_click_block(&self, host: &mut dyn Host, event: &mut LeftClickBlockEvent) -> Flow {
+        spawners::on_left_click(host, event.pos)
+    }
+
+    fn place_block(&self, host: &mut dyn Host, event: &mut PlaceBlockEvent<'_>) {
+        spawners::on_place(host, event);
     }
 
     fn register_commands(&self, _host: &mut dyn Host, event: &mut RegisterCommandsEvent<'_>) {

@@ -145,5 +145,14 @@
   "apotheosis.reforge.not_affixed": "Hold an affixed piece to reforge it.",
   "apotheosis.salvage.not_affixed": "Hold an affixed piece to salvage it.",
   "apotheosis.salvage.done": "Salvaged into %s.",
-  "apotheosis.salvage.no_room": "Some of it did not fit in your inventory."
+  "apotheosis.salvage.no_room": "Some of it did not fit in your inventory.",
+  "apotheosis.spawner.stats": "Spawner: %s · delay %s–%s ticks · %s per wave · player range %s · nearby max %s · spawn range %s",
+  "apotheosis.spawner.flag.ignore_players": "ignores players",
+  "apotheosis.spawner.flag.ignore_light": "ignores light",
+  "apotheosis.spawner.flag.ignore_conditions": "ignores conditions",
+  "apotheosis.spawner.flag.no_ai": "mobs have no AI",
+  "apotheosis.spawner.flag.silent": "silent",
+  "apotheosis.spawner.flag.redstone_control": "redstone controlled",
+  "apotheosis.spawner.flag.youthful": "young mobs",
+  "apotheosis.spawner.flag.burning": "burning mobs"
 }

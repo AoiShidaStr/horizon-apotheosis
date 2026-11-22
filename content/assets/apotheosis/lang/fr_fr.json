@@ -145,5 +145,14 @@
   "apotheosis.reforge.not_affixed": "Tenez un objet affixé pour le reforger.",
   "apotheosis.salvage.not_affixed": "Tenez un objet affixé pour le recycler.",
   "apotheosis.salvage.done": "Recyclé en %s.",
-  "apotheosis.salvage.no_room": "Une partie n'a pas tenu dans l'inventaire."
+  "apotheosis.salvage.no_room": "Une partie n'a pas tenu dans l'inventaire.",
+  "apotheosis.spawner.stats": "Spawner : %s · délai %s–%s ticks · %s par vague · portée joueur %s · proches max %s · portée d'apparition %s",
+  "apotheosis.spawner.flag.ignore_players": "ignore les joueurs",
+  "apotheosis.spawner.flag.ignore_light": "ignore la lumière",
+  "apotheosis.spawner.flag.ignore_conditions": "ignore les conditions",
+  "apotheosis.spawner.flag.no_ai": "mobs sans IA",
+  "apotheosis.spawner.flag.silent": "silencieux",
+  "apotheosis.spawner.flag.redstone_control": "commandé par redstone",
+  "apotheosis.spawner.flag.youthful": "mobs juvéniles",
+  "apotheosis.spawner.flag.burning": "mobs en feu"
 }

@@ -202,10 +202,10 @@ and **gems whose high tiers drop only from bosses**.
 - **Affixes from chest loot tables** — chest tables can supply gems, but their
   gear remains un-affixed; `loot_table_load` cannot roll the item components
   the later loot generation creates.
-- **The enchanting library**, its tomes (Scrap, Extraction) and **configurable
-  spawners** (silk-touched spawners with a chosen mob) are not implemented.
-  Enchanting stats themselves are ported (see *Apothic Enchanting* below), with
-  the limits listed there.
+- **The enchanting library** and its tomes (Scrap, Extraction) are not
+  implemented. Enchanting stats themselves are ported (see *Apothic Enchanting*
+  below), with the limits listed there; configurable spawners are ported (see
+  *Apothic Spawners*).
 - **Natural ore generation** for gems: gems come from mobs, bosses, recipes
   and reforge only.
 - Affix names, lore and command answers are translated, but an affixed item
@@ -306,6 +306,55 @@ and **gems whose high tiers drop only from bosses**.
 - **The enchanting library, Scrap/Extraction tomes, infusion and rectifiers.**
   No library block, tome or infusion altar is added; the recipes stop at
   vanilla crafting.
+
+## Apothic Spawners
+
+### Done
+
+- **Silk-touched spawners keep their mob and their settings**
+  (`left_click_block` API 30, `loot_drops` API 75, `place_block` API 14):
+  starting to dig a spawner reads its block entity; breaking it with a
+  silk-touch tool drops a `minecraft:spawner` whose
+  `minecraft:block_entity_data` is that data; placing it writes the data back
+  into the block, so both the mob and the stats survive, even for a player
+  who may not set a spawner's data themselves.
+- **The sixteen modifiers of Apothic Spawners** (`use_item_on` API 13), with
+  their real items and values: sugar and a clock for the delays, a fermented
+  spider eye for the wave size, a ghast tear for the mobs nearby, prismarine
+  crystals for the player range, a piston for the spawn range, pointed
+  dripstone for the initial health, an echo shard for the echo (0 to 3), and
+  the flags: nether star (ignores players), soul lantern (ignores light),
+  conduit (ignores conditions), chorus fruit (no AI), wool (silent),
+  comparator (redstone controlled), turtle egg (young mobs) and campfire
+  (burning mobs). Every step is clamped to Apothic Spawners' bounds, and the
+  item is not used up by the click.
+- **The inverter** (`minecraft:quartz`) takes the same steps back, and turns
+  nothing off: a flag is only ever turned on, as in Apothic Spawners.
+- **The stats are shown** (`action_bar` API 21) as one line above the hotbar
+  on every click on a spawner: the mob, the two delays, the mobs per wave, the
+  player range, the mobs allowed nearby, the spawn range, then the flags that
+  are on. Both languages ship the line (`tools/gen_spawners.py`).
+
+### Missing
+
+- **No block entity NBT hook at the pinned API.** `block_entity_tag`,
+  `set_block_entity`, `block_entity_nbt` and `run_command_captured` are all
+  still pending fragments at hooks 415, so this slice reads a spawner by
+  copying its data into a one-tick probe item entity with `/data modify` and
+  reading that item back (`item_entities`, API 42), and writes it with
+  `/data merge block` (`run_command`, API 21). The read therefore happens on
+  the game tick after the click, never on a client, and it needs the player
+  to be in a server world; a spawner's tooltip and a creative-side preview
+  are not possible without the hook.
+- **The off-hand inverter is best effort.** Reading another hand needs
+  `player_equipment`, which is pending at 415, so the quartz has to be the
+  item actually used on the spawner; a quartz held only in the off hand is
+  not seen.
+- **No spawner screen, no mob capture item, no "spawner module"**: Apothic
+  Spawners' GUI and its extra mob sources (a captured mob's equipment and
+  loot) are not ported. The stats are shown as an action bar line, not a
+  screen.
+- **The Apotheosis bosses** are another chantier's, not this one's.
 
 ## Install
 
