@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " N ",
+    "NTN",
+    " N "
+  ],
+  "key": {
+    "N": "minecraft:netherite_scrap",
+    "T": "apotheosis:scrap_tome"
+  },
+  "result": {
+    "id": "apotheosis:extraction_tome"
+  }
+}

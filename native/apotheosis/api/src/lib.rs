@@ -4,7 +4,7 @@
 //! above vanilla's, affixes on gear, higher tiers only from bosses). No
 //! Apotheosis code or asset is used: see `../../README.md` and `NOTICE.md`.
 //!
-//! Six hooks, all on the real game's trait API:
+//! Seven hooks, all on the real game's trait API:
 //! - `modify_default_components`: each gem carries a real
 //!   `minecraft:attribute_modifiers` entry, so a gem in the off hand grants its
 //!   bonus (the game applies equipment modifiers itself).
@@ -20,6 +20,9 @@
 //!   onto plain gear, for experience levels.
 //! - `prepare_item_enchant`: Apothic Eterna from nearby shelf blocks raises the
 //!   three enchanting offers; shelves are read through Horizon's server Host.
+//! - `use_item`: scrapping, superior scrapping and extraction tomes move
+//!   enchantments between the two hands, and the Prismatic Cobweb removes
+//!   curses; Horizon API 415 has no anvil hook, so a right click uses them.
 //!
 //! `attributes` holds the Apothic Attributes half: the combat, mining, bow and
 //! experience attributes affixes carry, filtered by what a piece of gear is.
@@ -968,7 +971,12 @@ impl Hooks for Apotheosis {
     }
 
     fn use_item(&self, host: &mut dyn Host, event: &mut horizon_client::mod_api::UseItemEvent<'_>) -> Flow {
-        sockets::use_item(host, event)
+        // Two right-click gestures share this hook: socketing and sigils (gem or
+        // sigil in the main hand) first, then the enchanting tomes and cobweb.
+        match sockets::use_item(host, event) {
+            Flow::Continue => enchanting::on_use_item(host, event),
+            Flow::Cancel => Flow::Cancel,
+        }
     }
 
     fn inventory_tick(&self, host: &mut dyn Host, event: &mut horizon_client::mod_api::InventoryTickEvent) {

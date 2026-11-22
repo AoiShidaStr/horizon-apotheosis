@@ -154,5 +154,17 @@
   "apotheosis.spawner.flag.silent": "silent",
   "apotheosis.spawner.flag.redstone_control": "redstone controlled",
   "apotheosis.spawner.flag.youthful": "young mobs",
-  "apotheosis.spawner.flag.burning": "burning mobs"
+  "apotheosis.spawner.flag.burning": "burning mobs",
+  "item.apotheosis.scrap_tome": "Tome of Scrapping",
+  "item.apotheosis.improved_scrap_tome": "Tome of Superior Scrapping",
+  "item.apotheosis.extraction_tome": "Tome of Extraction",
+  "item.apotheosis.prismatic_web": "Prismatic Cobweb",
+  "apotheosis.tome.no_target": "Offhand must hold an enchanted item or a cursed item.",
+  "apotheosis.tome.not_enchanted": "That item has no enchantments.",
+  "apotheosis.tome.no_curse": "That item carries no curse.",
+  "apotheosis.tome.levels": "You need %s experience levels.",
+  "apotheosis.tome.no_room": "No room for the book; nothing was changed.",
+  "apotheosis.tome.scrapped": "Scrapped %s enchantments.",
+  "apotheosis.tome.extracted": "Extracted %s enchantments.",
+  "apotheosis.tome.cleansed": "Curses removed."
 }

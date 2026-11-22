@@ -1,4 +1,7 @@
-use horizon_client::mod_api::{Host, PrepareItemEnchantEvent};
+use horizon_client::mod_api::{
+    EquipmentSlot, Flow, Hand, Host, ItemStack, PrepareItemEnchantEvent, Text, UseItemEvent,
+};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct ShelfStats {
@@ -137,6 +140,267 @@ pub(super) fn on_prepare_item_enchant(host: &dyn Host, event: &mut PrepareItemEn
     apply_costs(event.costs, stats.eterna);
 }
 
+// ---------------------------------------------------------------------------
+// Tomes and the Prismatic Cobweb
+// ---------------------------------------------------------------------------
+// Horizon API 415 has no anvil hook, so Apothic Enchanting's tomes are used on
+// a right click instead: the tome in one hand, the enchanted item in the other.
+
+const SCRAP_TOME: &str = "apotheosis:scrap_tome";
+const IMPROVED_TOME: &str = "apotheosis:improved_scrap_tome";
+const EXTRACTION_TOME: &str = "apotheosis:extraction_tome";
+const PRISMATIC_WEB: &str = "apotheosis:prismatic_web";
+
+const SCRAP_COST: i32 = 6;
+const IMPROVED_COST: i32 = 10;
+const EXTRACTION_COST: i32 = 16;
+const WEB_COST: i32 = 30;
+
+const CURSES: &[&str] = &["minecraft:binding_curse", "minecraft:vanishing_curse"];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Tome {
+    Scrap,
+    Improved,
+    Extraction,
+    Web,
+}
+
+fn tome_kind(item: &str) -> Option<Tome> {
+    match item {
+        SCRAP_TOME => Some(Tome::Scrap),
+        IMPROVED_TOME => Some(Tome::Improved),
+        EXTRACTION_TOME => Some(Tome::Extraction),
+        PRISMATIC_WEB => Some(Tome::Web),
+        _ => None,
+    }
+}
+
+/// Keeps `ceil(n / 2)` enchantments. A seeded xorshift draws which ones, so
+/// the same player sees the same result for the same item.
+fn scrap_selection(levels: &[(Arc<str>, u32)], seed: u64) -> Vec<(Arc<str>, u32)> {
+    let keep = levels.len().div_ceil(2);
+    let mut pool = levels.to_vec();
+    let mut state = seed | 1;
+    for index in 0..keep {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        let pick = index + (state % (pool.len() - index) as u64) as usize;
+        pool.swap(index, pick);
+    }
+    pool.truncate(keep);
+    pool
+}
+
+fn strip_curses(levels: &[(Arc<str>, u32)]) -> (Vec<(Arc<str>, u32)>, usize) {
+    let kept: Vec<_> = levels
+        .iter()
+        .filter(|(id, _)| !CURSES.contains(&&**id))
+        .cloned()
+        .collect();
+    let removed = levels.len() - kept.len();
+    (kept, removed)
+}
+
+fn tome_cost(tome: Tome, enchantments: usize) -> i32 {
+    match tome {
+        Tome::Scrap => enchantments as i32 * SCRAP_COST,
+        Tome::Improved => enchantments as i32 * IMPROVED_COST,
+        Tome::Extraction => enchantments as i32 * EXTRACTION_COST,
+        Tome::Web => WEB_COST,
+    }
+}
+
+fn output_stack(tome: Tome, target: &ItemStack, kept: Vec<(Arc<str>, u32)>) -> ItemStack {
+    if tome == Tome::Web {
+        let mut stack = target.clone();
+        stack.set_crafting_enchantments(kept);
+        stack
+    } else {
+        let mut book = ItemStack::new("minecraft:enchanted_book", 1);
+        book.set_crafting_enchantments(kept);
+        book
+    }
+}
+
+fn dice(uuid: u128) -> u64 {
+    (uuid as u64) ^ ((uuid >> 64) as u64)
+}
+
+pub(super) fn on_use_item(host: &mut dyn Host, event: &mut UseItemEvent<'_>) -> Flow {
+    let Some(tome) = tome_kind(&event.stack.item) else {
+        return Flow::Continue;
+    };
+    let Some(player) = host.acting_player() else {
+        return Flow::Continue;
+    };
+    if player.entity_id <= 0 {
+        return Flow::Continue;
+    }
+    let Some(entity) = host.entity(player.entity_id as u32) else {
+        return Flow::Continue;
+    };
+    let Some(living) = host.living(entity) else {
+        return Flow::Continue;
+    };
+
+    // The used stack is a tome; the other hand holds the item it acts on.
+    let main = living.hand_item(host, Hand::Main);
+    let off = living.hand_item(host, Hand::Off);
+    let (tome_slot, target_slot, target) = if main
+        .as_ref()
+        .is_some_and(|stack| stack.item == event.stack.item)
+    {
+        (EquipmentSlot::MainHand, EquipmentSlot::OffHand, off)
+    } else if off
+        .as_ref()
+        .is_some_and(|stack| stack.item == event.stack.item)
+    {
+        (EquipmentSlot::OffHand, EquipmentSlot::MainHand, main)
+    } else {
+        return Flow::Continue;
+    };
+
+    let Some(target) = target else {
+        host.tell(
+            player.uuid,
+            Text::translate_with_fallback(
+                "apotheosis.tome.no_target",
+                "Offhand must hold an enchanted item or a cursed item.",
+                &[],
+            ),
+        );
+        return Flow::Cancel;
+    };
+    if tome_kind(&target.item).is_some() {
+        host.tell(
+            player.uuid,
+            Text::translate_with_fallback(
+                "apotheosis.tome.no_target",
+                "Offhand must hold an enchanted item or a cursed item.",
+                &[],
+            ),
+        );
+        return Flow::Cancel;
+    }
+
+    let (kept, removed) = if tome == Tome::Web {
+        strip_curses(target.crafting_enchantments())
+    } else {
+        (target.crafting_enchantments().to_vec(), 0)
+    };
+    if tome == Tome::Web && removed == 0 {
+        host.tell(
+            player.uuid,
+            Text::translate_with_fallback(
+                "apotheosis.tome.no_curse",
+                "That item carries no curse.",
+                &[],
+            ),
+        );
+        return Flow::Cancel;
+    }
+    if tome != Tome::Web && kept.is_empty() {
+        host.tell(
+            player.uuid,
+            Text::translate_with_fallback(
+                "apotheosis.tome.not_enchanted",
+                "That item has no enchantments.",
+                &[],
+            ),
+        );
+        return Flow::Cancel;
+    }
+
+    let kept = if tome == Tome::Scrap {
+        scrap_selection(&kept, dice(player.uuid))
+    } else {
+        kept
+    };
+    let cost = tome_cost(tome, kept.len());
+    if player.game_mode != 1 && player.xp_level < cost {
+        host.tell(
+            player.uuid,
+            Text::translate_with_fallback(
+                "apotheosis.tome.levels",
+                "You need %s experience levels.",
+                &[Text::literal(cost.to_string())],
+            ),
+        );
+        return Flow::Cancel;
+    }
+
+    let replacement = output_stack(tome, &target, kept.clone());
+    let no_room = Text::translate_with_fallback(
+        "apotheosis.tome.no_room",
+        "No room for the extracted book; nothing was changed.",
+        &[],
+    );
+    if tome == Tome::Extraction {
+        // The item stays in the hand, stripped, while the book goes to the
+        // inventory. Restore it if there is no room for the book.
+        let mut stripped = target.clone();
+        stripped.set_crafting_enchantments(Vec::new());
+        if !living.set_equipment(host, target_slot, Some(stripped)) {
+            return Flow::Continue;
+        }
+        if host.give_stack(player.uuid, replacement).is_some() {
+            let _ = living.set_equipment(host, target_slot, Some(target));
+            host.tell(player.uuid, no_room);
+            return Flow::Cancel;
+        }
+    } else if tome == Tome::Web {
+        if !living.set_equipment(host, target_slot, Some(replacement)) {
+            return Flow::Continue;
+        }
+    } else {
+        // Scrapping consumes the item; take it before handing out the book so
+        // a full inventory leaves it in the hand instead of losing it.
+        if !living.set_equipment(host, target_slot, None) {
+            return Flow::Continue;
+        }
+        if host.give_stack(player.uuid, replacement).is_some() {
+            let _ = living.set_equipment(host, target_slot, Some(target));
+            host.tell(player.uuid, no_room);
+            return Flow::Cancel;
+        }
+    }
+
+    let left = event.stack.count.saturating_sub(1);
+    let tome_left = if left == 0 {
+        None
+    } else {
+        let mut stack = event.stack.clone();
+        stack.count = left;
+        Some(stack)
+    };
+    let _ = living.set_equipment(host, tome_slot, tome_left);
+
+    if player.game_mode != 1 {
+        let _ = host.give_levels(player.uuid, -cost);
+    }
+    let message = match tome {
+        Tome::Scrap | Tome::Improved => (
+            "apotheosis.tome.scrapped",
+            "Scrapped %s enchantments.",
+        ),
+        Tome::Extraction => ("apotheosis.tome.extracted", "Extracted %s enchantments."),
+        Tome::Web => ("apotheosis.tome.cleansed", "Curses removed."),
+    };
+    let count = Text::literal(kept.len().to_string());
+    let args: &[Text] = if tome == Tome::Web {
+        &[]
+    } else {
+        std::slice::from_ref(&count)
+    };
+    host.tell(
+        player.uuid,
+        Text::translate_with_fallback(message.0, message.1, args),
+    );
+    Flow::Cancel
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,5 +444,69 @@ mod tests {
         let mut costs = [0, 0, 0];
         apply_costs(&mut costs, 0.0);
         assert_eq!(costs, [1, 2, 3]);
+    }
+
+    fn levels(ids: &[(&str, u32)]) -> Vec<(Arc<str>, u32)> {
+        ids.iter().map(|(id, level)| (Arc::from(*id), *level)).collect()
+    }
+
+    #[test]
+    fn every_tome_and_the_web_are_recognised() {
+        assert_eq!(tome_kind(SCRAP_TOME), Some(Tome::Scrap));
+        assert_eq!(tome_kind(IMPROVED_TOME), Some(Tome::Improved));
+        assert_eq!(tome_kind(EXTRACTION_TOME), Some(Tome::Extraction));
+        assert_eq!(tome_kind(PRISMATIC_WEB), Some(Tome::Web));
+        assert_eq!(tome_kind("minecraft:book"), None);
+    }
+
+    #[test]
+    fn scrapping_keeps_half_rounded_up_and_is_stable() {
+        let all = levels(&[("minecraft:sharpness", 3), ("minecraft:unbreaking", 2),
+                           ("minecraft:mending", 1), ("minecraft:looting", 2),
+                           ("minecraft:fire_aspect", 1)]);
+        let kept = scrap_selection(&all, 42);
+        assert_eq!(kept.len(), 3);
+        for (id, _) in &kept {
+            assert!(all.iter().any(|(other, _)| other == id));
+        }
+        assert_eq!(scrap_selection(&all, 42), kept);
+        assert_eq!(scrap_selection(&all[..2], 7).len(), 1);
+        assert_eq!(scrap_selection(&all[..1], 7).len(), 1);
+    }
+
+    #[test]
+    fn prismatic_web_removes_only_curses() {
+        let all = levels(&[("minecraft:sharpness", 2),
+                           ("minecraft:binding_curse", 1),
+                           ("minecraft:vanishing_curse", 1)]);
+        let (kept, removed) = strip_curses(&all);
+        assert_eq!(removed, 2);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(&*kept[0].0, "minecraft:sharpness");
+        assert_eq!(strip_curses(&levels(&[("minecraft:sharpness", 1)])).1, 0);
+    }
+
+    #[test]
+    fn tome_costs_scale_with_the_enchantments_involved() {
+        assert_eq!(tome_cost(Tome::Scrap, 3), 18);
+        assert_eq!(tome_cost(Tome::Improved, 3), 30);
+        assert_eq!(tome_cost(Tome::Extraction, 3), 48);
+        assert_eq!(tome_cost(Tome::Web, 2), 30);
+    }
+
+    #[test]
+    fn tomes_move_enchantments_between_the_item_and_a_book() {
+        let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
+        sword.set_crafting_enchantments(levels(&[("minecraft:sharpness", 2)]));
+        let book = output_stack(Tome::Improved, &sword, sword.crafting_enchantments().to_vec());
+        assert_eq!(&*book.item, "minecraft:enchanted_book");
+        assert_eq!(book.crafting_enchantments().len(), 1);
+
+        let extracted = output_stack(Tome::Extraction, &sword, sword.crafting_enchantments().to_vec());
+        assert_eq!(&*extracted.item, "minecraft:enchanted_book");
+
+        let cleaned = output_stack(Tome::Web, &sword, levels(&[]));
+        assert_eq!(&*cleaned.item, "minecraft:diamond_sword");
+        assert!(cleaned.crafting_enchantments().is_empty());
     }
 }
