@@ -20,11 +20,11 @@
 //!   onto plain gear, for experience levels.
 //! - `prepare_item_enchant`: Apothic Eterna from nearby shelf blocks raises the
 //!   three enchanting offers; shelves are read through Horizon's server Host.
-mod enchanting;
 //!
 //! `attributes` holds the Apothic Attributes half: the combat, mining, bow and
 //! experience attributes affixes carry, filtered by what a piece of gear is.
 mod attributes;
+mod enchanting;
 
 use horizon_client::mod_api::{
     ArrowLooseEvent, BreakSpeedEvent, ExperienceOrbPickupEvent, Flow, Hooks, Host, ItemStack,
