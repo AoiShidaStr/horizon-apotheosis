@@ -1090,7 +1090,9 @@ impl Hooks for Apotheosis {
         host: &mut dyn Host,
         event: &mut LivingIncomingDamageV2Event<'_>,
     ) -> Flow {
-        attributes::incoming_damage_v2(host, event);
+        if attributes::incoming_damage_v2(host, event) {
+            return Flow::Cancel;
+        }
         affix_effects::on_hit(host, event);
         Flow::Continue
     }
@@ -1100,6 +1102,7 @@ impl Hooks for Apotheosis {
     }
 
     fn projectile_launch(&self, host: &mut dyn Host, event: &mut ProjectileLaunchEvent<'_>) {
+        attributes::projectile_launch(event);
         affix_effects::projectile_launch(host, event);
     }
 

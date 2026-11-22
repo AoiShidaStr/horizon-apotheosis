@@ -16,7 +16,7 @@ use horizon_client::mod_api::{
     ArrowLooseEvent, BreakSpeedEvent, Compound, EquipmentSlot, ExperienceOrbPickupEvent, Host,
     ItemStack, LivingEquipmentChangeEvent, LivingHealEvent, LivingIncomingDamageEvent,
     LivingIncomingDamageV2Event, ModifyDefaultComponentsEvent, NativeEffect, NativeServerPlayer,
-    OnEquipEvent, PlayerTickEvent, Tag, Text, TooltipEvent, serde_json,
+    OnEquipEvent, PlayerTickEvent, ProjectileLaunchEvent, Tag, Text, TooltipEvent, serde_json,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -539,9 +539,22 @@ fn outgoing(set: &AttrSet, amount: f64, roll: f64, physical: bool) -> (f64, bool
     (out.max(0.0), crit)
 }
 
-/// The attacker's weapon bonuses, in the player-weapon hook (v2, which runs
-/// before v1 and carries the weapon and a host).
+/// The attacker's weapon bonuses and the victim's dodge roll, in the
+/// player-weapon hook (v2, which runs before v1 and carries the weapon and a
+/// host). True when the hit was dodged and must be canceled.
 pub fn incoming_damage_v2(host: &mut dyn Host, event: &mut LivingIncomingDamageV2Event<'_>) -> bool {
+    // The dodge roll happens here, once, and v1 reuses this answer: a hit
+    // that lands must not be read as dodged just because the victim wears
+    // some dodge chance.
+    let salt = (u64::from(event.entity as u32) << 32) ^ u64::from(event.amount.to_bits());
+    let dodged = dodge_roll(
+        armor_of(event.entity as u32).get(Attr::DodgeChance),
+        unit(salt),
+    );
+    record_dodge(event.entity, dodged);
+    if dodged {
+        return true;
+    }
     let Some(weapon) = event.weapon else {
         return false;
     };
@@ -549,46 +562,68 @@ pub fn incoming_damage_v2(host: &mut dyn Host, event: &mut LivingIncomingDamageV
     if set.is_empty() {
         return false;
     }
-    let salt = u64::from(event.entity as u32) << 32 | u64::from(event.amount.to_bits());
-    let (amount, _) = outgoing(&set, f64::from(event.amount), unit(salt), is_physical(event.damage_type));
+    let (amount, _) = outgoing(
+        &set,
+        f64::from(event.amount),
+        unit(salt ^ 0x5DEE_CE66_D1CF_1234),
+        is_physical(event.damage_type),
+    );
     event.amount = amount as f32;
 
-    // A dodged hit is canceled by v1 after this; it should not feed life
-    // steal. The victim's chance is in the armour cache.
-    let dodged = armor_of(event.entity as u32).get(Attr::DodgeChance) > 0.0;
-    if !dodged {
-        if let Some(player) = host.acting_player() {
-            let health = amount * set.get(Attr::LifeSteal);
-            if health > 0.0 {
-                heal_player(host, &player, health);
-            }
-            let absorption = amount * set.get(Attr::Overheal);
-            if absorption > 0.0 {
-                absorb(host, &player, absorption);
-            }
+    if let Some(player) = host.acting_player() {
+        let health = amount * set.get(Attr::LifeSteal);
+        if health > 0.0 {
+            heal_player(host, &player, health);
+        }
+        let absorption = amount * set.get(Attr::Overheal);
+        if absorption > 0.0 {
+            absorb(host, &player, absorption);
         }
     }
-    true
+    false
+}
+
+/// Whether a dodge roll of `roll` beats `chance`, once the armour cache's
+/// bonus and vanilla's floor are applied.
+fn dodge_roll(chance: f64, roll: f64) -> bool {
+    chance > 0.0 && roll < chance.clamp(0.0, 1.0)
+}
+
+/// The dodge decision v2 already made for a victim, so v1 does not roll a
+/// second time (and does not cancel a hit life steal has been paid on).
+static DODGES: OnceLock<Mutex<HashMap<i32, (bool, Instant)>>> = OnceLock::new();
+
+fn dodges() -> &'static Mutex<HashMap<i32, (bool, Instant)>> {
+    DODGES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn record_dodge(entity: i32, dodged: bool) {
+    dodges()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(entity, (dodged, Instant::now()));
+}
+
+fn take_dodge(entity: i32) -> Option<bool> {
+    let (dodged, at) = dodges()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .remove(&entity)?;
+    (at.elapsed().as_secs() < 2).then_some(dodged)
 }
 
 /// The victim-side part, in v1 (all damage routes, no host): a pending bow's
 /// damage bonus and the armour's dodge chance. True when the hit was dodged
 /// and must be canceled.
 pub fn incoming_damage(event: &mut LivingIncomingDamageEvent<'_>) -> bool {
-    if event.causing != 0 {
-        if let Some(multiplier) = take_arrow(event.causing) {
-            event.amount = (f64::from(event.amount) * multiplier) as f32;
-        }
+    if let Some(multiplier) = take_arrow(event.direct, event.damage_type) {
+        event.amount = (f64::from(event.amount) * multiplier) as f32;
     }
-    let set = armor_of(event.entity as u32);
-    let chance = set.get(Attr::DodgeChance);
-    if chance > 0.0 {
-        let salt = (u64::from(event.entity as u32) << 32) ^ u64::from(event.amount.to_bits());
-        if unit(salt) < chance.clamp(0.0, 1.0) {
-            return true;
-        }
+    if let Some(dodged) = take_dodge(event.entity) {
+        return dodged;
     }
-    false
+    let salt = (u64::from(event.entity as u32) << 32) ^ u64::from(event.amount.to_bits());
+    dodge_roll(armor_of(event.entity as u32).get(Attr::DodgeChance), unit(salt))
 }
 
 /// The default used by `living_heal`, scaled by the healing-received armour
@@ -635,48 +670,110 @@ fn absorb(host: &mut dyn Host, player: &NativeServerPlayer, amount: f64) {
 // Bows
 // ---------------------------------------------------------------------------
 
-/// A loosed arrow's damage multiplier, waiting for its hit. `arrow_loose`
-/// runs before the arrow exists, so the multiplier is carried to the damage
-/// hook by the shooter's entity id, for a few seconds.
-static ARROWS: OnceLock<Mutex<HashMap<i32, (f64, Instant)>>> = OnceLock::new();
-
-fn arrows() -> &'static Mutex<HashMap<i32, (f64, Instant)>> {
-    ARROWS.get_or_init(|| Mutex::new(HashMap::new()))
+/// A shot's damage multiplier, from `arrow_loose` until `projectile_launch`
+/// names the arrow it became, then on that arrow's own hit. A bow shot is
+/// never spent by a sword hit, and two quick shots keep one multiplier each.
+///
+/// The store is plain data so the binding is testable without a host.
+#[derive(Default)]
+struct ArrowDamageStore {
+    /// Multipliers waiting for a projectile, one queue per shooter.
+    pending: HashMap<u128, std::collections::VecDeque<(f64, Instant)>>,
+    /// Multipliers bound to a projectile id, with the shooter it belongs to.
+    by_projectile: HashMap<i32, (u128, f64, Instant)>,
 }
 
-fn remember_arrow(shooter: i32, multiplier: f64) {
-    if shooter == 0 || multiplier <= 1.0 {
-        return;
+impl ArrowDamageStore {
+    /// Every shot takes its place in the queue, a plain one as `1.0`: a shot
+    /// without the affix must not let its arrow spend an earlier shot's bonus.
+    fn remember_shot(&mut self, shooter: u128, multiplier: f64) {
+        if shooter == 0 || !multiplier.is_finite() || multiplier < 1.0 {
+            return;
+        }
+        let queue = self.pending.entry(shooter).or_default();
+        queue.retain(|(_, at)| at.elapsed().as_secs() < 5);
+        queue.push_back((multiplier, Instant::now()));
     }
+
+    /// Binds the oldest waiting shot of `shooter` to `projectile`, for the
+    /// arrow-like kinds a bow or crossbow looses.
+    fn projectile_launched(&mut self, shooter: Option<u128>, projectile: u32, kind: &str) -> bool {
+        if projectile == 0 || !kind.ends_with("arrow") {
+            return false;
+        }
+        let Some(shooter) = shooter.filter(|id| *id != 0) else {
+            return false;
+        };
+        let Some((multiplier, _)) = self
+            .pending
+            .get_mut(&shooter)
+            .and_then(|queue| queue.pop_front())
+        else {
+            return false;
+        };
+        if multiplier <= 1.0 {
+            return false;
+        }
+        self.by_projectile
+            .insert(projectile as i32, (shooter, multiplier, Instant::now()));
+        true
+    }
+
+    /// The multiplier for this hit, only when `direct` is that arrow and the
+    /// damage type is an arrow's. `_shooter` is the v1 `causing` entity; the
+    /// binding already carries the shooter, so a stray melee hit never takes
+    /// an arrow's bonus.
+    fn take_for_damage(&mut self, _shooter: i32, direct: i32, damage_type: &str) -> Option<f64> {
+        if direct == 0 || !damage_type.ends_with("arrow") {
+            return None;
+        }
+        let (_, multiplier, at) = self.by_projectile.remove(&direct)?;
+        (at.elapsed().as_secs() < 5).then_some(multiplier)
+    }
+}
+
+static ARROWS: OnceLock<Mutex<ArrowDamageStore>> = OnceLock::new();
+
+fn arrows() -> &'static Mutex<ArrowDamageStore> {
+    ARROWS.get_or_init(|| Mutex::new(ArrowDamageStore::default()))
+}
+
+fn remember_arrow(shooter: u128, multiplier: f64) {
     arrows()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .insert(shooter, (multiplier, Instant::now()));
+        .remember_shot(shooter, multiplier);
 }
 
-fn take_arrow(shooter: i32) -> Option<f64> {
-    let (multiplier, at) = arrows()
+/// `projectile_launch`: the shot `arrow_loose` remembered becomes this arrow.
+pub fn projectile_launch(event: &mut ProjectileLaunchEvent<'_>) {
+    arrows()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .remove(&shooter)?;
-    (at.elapsed().as_secs() < 5).then_some(multiplier)
+        .projectile_launched(event.player, event.entity, event.kind);
+}
+
+fn take_arrow(direct: i32, damage_type: &str) -> Option<f64> {
+    arrows()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take_for_damage(0, direct, damage_type)
 }
 
 /// Draw speed, arrow velocity and arrow damage: the first two become a higher
-/// charge, the last is carried to the hit.
+/// charge, the last waits for the arrow named by `projectile_launch`.
 pub fn arrow_loose(host: &mut dyn Host, event: &mut ArrowLooseEvent<'_>) -> bool {
     let set = AttrSet::of_stack(event.stack);
-    if set.is_empty() {
-        return false;
-    }
     let faster = set.draw_multiplier() * set.arrow_velocity_multiplier();
-    if (faster - 1.0).abs() > f64::EPSILON {
+    if !set.is_empty() && (faster - 1.0).abs() > f64::EPSILON {
         event.charge = (f64::from(event.charge) * faster).round().clamp(0.0, 100.0) as i32;
     }
+    // A plain bow still queues its shot, at 1.0, so the arrow it looses gets
+    // that slot rather than a bonus left by an earlier affixed shot.
     if let Some(player) = host.acting_player() {
-        remember_arrow(player.entity_id, set.arrow_damage_multiplier());
+        remember_arrow(player.uuid, set.arrow_damage_multiplier());
     }
-    true
+    !set.is_empty()
 }
 
 // ---------------------------------------------------------------------------
@@ -906,6 +1003,52 @@ mod tests {
         let (hit, _) = outgoing(&set, 10.0, 0.99, true);
         // 4 pierce points are 8%, plus 20% shred.
         assert!((hit - 12.8).abs() < 1e-9);
+    }
+
+    #[test]
+    fn dodge_uses_the_roll_not_just_a_nonzero_chance() {
+        assert!(dodge_roll(0.05, 0.049));
+        assert!(!dodge_roll(0.05, 0.05));
+        assert!(!dodge_roll(0.05, 0.95));
+        assert!(!dodge_roll(0.0, 0.0));
+    }
+
+    #[test]
+    fn arrow_damage_is_bound_to_its_projectile_and_arrow_damage_type() {
+        let mut arrows = ArrowDamageStore::default();
+        arrows.remember_shot(77, 1.6);
+        arrows.remember_shot(77, 1.25);
+        arrows.projectile_launched(Some(77), 101, "minecraft:arrow");
+        arrows.projectile_launched(Some(77), 102, "minecraft:arrow");
+
+        assert_eq!(arrows.take_for_damage(999, 101, "minecraft:player_attack"), None);
+        assert_eq!(arrows.take_for_damage(999, 101, "minecraft:arrow"), Some(1.6));
+        assert_eq!(arrows.take_for_damage(999, 102, "minecraft:arrow"), Some(1.25));
+        assert_eq!(arrows.take_for_damage(77, 77, "minecraft:player_attack"), None);
+
+        arrows.remember_shot(77, 1.4);
+        arrows.projectile_launched(Some(77), 103, "minecraft:arrow");
+        assert_eq!(arrows.take_for_damage(77, 103, "minecraft:mob_attack"), None);
+        assert_eq!(arrows.take_for_damage(77, 103, "minecraft:arrow"), Some(1.4));
+    }
+
+    #[test]
+    fn non_arrow_projectiles_do_not_consume_a_bow_shot_bonus() {
+        let mut arrows = ArrowDamageStore::default();
+        arrows.remember_shot(88, 1.6);
+        arrows.projectile_launched(Some(88), 201, "minecraft:trident");
+        assert_eq!(arrows.take_for_damage(88, 201, "minecraft:trident"), None);
+        assert_eq!(arrows.take_for_damage(88, 201, "minecraft:arrow"), None);
+
+        // A plain shot queues 1.0: it holds its place in the queue, so the
+        // affixed shot before it keeps its own arrow and the plain one none.
+        let mut mixed = ArrowDamageStore::default();
+        mixed.remember_shot(88, 1.6);
+        mixed.remember_shot(88, 1.0);
+        mixed.projectile_launched(Some(88), 301, "minecraft:arrow");
+        mixed.projectile_launched(Some(88), 302, "minecraft:arrow");
+        assert_eq!(mixed.take_for_damage(88, 301, "minecraft:arrow"), Some(1.6));
+        assert_eq!(mixed.take_for_damage(88, 302, "minecraft:arrow"), None);
     }
 
     #[test]

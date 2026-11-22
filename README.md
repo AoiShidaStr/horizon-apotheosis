@@ -193,14 +193,18 @@ and **gems whose high tiers drop only from bosses**.
 - **They do something in play**:
   - *Damage*: `living_incoming_damage_v2` scales an attacker's hit by crit,
     fire, cold, pierce and shred (the victim's armor absorption is reduced by
-    shred and then by pierce); `living_incoming_damage` applies the victim's
-    dodge and rolls the crit chance. Dodge is the only case that cancels the
-    hit (flow `Cancel`), so a dodged arrow is not a free hit.
+    shred and then by pierce). It also rolls the victim's dodge **once** and
+    cancels the hit there when it succeeds, so the 95 % of hits that land are
+    not read as dodged; `living_incoming_damage` reuses that decision and only
+    rolls for damage routes v2 does not see. Dodge is the only case that
+    cancels the hit (flow `Cancel`), so a dodged arrow is not a free hit.
   - *Life steal and overheal*: the damage actually dealt heals the attacker by
-    the life-steal share, above max health through absorption for overheal.
-  - *Bow*: `arrow_loose` remembers the shooter's arrow-damage multiplier for
-    that shot (five seconds), `living_incoming_damage` spends it; draw speed
-    scales the charge needed to loose, so a faster bow fires sooner.
+    the life-steal share, above max health through absorption for overheal;
+    a dodged hit pays neither.
+  - *Bow*: `arrow_loose` queues the shot's arrow-damage multiplier, and
+    `projectile_launch` binds it to the arrow it becomes; only that arrow's own
+    `arrow` damage spends it, never a sword hit in the next five seconds. Draw
+    speed scales the charge needed to loose, so a faster bow fires sooner.
   - *Healing*: `living_heal` scales incoming healing by *healing received*
     and refunds the **overheal** share, up to the missing health.
   - *Mining*: `break_speed` scales the break speed of the held tool.
