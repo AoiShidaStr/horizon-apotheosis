@@ -1,7 +1,8 @@
 use horizon_client::mod_api::{
-    EquipmentSlot, Flow, Hand, Host, ItemStack, PrepareItemEnchantEvent, Text, UseItemEvent,
+    BlockEntityEvent, BlockEntityTickEvent, BlockEntityTicksEvent, Compound, EquipmentSlot, Flow,
+    Hand, Host, ItemStack, PrepareItemEnchantEvent, RightClickBlockEvent, Tag, Text, UseItemEvent,
 };
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct ShelfStats {
@@ -61,8 +62,12 @@ const OFFSETS: &[(i32, i32)] = &[
     (0, -2), (0, 2), (1, -2), (1, 2), (2, -1), (2, 0), (2, 1),
 ];
 
+/// The stats of the shelf block id `name` (`apotheosis:deepshelf`,
+/// `minecraft:amethyst_cluster`): `Host::block` gives a qualified id, the
+/// table above keeps the bare ones.
 fn shelf_stats(name: &str) -> Option<ShelfStats> {
-    SHELVES.iter().find(|(id, _)| *id == name).map(|(_, stats)| *stats)
+    let id = name.rsplit(':').next().unwrap_or(name);
+    SHELVES.iter().find(|(shelf, _)| *shelf == id).map(|(_, stats)| *stats)
 }
 
 fn aggregate(stats: impl IntoIterator<Item = ShelfStats>) -> ShelfStats {
@@ -401,9 +406,458 @@ pub(super) fn on_use_item(host: &mut dyn Host, event: &mut UseItemEvent<'_>) -> 
     Flow::Cancel
 }
 
+// ---------------------------------------------------------------------------
+// Enchantment Library
+// ---------------------------------------------------------------------------
+//
+// API 415 has no menu hook that reaches the player hosting a world, and no
+// vanilla-menu click hook, so the library is driven by right clicks and keeps
+// its points in the saved compound of its block entity (API 15/17). No item
+// ever sits in a slot the library shows: a click is applied at once on the
+// server thread, which leaves nothing to duplicate with a menu, a hopper or a
+// second player.
+
+/// The library block and the id its block entity saves under.
+pub(super) const LIBRARY: &str = "apotheosis:enchantment_library";
+const LIBRARY_ENTITY: &str = "apotheosis:enchantment_library";
+/// The saved compound's key holding the stored points.
+const LIBRARY_POINTS: &str = "points";
+/// The highest level a library holds and hands out: one point a level.
+pub(super) const LIBRARY_MAX_LEVEL: u32 = 30;
+/// Libraries whose points are mirrored in memory, and how many offers a player
+/// may have selected.
+const LIBRARY_CACHE: usize = 64;
+const SELECTION_CACHE: usize = 256;
+
+/// Stored points of one library, by enchantment. `dirty` marks a change the
+/// block entity's next tick has to save.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Library {
+    points: Vec<(Arc<str>, u32)>,
+    dirty: bool,
+}
+
+impl Library {
+    /// Adds `levels` points to `enchantment`, never past the library's cap.
+    fn absorb(&mut self, enchantment: &Arc<str>, levels: u32) {
+        if levels == 0 {
+            return;
+        }
+        let current = self
+            .points
+            .iter_mut()
+            .find(|(id, _)| id == enchantment)
+            .map(|(_, points)| points);
+        match current {
+            Some(points) => *points = (*points + levels).min(LIBRARY_MAX_LEVEL),
+            None => {
+                self.points
+                    .push((enchantment.clone(), levels.min(LIBRARY_MAX_LEVEL)));
+                self.points.sort_by(|a, b| a.0.cmp(&b.0));
+            }
+        }
+    }
+
+    fn stored(&self, enchantment: &str) -> u32 {
+        self.points
+            .iter()
+            .find(|(id, _)| id.as_ref() == enchantment)
+            .map_or(0, |(_, points)| *points)
+    }
+
+    /// Takes `level` points out, when the library holds them.
+    fn withdraw(&mut self, enchantment: &str, level: u32) -> bool {
+        if level == 0 || self.stored(enchantment) < level {
+            return false;
+        }
+        for (id, points) in &mut self.points {
+            if id.as_ref() == enchantment {
+                *points -= level;
+            }
+        }
+        self.points.retain(|(_, points)| *points > 0);
+        true
+    }
+
+    /// Every book the library can hand out, cheapest first, then by name.
+    fn offers(&self) -> Vec<(Arc<str>, u32)> {
+        let mut offers = Vec::new();
+        for (id, points) in &self.points {
+            for level in 1..=(*points).min(LIBRARY_MAX_LEVEL) {
+                offers.push((id.clone(), level));
+            }
+        }
+        offers.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+        offers
+    }
+}
+
+fn libraries() -> &'static Mutex<Vec<((String, [i32; 3]), Library)>> {
+    static LIBRARIES: Mutex<Vec<((String, [i32; 3]), Library)>> = Mutex::new(Vec::new());
+    &LIBRARIES
+}
+
+fn selections() -> &'static Mutex<Vec<((u128, String, [i32; 3]), (Arc<str>, u32))>> {
+    static SELECTIONS: Mutex<Vec<((u128, String, [i32; 3]), (Arc<str>, u32))>> = Mutex::new(Vec::new());
+    &SELECTIONS
+}
+
+/// The mirror of the library at `pos`, empty when none is cached yet.
+fn library_at(dimension: &str, pos: [i32; 3]) -> Library {
+    let key = (dimension.to_owned(), pos);
+    libraries()
+        .lock()
+        .map(|all| {
+            all.iter()
+                .find(|(at, _)| *at == key)
+                .map_or_else(Library::default, |(_, library)| library.clone())
+        })
+        .unwrap_or_default()
+}
+
+fn store_library(dimension: &str, pos: [i32; 3], library: Library) {
+    let key = (dimension.to_owned(), pos);
+    let Ok(mut all) = libraries().lock() else {
+        return;
+    };
+    if let Some((_, entry)) = all.iter_mut().find(|(at, _)| *at == key) {
+        *entry = library;
+    } else {
+        if all.len() >= LIBRARY_CACHE {
+            all.remove(0);
+        }
+        all.push((key, library));
+    }
+}
+
+/// `"minecraft:sharpness=3;minecraft:unbreaking=1"`, the compound's readable
+/// form: the ids hold `:`, so `=` separates a level and `;` entries.
+fn encode_points(points: &[(Arc<str>, u32)]) -> String {
+    let mut text = String::new();
+    for (id, level) in points {
+        if *level == 0 {
+            continue;
+        }
+        if !text.is_empty() {
+            text.push(';');
+        }
+        text.push_str(id);
+        text.push('=');
+        text.push_str(&level.to_string());
+    }
+    text
+}
+
+fn decode_points(text: &str) -> Vec<(Arc<str>, u32)> {
+    let mut points: Vec<(Arc<str>, u32)> = Vec::new();
+    for entry in text.split(';') {
+        let Some((id, level)) = entry.rsplit_once('=') else {
+            continue;
+        };
+        let Ok(level) = level.parse::<u32>() else {
+            continue;
+        };
+        if id.is_empty() || level == 0 {
+            continue;
+        }
+        let level = level.min(LIBRARY_MAX_LEVEL);
+        match points.iter_mut().find(|(known, _)| known.as_ref() == id) {
+            Some((_, known)) => *known = (*known).saturating_add(level).min(LIBRARY_MAX_LEVEL),
+            None => points.push((Arc::from(id), level)),
+        }
+    }
+    points.sort_by(|a, b| a.0.cmp(&b.0));
+    points
+}
+
+fn read_library(nbt: &Compound) -> Library {
+    let points = match nbt.get(&LIBRARY_POINTS.into()) {
+        Some(Tag::String(text)) => decode_points(&text.to_string_lossy()),
+        _ => Vec::new(),
+    };
+    Library {
+        points,
+        dirty: false,
+    }
+}
+
+fn write_library(nbt: &mut Compound, library: &Library) {
+    nbt.insert(
+        LIBRARY_POINTS.into(),
+        Tag::String(encode_points(&library.points).as_str().into()),
+    );
+}
+
+fn remember_selection(uuid: u128, dimension: &str, pos: [i32; 3], offer: (Arc<str>, u32)) {
+    let key = (uuid, dimension.to_owned(), pos);
+    let Ok(mut all) = selections().lock() else {
+        return;
+    };
+    if let Some((_, selected)) = all.iter_mut().find(|(at, _)| *at == key) {
+        *selected = offer;
+    } else {
+        if all.len() >= SELECTION_CACHE {
+            all.remove(0);
+        }
+        all.push((key, offer));
+    }
+}
+
+fn selected_offer(uuid: u128, dimension: &str, pos: [i32; 3]) -> Option<(Arc<str>, u32)> {
+    let key = (uuid, dimension.to_owned(), pos);
+    selections()
+        .lock()
+        .ok()?
+        .iter()
+        .find(|(at, _)| *at == key)
+        .map(|(_, offer)| offer.clone())
+}
+
+fn enchantment_name(id: &str) -> String {
+    format!("enchantment.{}", id.replace(':', "."))
+}
+
+/// A book stored into the library: each of its enchantments adds its level in
+/// points, past the cap the extra levels are lost. The book is consumed only
+/// once the points are recorded.
+pub(super) fn on_right_click_block(host: &mut dyn Host, event: &mut RightClickBlockEvent) -> Flow {
+    if host.block(event.pos) != LIBRARY {
+        return Flow::Continue;
+    }
+    let Some(player) = host.acting_player() else {
+        return Flow::Continue;
+    };
+    let dimension = player.dimension.clone();
+    let Some(entity) = u32::try_from(player.entity_id)
+        .ok()
+        .and_then(|id| host.entity(id))
+    else {
+        return Flow::Continue;
+    };
+    let Some(living) = host.living(entity) else {
+        return Flow::Continue;
+    };
+    let held = living.hand_item(host, Hand::Main);
+    let mut library = library_at(&dimension, event.pos);
+
+    match held.as_ref().map(|stack| stack.item.as_ref()) {
+        Some("minecraft:enchanted_book") => {
+            let stack = held.expect("checked above");
+            let enchantments = stack.crafting_enchantments().to_vec();
+            if enchantments.is_empty() {
+                host.tell(
+                    player.uuid,
+                    Text::translate_with_fallback(
+                        "apotheosis.library.not_enchanted",
+                        "That book carries no enchantment.",
+                        &[],
+                    ),
+                );
+                return Flow::Continue;
+            }
+            for (enchantment, level) in &enchantments {
+                library.absorb(enchantment, *level);
+            }
+            library.dirty = true;
+            let left = stack.count.saturating_sub(1);
+            let mut rest = stack.clone();
+            rest.count = left;
+            let kept = if left == 0 {
+                living.set_equipment(host, EquipmentSlot::MainHand, None)
+            } else {
+                living.set_equipment(host, EquipmentSlot::MainHand, Some(rest))
+            };
+            if !kept {
+                return Flow::Continue;
+            }
+            store_library(&dimension, event.pos, library.clone());
+            let levels: u32 = enchantments.iter().map(|(_, level)| *level).sum();
+            let total: u32 = library.points.iter().map(|(_, points)| *points).sum();
+            host.tell(
+                player.uuid,
+                Text::translate_with_fallback(
+                    "apotheosis.library.absorbed",
+                    "Stored %s levels; the library holds %s points.",
+                    &[
+                        Text::literal(levels.to_string()),
+                        Text::literal(total.to_string()),
+                    ],
+                ),
+            );
+        }
+        Some("minecraft:book") => {
+            let offers = library.offers();
+            if offers.is_empty() {
+                host.tell(
+                    player.uuid,
+                    Text::translate_with_fallback(
+                        "apotheosis.library.empty",
+                        "The library holds no points yet: store enchanted books first.",
+                        &[],
+                    ),
+                );
+                return Flow::Continue;
+            }
+            let offer = selected_offer(player.uuid, &dimension, event.pos)
+                .filter(|(id, level)| library.stored(id) >= *level)
+                .unwrap_or_else(|| offers[0].clone());
+            let stack = held.expect("checked above");
+            let mut book = ItemStack::new("minecraft:enchanted_book", 1);
+            book.set_crafting_enchantments(vec![offer.clone()]);
+            let left = stack.count.saturating_sub(1);
+            let mut rest = stack.clone();
+            rest.count = left;
+            let kept = if left == 0 {
+                living.set_equipment(host, EquipmentSlot::MainHand, None)
+            } else {
+                living.set_equipment(host, EquipmentSlot::MainHand, Some(rest))
+            };
+            if !kept {
+                return Flow::Continue;
+            }
+            if host.give_stack(player.uuid, book).is_some() {
+                let _ = living.set_equipment(host, EquipmentSlot::MainHand, Some(stack.clone()));
+                host.tell(
+                    player.uuid,
+                    Text::translate_with_fallback(
+                        "apotheosis.library.no_room",
+                        "No room for the book; nothing was taken.",
+                        &[],
+                    ),
+                );
+                return Flow::Continue;
+            }
+            if !library.withdraw(&offer.0, offer.1) {
+                return Flow::Continue;
+            }
+            library.dirty = true;
+            store_library(&dimension, event.pos, library);
+            remember_selection(player.uuid, &dimension, event.pos, offer.clone());
+            host.tell(
+                player.uuid,
+                Text::translate_with_fallback(
+                    "apotheosis.library.withdrawn",
+                    "Took %s %s for %s points.",
+                    &[
+                        Text::translate_with_fallback(
+                            &enchantment_name(&offer.0),
+                            &offer.0,
+                            &[],
+                        ),
+                        Text::literal(offer.1.to_string()),
+                        Text::literal(offer.1.to_string()),
+                    ],
+                ),
+            );
+        }
+        None => {
+            let offers = library.offers();
+            if offers.is_empty() {
+                host.tell(
+                    player.uuid,
+                    Text::translate_with_fallback(
+                        "apotheosis.library.empty",
+                        "The library holds no points yet: store enchanted books first.",
+                        &[],
+                    ),
+                );
+                return Flow::Continue;
+            }
+            let current = selected_offer(player.uuid, &dimension, event.pos);
+            let next = match current {
+                Some(ref offer) => offers
+                    .iter()
+                    .position(|candidate| candidate == offer)
+                    .map_or(0, |index| (index + 1) % offers.len()),
+                None => 0,
+            };
+            let offer = offers[next].clone();
+            remember_selection(player.uuid, &dimension, event.pos, offer.clone());
+            host.tell(
+                player.uuid,
+                Text::translate_with_fallback(
+                    "apotheosis.library.offer",
+                    "Offer: %s %s (%s points stored). Right-click with a book to take it.",
+                    &[
+                        Text::translate_with_fallback(
+                            &enchantment_name(&offer.0),
+                            &offer.0,
+                            &[],
+                        ),
+                        Text::literal(offer.1.to_string()),
+                        Text::literal(library.stored(&offer.0).to_string()),
+                    ],
+                ),
+            );
+        }
+        Some(_) => {
+            host.tell(
+                player.uuid,
+                Text::translate_with_fallback(
+                    "apotheosis.library.usage",
+                    "Hold an enchanted book to store it, or a book to take an enchantment out.",
+                    &[],
+                ),
+            );
+        }
+    }
+    Flow::Continue
+}
+
+/// Every library block gets a block entity, saved with its chunk.
+pub(super) fn on_block_entity(event: &BlockEntityEvent<'_>) -> Option<(String, Compound)> {
+    (event.block == LIBRARY).then(|| (LIBRARY_ENTITY.to_owned(), Compound::new()))
+}
+
+/// The library's block entity ticks, so pending points reach the save.
+pub(super) fn on_block_entity_ticks(event: &mut BlockEntityTicksEvent<'_>) {
+    if event.block == LIBRARY {
+        event.ticks = true;
+    }
+}
+
+/// Loads the saved points the first time the entity ticks, and writes them back
+/// after a click changed them. A library broken before its next tick keeps its
+/// cached points until the cache forgets it, never a duplicated book.
+pub(super) fn on_block_entity_tick(host: &mut dyn Host, event: &mut BlockEntityTickEvent<'_>) {
+    let dimension = host.dimension().to_owned();
+    let key = (dimension.clone(), event.pos);
+    let Ok(mut all) = libraries().lock() else {
+        return;
+    };
+    if let Some((_, library)) = all.iter_mut().find(|(at, _)| *at == key) {
+        if library.dirty {
+            write_library(&mut event.entity.nbt, library);
+            library.dirty = false;
+        } else {
+            // A library placed where another stood starts empty again: the
+            // saved compound, not the cache, is what the chunk holds.
+            let saved = read_library(&event.entity.nbt);
+            if saved.points != library.points {
+                library.points = saved.points;
+            }
+        }
+        return;
+    }
+    let library = read_library(&event.entity.nbt);
+    if all.len() >= LIBRARY_CACHE {
+        all.remove(0);
+    }
+    all.push((key, library));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn qualified_block_ids_find_their_shelf() {
+        // `host.block` answers `namespace:path`, the table lists bare paths.
+        assert_eq!(shelf_stats("apotheosis:deepshelf").unwrap().eterna, 5.0);
+        assert_eq!(shelf_stats("minecraft:amethyst_cluster").unwrap().eterna, 1.0);
+        assert_eq!(shelf_stats("apotheosis:stoneshelf").unwrap().eterna, -3.0);
+        assert_eq!(shelf_stats("minecraft:air"), None);
+    }
 
     #[test]
     fn upstream_shelf_stats_keep_their_caps_and_modifiers() {
@@ -508,5 +962,60 @@ mod tests {
         let cleaned = output_stack(Tome::Web, &sword, levels(&[]));
         assert_eq!(&*cleaned.item, "minecraft:diamond_sword");
         assert!(cleaned.crafting_enchantments().is_empty());
+    }
+
+    #[test]
+    fn library_points_cap_at_its_top_level_and_are_spent_by_level() {
+        let mut library = Library::default();
+        library.absorb(&Arc::from("minecraft:sharpness"), 5);
+        library.absorb(&Arc::from("minecraft:shadow"), 40);
+        assert_eq!(library.stored("minecraft:sharpness"), 5);
+        assert_eq!(library.stored("minecraft:shadow"), LIBRARY_MAX_LEVEL);
+        assert!(library.withdraw("minecraft:sharpness", 3));
+        assert_eq!(library.stored("minecraft:sharpness"), 2);
+        assert!(!library.withdraw("minecraft:sharpness", 3));
+        assert!(!library.withdraw("minecraft:unbreaking", 1));
+        assert!(!library.withdraw("minecraft:sharpness", 0));
+    }
+
+    #[test]
+    fn library_offers_every_level_it_can_pay_for() {
+        let mut library = Library::default();
+        library.absorb(&Arc::from("minecraft:unbreaking"), 2);
+        library.absorb(&Arc::from("minecraft:sharpness"), 3);
+        assert_eq!(
+            library.offers(),
+            vec![
+                (Arc::from("minecraft:sharpness"), 1),
+                (Arc::from("minecraft:unbreaking"), 1),
+                (Arc::from("minecraft:sharpness"), 2),
+                (Arc::from("minecraft:unbreaking"), 2),
+                (Arc::from("minecraft:sharpness"), 3),
+            ]
+        );
+        assert!(Library::default().offers().is_empty());
+    }
+
+    #[test]
+    fn library_points_round_trip_through_the_saved_compound() {
+        let mut library = Library::default();
+        library.absorb(&Arc::from("minecraft:sharpness"), 3);
+        library.absorb(&Arc::from("minecraft:protection"), 2);
+        let mut nbt = Compound::new();
+        write_library(&mut nbt, &library);
+        let read = read_library(&nbt);
+        assert_eq!(read.points, library.points);
+        assert!(!read.dirty);
+        // Malformed entries are skipped rather than guessed.
+        assert!(decode_points(";;=2;minecraft:sharpness=x;=1;=0").is_empty());
+        assert_eq!(decode_points("a=1;a=2"), vec![(Arc::from("a"), 3)]);
+    }
+
+    #[test]
+    fn a_stored_enchantment_lists_its_levels_and_nothing_else() {
+        let mut library = Library::default();
+        library.absorb(&Arc::from("minecraft:sharpness"), 0);
+        assert!(library.points.is_empty());
+        assert_eq!(encode_points(&library.points), "");
     }
 }

@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "building",
+  "pattern": [
+    "BBB",
+    "BSB",
+    "BBB"
+  ],
+  "key": {
+    "B": "minecraft:book",
+    "S": "minecraft:bookshelf"
+  },
+  "result": {
+    "id": "apotheosis:enchantment_library"
+  }
+}

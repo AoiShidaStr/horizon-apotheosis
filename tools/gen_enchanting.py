@@ -154,6 +154,42 @@ def web_pixels():
     return pixels
 
 
+def library_pixels():
+    """Draw the enchanting library: a dark shelf with a glowing open tome."""
+    wood = (0x4A, 0x2F, 0x1F, 255)
+    grain = (0x5E, 0x3D, 0x28, 255)
+    book = (0x6E, 0x3F, 0x9E, 255)
+    glow = (0xC9, 0x8B, 0xF0, 255)
+    page = (0xEC, 0xE6, 0xF5, 255)
+    gold = (0xD8, 0xB0, 0x4A, 255)
+    clear = (0, 0, 0, 0)
+    pixels = [[clear] * 16 for _ in range(16)]
+    for y in range(16):
+        for x in range(16):
+            pixels[y][x] = grain if (x + y * 3) % 7 == 0 else wood
+    # Shelf boards and two rows of books, with the open tome in the middle.
+    for y in (4, 5, 10, 11):
+        for x in range(16):
+            pixels[y][x] = gold if x in (0, 15) else wood
+    for row, top in ((0, 0), (1, 6)):
+        for index in range(5):
+            x0 = 1 + index * 3
+            colour = (0x8C, 0x3B, 0x3B, 255) if (row + index) % 2 else (0x2F, 0x5C, 0x8C, 255)
+            for x in (x0, x0 + 1):
+                for y in range(top, top + 4):
+                    pixels[y][x] = colour
+            pixels[top][x0] = page
+    for x in (6, 7, 8, 9):
+        for y in (7, 8, 9):
+            pixels[y][x] = page if x in (6, 9) else glow
+    for y in (7, 9):
+        pixels[y][7] = book
+        pixels[y][8] = book
+    pixels[8][7] = glow
+    pixels[8][8] = glow
+    return pixels
+
+
 # id, English name, French name, stack size, rarity, texture, recipe
 ITEMS = [
     ("scrap_tome", "Tome of Scrapping", "Livre de Démantèlement", 16, "common",
@@ -203,6 +239,20 @@ MESSAGES = [
      "%s enchantements extraits."),
     ("apotheosis.tome.cleansed", "Curses removed.",
      "Malédictions retirées."),
+    ("apotheosis.library.not_enchanted", "That book carries no enchantment.",
+     "Ce livre ne porte aucun enchantement."),
+    ("apotheosis.library.absorbed", "Stored %s levels; the library holds %s points.",
+     "%s niveaux absorbés ; la bibliothèque totalise %s points."),
+    ("apotheosis.library.empty", "The library holds no points yet: store enchanted books first.",
+     "La bibliothèque n'a aucun point : déposez d'abord des livres enchantés."),
+    ("apotheosis.library.offer", "Offer: %s %s (%s points stored). Right-click with a book to take it.",
+     "Proposition : %s %s (%s points stockés). Clic droit avec un livre pour le prendre."),
+    ("apotheosis.library.withdrawn", "Took %s %s for %s points.",
+     "%s %s récupéré pour %s points."),
+    ("apotheosis.library.no_room", "No room for the book; nothing was taken.",
+     "Pas de place pour le livre ; rien n'a été pris."),
+    ("apotheosis.library.usage", "Hold an enchanted book to store it, or a book to take an enchantment out.",
+     "Tenez un livre enchanté pour le déposer, ou un livre vierge pour retirer un enchantement."),
 ]
 
 
@@ -280,7 +330,22 @@ def main():
     # The power-provider tag makes the shelves count at the player's own table;
     # the native hook adds Apotheosis Eterna for LAN guests, the only path
     # Horizon API 291 dispatches today. Bookshelves are axe-mined in vanilla.
-    merge_values(os.path.join(CONTENT, "data", "minecraft", "tags", "block", "enchantment_power_provider.json"), shelf_items)
+    # A shelf whose Eterna is negative must not count as a vanilla power
+    # provider: the game would treat it as a bookshelf and raise the offers,
+    # the opposite of what the native hook does with it.
+    negative = {f"{ID}:{shelf}" for shelf, eterna, *_ in SHELVES if eterna < 0}
+    power_path = os.path.join(CONTENT, "data", "minecraft", "tags", "block", "enchantment_power_provider.json")
+    if os.path.exists(power_path):
+        with open(power_path, encoding="utf-8") as f:
+            power = json.load(f)
+    else:
+        power = {"values": []}
+    values = [entry for entry in power.setdefault("values", []) if entry not in negative]
+    for item in shelf_items:
+        if item not in negative and item not in values:
+            values.append(item)
+    power["values"] = values
+    write_json(power_path, power)
     merge_values(os.path.join(CONTENT, "data", "minecraft", "tags", "block", "mineable", "axe.json"), axes)
     tab_path = os.path.join(CONTENT, "data", ID, "horizon", "creative_tab", ID + ".json")
     if os.path.exists(tab_path):
@@ -293,6 +358,42 @@ def main():
         if item not in entries:
             entries.append(item)
     write_json(tab_path, tab)
+
+    # The Enchantment Library: a bookshelf that stores enchantments as points.
+    library = f"{ID}:enchantment_library"
+    write_json(os.path.join(CONTENT, "data", ID, "horizon", "block", "enchantment_library.json"), {
+        "template": "minecraft:bookshelf",
+        "item": True,
+        "properties": {"hardness": 2.0, "explosion_resistance": 2.0,
+                       "sounds": "minecraft:chiseled_bookshelf", "requires_tool": False},
+    })
+    write_json(os.path.join(CONTENT, "assets", ID, "blockstates", "enchantment_library.json"), {
+        "variants": {"": {"model": f"{ID}:block/enchantment_library"}},
+    })
+    write_json(os.path.join(CONTENT, "assets", ID, "models", "block", "enchantment_library.json"), {
+        "parent": "minecraft:block/cube_all", "textures": {"all": f"{ID}:block/enchantment_library"},
+    })
+    write_json(os.path.join(CONTENT, "assets", ID, "items", "enchantment_library.json"), {
+        "model": {"type": "minecraft:model", "model": f"{ID}:block/enchantment_library"},
+    })
+    write_png(os.path.join(CONTENT, "assets", ID, "textures", "block", "enchantment_library.png"),
+              library_pixels())
+    write_json(os.path.join(CONTENT, "data", ID, "loot_table", "blocks", "enchantment_library.json"), {
+        "type": "minecraft:block", "pools": [{"rolls": 1, "bonus_rolls": 0,
+            "entries": [{"type": "minecraft:item", "name": library}]}],
+    })
+    write_json(os.path.join(CONTENT, "data", ID, "recipe", "enchantment_library.json"), {
+        "type": "minecraft:crafting_shaped", "category": "building",
+        "pattern": ["BBB", "BSB", "BBB"],
+        "key": {"B": "minecraft:book", "S": "minecraft:bookshelf"},
+        "result": {"id": library},
+    })
+    en[f"block.{ID}.enchantment_library"] = "Enchantment Library"
+    fr[f"block.{ID}.enchantment_library"] = "Bibliothèque d'enchantement"
+    merge_values(os.path.join(CONTENT, "data", "minecraft", "tags", "block", "mineable", "axe.json"),
+                 [library])
+    if library not in entries:
+        entries.append(library)
 
     for item_id, name_en, name_fr, stack, rarity, pixels, recipe in ITEMS:
         item = f"{ID}:{item_id}"

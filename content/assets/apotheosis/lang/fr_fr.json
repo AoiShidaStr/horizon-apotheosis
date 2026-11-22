@@ -267,5 +267,13 @@
   "apotheosis.spawner.tooltip.ranges": "Portée joueur %s · proches max %s · portée d'apparition %s",
   "apotheosis.spawner.tooltip.health": "Vie des mobs : %s×",
   "apotheosis.spawner.tooltip.echo": "Écho : %s",
-  "apotheosis.spawner.tooltip.options": "Options : %s"
+  "apotheosis.spawner.tooltip.options": "Options : %s",
+  "block.apotheosis.enchantment_library": "Bibliothèque d'enchantement",
+  "apotheosis.library.not_enchanted": "Ce livre ne porte aucun enchantement.",
+  "apotheosis.library.absorbed": "%s niveaux absorbés ; la bibliothèque totalise %s points.",
+  "apotheosis.library.empty": "La bibliothèque n'a aucun point : déposez d'abord des livres enchantés.",
+  "apotheosis.library.offer": "Proposition : %s %s (%s points stockés). Clic droit avec un livre pour le prendre.",
+  "apotheosis.library.withdrawn": "%s %s récupéré pour %s points.",
+  "apotheosis.library.no_room": "Pas de place pour le livre ; rien n'a été pris.",
+  "apotheosis.library.usage": "Tenez un livre enchanté pour le déposer, ou un livre vierge pour retirer un enchantement."
 }

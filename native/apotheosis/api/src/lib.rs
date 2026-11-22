@@ -1158,7 +1158,34 @@ impl Hooks for Apotheosis {
     }
 
     fn right_click_block(&self, host: &mut dyn Host, event: &mut RightClickBlockEvent) -> Flow {
-        spawners::on_right_click(host, event.pos)
+        match spawners::on_right_click(host, event.pos) {
+            Flow::Continue => enchanting::on_right_click_block(host, event),
+            Flow::Cancel => Flow::Cancel,
+        }
+    }
+
+    fn block_entity(
+        &self,
+        _host: &mut dyn Host,
+        event: &mut horizon_client::mod_api::BlockEntityEvent<'_>,
+    ) -> Option<(String, horizon_client::mod_api::Compound)> {
+        enchanting::on_block_entity(event)
+    }
+
+    fn block_entity_ticks(
+        &self,
+        _host: &dyn Host,
+        event: &mut horizon_client::mod_api::BlockEntityTicksEvent<'_>,
+    ) {
+        enchanting::on_block_entity_ticks(event);
+    }
+
+    fn block_entity_tick(
+        &self,
+        host: &mut dyn Host,
+        event: &mut horizon_client::mod_api::BlockEntityTickEvent<'_>,
+    ) {
+        enchanting::on_block_entity_tick(host, event);
     }
 
     fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {

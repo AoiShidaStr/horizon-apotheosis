@@ -17,7 +17,7 @@ and **gems whose high tiers drop only from bosses**.
   enchanting shelves and five rarity salvage materials. All of them are
   craftable or salvageable in survival (see *Recipes* below).
 
-- **Content mod `.hmod`** (`side = "both"`, id `apotheosis`) with **52 creative
+- **Content mod `.hmod`** (`side = "both"`, id `apotheosis`) with **65 creative
   entries**: twelve gems, gem dust, twelve decorative gem blocks, twenty-three
   enchanting shelves and four tome/cobweb items. All of them are craftable in
   survival (see *Recipes* below).
@@ -359,11 +359,13 @@ and **gems whose high tiers drop only from bosses**.
   Each offer keeps at least its vanilla eligibility (1, 2, 3), costs that many
   experience levels, and is never lowered below what vanilla had already
   computed for the table.
-- **The shelves also feed the player's own table.** Each one is in
-  `minecraft:enchantment_power_provider`, so in single player, where Horizon
-  does not dispatch API 291, they count like bookshelves for vanilla power and
-  show the table's particles. Vanilla still caps that path at 15 providers
-  (level 30).
+- **The shelves also feed the player's own table.** Each shelf with positive
+  Eterna is in `minecraft:enchantment_power_provider`, so in single player,
+  where Horizon does not dispatch API 291, it counts like a bookshelf for
+  vanilla power and shows the table's particles. The negative-Eterna shelves
+  (bee, melon and stone) are deliberately left out: the game would otherwise
+  treat them as bookshelves and raise the offers they are meant to lower.
+  Vanilla still caps that path at 15 providers (level 30).
 - **Survival recipes** (vanilla `minecraft:crafting_shaped`): the basic
   bookshelf is three planks, three books, three planks; every other shelf is
   one `minecraft:bookshelf` surrounded by four of its theme catalyst — honeycomb,
@@ -392,6 +394,19 @@ and **gems whose high tiers drop only from bosses**.
   shaped recipes: eight books around an anvil give eight scrap tomes, diamonds
   or netherite scraps upgrade one to the superior or extraction tome, and four
   prismarine shards around a cobweb give the Prismatic Cobweb.
+- **The Enchantment Library** (`block_entity` / `block_entity_ticks` /
+  `block_entity_tick` API 15–17, `right_click_block` API 21). The block stores
+  enchantments as points — one point per level, capped at level 30 per
+  enchantment — in the saved compound of its own block entity, so the points
+  survive a restart. Right-clicking with an enchanted book absorbs it (its
+  levels are added, capped); right-clicking empty-handed cycles through the
+  offers it can pay for, from level 1 up; right-clicking with a plain
+  `minecraft:book` takes the shown offer, spends its points and gives the
+  enchanted book. It is a real block with an original 16x16 texture, en_us and
+  fr_fr names, a creative-tab entry, a self-drop loot table, the axe tag and a
+  vanilla recipe (eight books around a bookshelf). No menu and no item slot is
+  involved — every click is applied at once on the server thread, so rapid
+  clicks, two players and a broken block cannot duplicate a book.
 
 ### Missing
 
@@ -418,10 +433,15 @@ and **gems whose high tiers drop only from bosses**.
   or dedicated host's guests (`lan_stations.rs`); the integrated single-player
   table computes its offers locally without calling the hook. Local play gets
   the tag-based power above, capped at vanilla's 15 providers.
-- **The enchanting library, infusion and rectifiers.** No library block or
-  infusion altar is added; the recipes stop at vanilla crafting. The tomes are
-  used by a right click rather than in an anvil, since API 415 has no anvil
-  hook.
+- **Infusion and rectifiers.** No infusion altar or rectifier is added; the
+  recipes stop at vanilla crafting. The tomes are used by a right click rather
+  than in an anvil, since API 415 has no anvil hook.
+- **The Enchantment Library has no screen and drops no contents.** API 415's
+  menu hooks only reach a LAN host's guests and vanilla-menu clicks cannot be
+  intercepted, so the library is driven by right clicks and shows offers in
+  chat instead of a slot grid; a broken library keeps its block item but its
+  stored points are lost (the block-break hook cannot read a block entity's
+  saved compound at this API).
 
 ## Apothic Spawners
 
