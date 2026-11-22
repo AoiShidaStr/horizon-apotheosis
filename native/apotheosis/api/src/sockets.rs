@@ -399,10 +399,22 @@ fn is_socket_lore(entry: &Tag) -> bool {
 /// Rewrites the socket half of a piece's modifiers and lore, keeping the
 /// affixes' own entries: called after socketing, after a reforge, and once when
 /// the sockets are rolled.
+fn socket_slot_group(item: &str) -> &'static str {
+    if ["_helmet", "_chestplate", "_leggings", "_boots"]
+        .iter()
+        .any(|suffix| item.ends_with(suffix))
+    {
+        "armor"
+    } else {
+        // Shields are equipped in the off hand, not in an armor slot.
+        "hand"
+    }
+}
+
 fn refresh(stack: &mut ItemStack) {
     let total = socket_total(stack);
     let sockets = socketed(stack);
-    let slots = if is_armor(&stack.item) { "armor" } else { "hand" };
+    let slots = socket_slot_group(&stack.item);
 
     let mut modifiers = match stack
         .data()
@@ -1330,6 +1342,32 @@ mod tests {
             socketed_amount("apotheosis:gem_ruby", Purity::Perfect),
             Some(2.0)
         );
+    }
+
+    #[test]
+    fn a_socketed_gem_on_a_shield_targets_the_hand_slot_group() {
+        let mut shield = ItemStack::new("minecraft:shield", 1);
+        write_sockets(&mut shield, 1, &[]);
+        assert!(insert_gem(
+            &mut shield,
+            "apotheosis:gem_ruby",
+            Purity::Normal
+        ));
+
+        let Some(Tag::List(modifiers)) = shield
+            .data()
+            .and_then(|data| data.other("minecraft:attribute_modifiers"))
+        else {
+            panic!("no modifiers");
+        };
+        let socket_modifier = modifiers
+            .iter()
+            .find(|entry| is_socket_modifier(entry))
+            .expect("a socket modifier");
+        assert_eq!(socket_modifier.get("slot"), Some(&Tag::String("hand".into())));
+        assert_eq!(socket_slot_group("minecraft:shield"), "hand");
+        assert_eq!(socket_slot_group("minecraft:diamond_chestplate"), "armor");
+        assert_eq!(socket_slot_group("minecraft:diamond_sword"), "hand");
     }
 
     #[test]
