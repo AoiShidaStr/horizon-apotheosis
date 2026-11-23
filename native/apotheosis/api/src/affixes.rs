@@ -44,9 +44,12 @@ pub fn classes(affix: &Affix) -> u16 {
     mask
 }
 
-/// Whether `affix` may land on a piece of `class` at `tier`.
+/// Whether `affix` may land on a piece of `class` at `tier` as an attribute
+/// line. Effect affixes (`mob_effect`, `damage_reduction`, ...) are rolled by
+/// `affix_effects` instead: their payout is not an attribute modifier.
 pub fn accepts(affix: &Affix, class: ItemClass, tier: Tier) -> bool {
     affix.supported
+        && affix.kind == "attribute"
         && affix
             .rarities
             .contains(&(rarity_index(tier) as u8))
@@ -69,7 +72,7 @@ pub fn amount(affix: &Affix, tier: Tier, rng: &mut Rng) -> Option<f64> {
     Some(roll_range(range, rng))
 }
 
-fn roll_range(range: Range, rng: &mut Rng) -> f64 {
+pub(crate) fn roll_range(range: Range, rng: &mut Rng) -> f64 {
     let fraction = rng.below(10_001) as f64 / 10_000.0;
     let mut value = range.min + (range.max - range.min) * fraction;
     if range.step != 0.0 {
@@ -263,9 +266,8 @@ mod tests {
             assert_eq!(affix.name_key, format!("affix.{}", affix.id));
             assert_eq!(affix.suffix_key, format!("{}.suffix", affix.name_key));
             assert!(!affix.name.is_empty() && !affix.suffix.is_empty());
-            if affix.supported {
-                assert_eq!(affix.kind, "attribute", "{}", affix.id);
-                assert!(!affix.categories.is_empty(), "{} has no category", affix.id);
+            assert!(!affix.categories.is_empty(), "{} has no category", affix.id);
+            if affix.supported && affix.kind == "attribute" {
                 assert!(affix.attribute.is_some(), "{}", affix.id);
                 assert!(affix.operation.is_some(), "{}", affix.id);
                 assert!(
@@ -307,9 +309,6 @@ mod tests {
             "armor/attribute/timekeeping",
             "armor/attribute/unbound",
             "armor/attribute/winged",
-            "melee/attribute/giant_slaying",
-            "weapon/attribute/nullifying",
-            "weapon/attribute/runebreaking",
         ] {
             let affix = find(path);
             assert!(!affix.supported, "{path} should stay catalogue-only");

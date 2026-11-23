@@ -10,8 +10,8 @@ Source inspectée : `java-ref`
 - objets avec modèle Java : 42
 - modèles copiés : 100
 - textures copiées : 107
-- clés lang en_us : 1699
-- clés lang fr_fr : 1575
+- clés lang en_us : 1725
+- clés lang fr_fr : 1601
 
 Les ids sans équivalent Java gardent nos définitions et nos textures originales de `content/`. Les gemmes viennent de Java : une seule gemme (`apotheosis:gem`) dont le modèle choisit la texture du type qu'elle porte, ci-dessous en liste à part.
 

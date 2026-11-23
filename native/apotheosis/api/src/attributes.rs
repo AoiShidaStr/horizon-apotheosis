@@ -47,10 +47,13 @@ pub enum Attr {
     ArrowVelocity,
     DrawSpeed,
     MiningSpeed,
+    CurrentHpDamage,
+    ProtPierce,
+    ProtShred,
 }
 
 impl Attr {
-    pub const ALL: [Attr; 15] = [
+    pub const ALL: [Attr; 18] = [
         Attr::CritChance,
         Attr::CritDamage,
         Attr::LifeSteal,
@@ -66,6 +69,9 @@ impl Attr {
         Attr::ArrowVelocity,
         Attr::DrawSpeed,
         Attr::MiningSpeed,
+        Attr::CurrentHpDamage,
+        Attr::ProtPierce,
+        Attr::ProtShred,
     ];
 
     /// The field name in `apotheosis:attributes`, and the lang key's suffix.
@@ -86,6 +92,9 @@ impl Attr {
             Attr::ArrowVelocity => "arrow_velocity",
             Attr::DrawSpeed => "draw_speed",
             Attr::MiningSpeed => "mining_speed",
+            Attr::CurrentHpDamage => "current_hp_damage",
+            Attr::ProtPierce => "prot_pierce",
+            Attr::ProtShred => "prot_shred",
         }
     }
 
@@ -114,12 +123,19 @@ impl Attr {
             Attr::ArrowVelocity => "Arrow Velocity",
             Attr::DrawSpeed => "Draw Speed",
             Attr::MiningSpeed => "Mining Speed",
+            Attr::CurrentHpDamage => "Current HP Damage",
+            Attr::ProtPierce => "Protection Pierce",
+            Attr::ProtShred => "Protection Shred",
         }
     }
 
     /// Whether the value is a fraction shown as a percentage.
     pub fn is_percent(self) -> bool {
-        !matches!(self, Attr::ArmorPierce | Attr::FireDamage | Attr::ColdDamage)
+        !matches!(
+            self,
+            Attr::ArmorPierce | Attr::FireDamage | Attr::ColdDamage | Attr::CurrentHpDamage
+                | Attr::ProtPierce
+        )
     }
 
     /// Apothic Attributes' default, which the stored value is a bonus over.
@@ -154,6 +170,9 @@ impl Attr {
             Attr::ArrowVelocity => 12,
             Attr::DrawSpeed => 13,
             Attr::MiningSpeed => 14,
+            Attr::CurrentHpDamage => 15,
+            Attr::ProtPierce => 16,
+            Attr::ProtShred => 17,
         }
     }
 
@@ -177,7 +196,7 @@ impl Attr {
 /// The attributes an item carries, as bonuses over their defaults.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct AttrSet {
-    values: [f64; 15],
+    values: [f64; 18],
 }
 
 impl AttrSet {
@@ -253,6 +272,163 @@ impl AttrSet {
 
     pub fn arrow_velocity_multiplier(self) -> f64 {
         (1.0 + self.get(Attr::ArrowVelocity)).clamp(0.0, 4.0)
+    }
+}
+
+/// The custom data key a piece's damage reduction shares live under.
+const REDUCTION_KEY: &str = "apotheosis:reductions";
+
+/// A piece's share of incoming damage it removes, per Java damage class.
+/// `damage_reduction` affixes (Feathery, Runed, ...) land here rather than in
+/// an attribute modifier, but are rolled by the same effect pass.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Reduction {
+    physical: f64,
+    projectile: f64,
+    explosion: f64,
+    fall: f64,
+    lightning: f64,
+    magic: f64,
+}
+
+impl Reduction {
+    /// The reduction a stack's custom data carries, empty for a plain item.
+    pub fn of_stack(stack: &ItemStack) -> Reduction {
+        let Some(Tag::Compound(compound)) = stack
+            .data()
+            .and_then(|data| data.other(CUSTOM_DATA))
+            .and_then(|data| data.get(REDUCTION_KEY))
+        else {
+            return Reduction::default();
+        };
+        let mut reduction = Reduction::default();
+        for (key, slot) in [
+            ("physical", &mut reduction.physical),
+            ("projectile", &mut reduction.projectile),
+            ("explosion", &mut reduction.explosion),
+            ("fall", &mut reduction.fall),
+            ("lightning", &mut reduction.lightning),
+            ("magic", &mut reduction.magic),
+        ] {
+            *slot = number(compound.get(&key.into())).unwrap_or(0.0);
+        }
+        reduction
+    }
+
+    /// The share removed from a hit of `kind`, capped like vanilla's armour.
+    pub fn get(self, kind: &str) -> f64 {
+        let value = match kind {
+            "projectile" => self.projectile,
+            "explosion" => self.explosion,
+            "fall" => self.fall,
+            "lightning" => self.lightning,
+            "magic" => self.magic,
+            _ => self.physical,
+        };
+        value.clamp(0.0, 0.95)
+    }
+
+    fn add(&mut self, other: &Reduction) {
+        for kind in REDUCTION_KINDS {
+            *self.slot(kind) += other.get(kind);
+        }
+    }
+
+    fn sub(&mut self, other: &Reduction) {
+        for kind in REDUCTION_KINDS {
+            *self.slot(kind) = (self.get(kind) - other.get(kind)).max(0.0);
+        }
+    }
+
+    fn slot(&mut self, kind: &str) -> &mut f64 {
+        match kind {
+            "projectile" => &mut self.projectile,
+            "explosion" => &mut self.explosion,
+            "fall" => &mut self.fall,
+            "lightning" => &mut self.lightning,
+            "magic" => &mut self.magic,
+            _ => &mut self.physical,
+        }
+    }
+
+    fn is_empty(self) -> bool {
+        REDUCTION_KINDS.iter().all(|kind| self.get(kind) == 0.0)
+    }
+}
+
+const REDUCTION_KINDS: [&str; 6] = [
+    "physical",
+    "projectile",
+    "explosion",
+    "fall",
+    "lightning",
+    "magic",
+];
+
+/// Writes one damage-reduction roll into the stack's custom data, adding to
+/// whatever the piece already carried.
+pub fn attach_reduction(stack: &mut ItemStack, kind: &str, value: f64) {
+    if !REDUCTION_KINDS.contains(&kind) || value <= 0.0 {
+        return;
+    }
+    let mut reduction = Reduction::of_stack(stack);
+    *reduction.slot(kind) += value;
+    let mut custom = match stack
+        .data()
+        .and_then(|data| data.other(CUSTOM_DATA))
+    {
+        Some(Tag::Compound(compound)) => compound.clone(),
+        _ => Compound::new(),
+    };
+    let mut inner = match custom.get(&REDUCTION_KEY.into()) {
+        Some(Tag::Compound(compound)) => compound.clone(),
+        _ => Compound::new(),
+    };
+    for kind in REDUCTION_KINDS {
+        let value = reduction.get(kind);
+        if value > 0.0 {
+            inner.insert(kind.into(), Tag::Double(value.to_bits()));
+        } else {
+            inner.remove(&kind.into());
+        }
+    }
+    custom.insert(REDUCTION_KEY.into(), Tag::Compound(inner));
+    stack
+        .data_mut()
+        .set_other(CUSTOM_DATA, Some(Tag::Compound(custom)));
+}
+
+/// Drops the damage reduction a previous affix pass wrote.
+pub fn clear_reduction(stack: &mut ItemStack) {
+    let mut custom = match stack
+        .data()
+        .and_then(|data| data.other(CUSTOM_DATA))
+    {
+        Some(Tag::Compound(compound)) => compound.clone(),
+        _ => return,
+    };
+    if custom.remove(&REDUCTION_KEY.into()).is_some() {
+        stack
+            .data_mut()
+            .set_other(CUSTOM_DATA, Some(Tag::Compound(custom)));
+    }
+}
+
+/// The damage class a vanilla damage type belongs to, as Java's
+/// `damage_reduction` data names them.
+pub fn damage_class(damage_type: &str) -> &'static str {
+    let name = damage_type.rsplit(':').next().unwrap_or(damage_type);
+    match name {
+        "explosion" | "player_explosion" | "bad_respawn_point" => "explosion",
+        "arrow" | "trident" | "thrown" | "fireball" | "wind_charge" | "spectral_arrow" => {
+            "projectile"
+        }
+        "fall" | "fly_into_wall" => "fall",
+        "lightning_bolt" => "lightning",
+        "magic" | "indirect_magic" | "dragon_breath" | "wither" | "sonic_boom" | "thorns" => {
+            "magic"
+        }
+        _ => "physical",
     }
 }
 
@@ -568,13 +744,36 @@ pub fn incoming_damage_v2(host: &mut dyn Host, event: &mut LivingIncomingDamageV
     if set.is_empty() {
         return false;
     }
+    let physical = is_physical(event.damage_type);
     let (amount, _) = outgoing(
         &set,
         f64::from(event.amount),
         unit(salt ^ 0x5DEE_CE66_D1CF_1234),
-        is_physical(event.damage_type),
+        physical,
     );
     event.amount = amount as f32;
+
+    // Giant Slaying: a physical hit adds a share of the target's own health.
+    let bonus = set.get(Attr::CurrentHpDamage).max(0.0);
+    if physical && bonus > 0.0 {
+        if let Some(health) = victim_health(host, event.entity as u32) {
+            event.amount += (f64::from(health) * bonus) as f32;
+        }
+    }
+
+    // Nullifying and Runebreaking: the victim's protection points are shaved
+    // before the hit lands. Protection is 4% a point, capped at 20 points; the
+    // damage is raised by the share that was removed.
+    let points = protection_points(host, event.entity as u32);
+    if points > 0.0 {
+        let share = (points * 0.04).min(0.8);
+        let shred = set.get(Attr::ProtShred).clamp(0.0, 1.0);
+        let pierce = (set.get(Attr::ProtPierce).max(0.0) * 0.04).min(0.8);
+        let extra = share * shred + pierce;
+        if extra > 0.0 {
+            event.amount = (f64::from(event.amount) * (1.0 + extra)) as f32;
+        }
+    }
 
     if let Some(player) = host.acting_player() {
         let health = amount * set.get(Attr::LifeSteal);
@@ -625,6 +824,12 @@ pub fn incoming_damage(event: &mut LivingIncomingDamageEvent<'_>) -> bool {
     if let Some(multiplier) = take_arrow(event.direct, event.damage_type) {
         event.amount = (f64::from(event.amount) * multiplier) as f32;
     }
+    // Feathery, Runed, Deflective, Blast Forged, Grounded and Blockading: the
+    // victim's own armour removes a share of that damage class.
+    let share = reduction_of(event.entity as u32).get(damage_class(event.damage_type));
+    if share > 0.0 {
+        event.amount = (f64::from(event.amount) * (1.0 - share)) as f32;
+    }
     if let Some(dodged) = take_dodge(event.entity) {
         return dodged;
     }
@@ -641,6 +846,44 @@ pub fn living_heal(event: &mut LivingHealEvent) -> bool {
     }
     event.amount = (f64::from(event.amount) * multiplier) as f32;
     true
+}
+
+/// The victim's current health, read from its own NBT.
+fn victim_health(host: &mut dyn Host, id: u32) -> Option<f32> {
+    let entity = host.entity(id)?;
+    let nbt = host.entity_nbt(entity)?;
+    match nbt.get(&"Health".into()) {
+        Some(Tag::Float(bits)) => Some(f32::from_bits(*bits)),
+        Some(Tag::Double(bits)) => Some(f64::from_bits(*bits) as f32),
+        _ => None,
+    }
+}
+
+/// The victim's protection points: one per Protection level on worn armour,
+/// capped at 20. Only a player's equipment is readable through the API, so a
+/// mob's protection is left alone rather than guessed.
+fn protection_points(host: &mut dyn Host, victim: u32) -> f64 {
+    let Some(entity) = host.entity(victim) else {
+        return 0.0;
+    };
+    if host.entity_kind(entity).as_deref() != Some("minecraft:player") {
+        return 0.0;
+    }
+    let Some(uuid) = host.entity_uuid(entity) else {
+        return 0.0;
+    };
+    let mut points = 0.0;
+    for slot in [
+        EquipmentSlot::Head,
+        EquipmentSlot::Chest,
+        EquipmentSlot::Legs,
+        EquipmentSlot::Feet,
+    ] {
+        if let Some(stack) = host.player_equipment(uuid, slot) {
+            points += f64::from(stack.enchantment_level("minecraft:protection"));
+        }
+    }
+    points.min(20.0)
 }
 
 fn heal_player(host: &mut dyn Host, player: &NativeServerPlayer, health: f64) {
@@ -838,29 +1081,71 @@ fn store_armor(entity: u32, set: AttrSet) {
         .insert(entity, set);
 }
 
+/// The damage reduction of every worn piece, summed per damage class.
+static REDUCTION_CACHE: OnceLock<Mutex<HashMap<u32, Reduction>>> = OnceLock::new();
+
+fn reduction_cache() -> &'static Mutex<HashMap<u32, Reduction>> {
+    REDUCTION_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn reduction_of(entity: u32) -> Reduction {
+    reduction_cache()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&entity)
+        .copied()
+        .unwrap_or_default()
+}
+
+fn store_reduction(entity: u32, reduction: Reduction) {
+    reduction_cache()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(entity, reduction);
+}
+
 fn worn(stack: &ItemStack) -> Option<AttrSet> {
     class_of(&stack.item)
         .is_worn_armor()
         .then(|| AttrSet::of_stack(stack))
 }
 
+fn worn_reduction(stack: &ItemStack) -> Reduction {
+    if class_of(&stack.item).is_worn_armor() {
+        Reduction::of_stack(stack)
+    } else {
+        Reduction::default()
+    }
+}
+
 /// An armour slot changed: take the old piece's attributes off and put the new
 /// piece's on. `from` is none when the slot was empty.
 pub fn equipment_changed(event: &mut LivingEquipmentChangeEvent<'_>) {
     let mut set = armor_of(event.entity);
-    if let Some(from) = event.from.and_then(worn) {
-        set.sub(&from);
+    let mut reduction = reduction_of(event.entity);
+    if let Some(from) = event.from.as_ref() {
+        if let Some(attrs) = worn(from) {
+            set.sub(&attrs);
+        }
+        reduction.sub(&worn_reduction(from));
     }
-    if let Some(to) = event.to.and_then(worn) {
-        set.add(&to);
+    if let Some(to) = event.to.as_ref() {
+        if let Some(attrs) = worn(to) {
+            set.add(&attrs);
+        }
+        reduction.add(&worn_reduction(to));
     }
     store_armor(event.entity, set);
+    store_reduction(event.entity, reduction);
 }
 
 /// A player put a piece on: `on_equip` names no entity, so the acting player
 /// is the one whose cache changes.
 pub fn equipped(host: &mut dyn Host, event: &mut OnEquipEvent<'_>) {
-    let Some(stack) = event.new.and_then(worn) else {
+    let Some(new) = event.new.as_ref() else {
+        return;
+    };
+    let Some(stack) = worn(new) else {
         return;
     };
     let Some(player) = host.acting_player() else {
@@ -869,9 +1154,13 @@ pub fn equipped(host: &mut dyn Host, event: &mut OnEquipEvent<'_>) {
     if player.entity_id == 0 {
         return;
     }
-    let mut set = armor_of(player.entity_id as u32);
+    let id = player.entity_id as u32;
+    let mut set = armor_of(id);
     set.add(&stack);
-    store_armor(player.entity_id as u32, set);
+    store_armor(id, set);
+    let mut reduction = reduction_of(id);
+    reduction.add(&worn_reduction(new));
+    store_reduction(id, reduction);
 }
 
 /// Refreshes the acting player's whole armour from the equipment slots, which
@@ -884,6 +1173,7 @@ pub fn tick(host: &mut dyn Host, _event: &mut PlayerTickEvent) {
         return;
     }
     let mut set = AttrSet::default();
+    let mut reduction = Reduction::default();
     for slot in [
         EquipmentSlot::Head,
         EquipmentSlot::Chest,
@@ -894,9 +1184,11 @@ pub fn tick(host: &mut dyn Host, _event: &mut PlayerTickEvent) {
             if let Some(attrs) = worn(&stack) {
                 set.add(&attrs);
             }
+            reduction.add(&worn_reduction(&stack));
         }
     }
     store_armor(player.entity_id as u32, set);
+    store_reduction(player.entity_id as u32, reduction);
 }
 
 // ---------------------------------------------------------------------------
@@ -1112,5 +1404,35 @@ mod tests {
         assert_eq!(Attr::CritDamage.default_value(), 1.5);
         assert!(Attr::ArmorPierce.format(2.0) == "+2");
         assert!(Attr::CritChance.format(0.05) == "+5%");
+        assert_eq!(Attr::ProtShred.format(0.2), "+20%");
+        assert_eq!(Attr::ProtPierce.format(2.0), "+2");
+        assert_eq!(Attr::CurrentHpDamage.format(0.15), "+0.1");
+    }
+
+    #[test]
+    fn damage_types_fall_in_java_s_classes() {
+        assert_eq!(damage_class("minecraft:arrow"), "projectile");
+        assert_eq!(damage_class("minecraft:trident"), "projectile");
+        assert_eq!(damage_class("minecraft:explosion"), "explosion");
+        assert_eq!(damage_class("minecraft:fall"), "fall");
+        assert_eq!(damage_class("minecraft:lightning_bolt"), "lightning");
+        assert_eq!(damage_class("minecraft:magic"), "magic");
+        assert_eq!(damage_class("minecraft:player_attack"), "physical");
+        assert_eq!(damage_class("minecraft:mob_attack"), "physical");
+    }
+
+    #[test]
+    fn a_reduction_round_trips_and_sums_per_class() {
+        let mut stack = one("minecraft:diamond_boots");
+        assert!(Reduction::of_stack(&stack).is_empty());
+        attach_reduction(&mut stack, "fall", 0.2);
+        attach_reduction(&mut stack, "fall", 0.1);
+        attach_reduction(&mut stack, "magic", 0.05);
+        let reduction = Reduction::of_stack(&stack);
+        assert!((reduction.get("fall") - 0.3).abs() < 1.0e-9);
+        assert!((reduction.get("magic") - 0.05).abs() < 1.0e-9);
+        assert_eq!(reduction.get("projectile"), 0.0);
+        clear_reduction(&mut stack);
+        assert!(Reduction::of_stack(&stack).is_empty());
     }
 }

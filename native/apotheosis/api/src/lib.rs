@@ -571,9 +571,8 @@ impl Hooks for Apotheosis {
         affix_effects::item_damaged(host, event)
     }
 
-    fn projectile_launch(&self, host: &mut dyn Host, event: &mut ProjectileLaunchEvent<'_>) {
+    fn projectile_launch(&self, _host: &mut dyn Host, event: &mut ProjectileLaunchEvent<'_>) {
         attributes::projectile_launch(event);
-        affix_effects::projectile_launch(host, event);
     }
 
     fn entity_join_level(&self, _host: &mut dyn Host, event: &mut EntityJoinLevelEvent<'_>) -> Flow {

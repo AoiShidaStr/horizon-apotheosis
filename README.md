@@ -185,12 +185,13 @@ a85af177 and covered by unit tests only.
 
 ### Done
 
-- **Fifteen attributes** (`native/apotheosis/api/src/attributes.rs`), stored on
-  an affixed stack in `minecraft:custom_data` under `apotheosis:attributes`
+- **Eighteen attributes** (`native/apotheosis/api/src/attributes.rs`), stored
+  on an affixed stack in `minecraft:custom_data` under `apotheosis:attributes`
   and read back by the hooks: crit chance and crit damage, life steal,
   overheal, dodge chance, armor pierce, armor shred, fire and cold damage,
   experience gained, healing received, arrow damage and velocity, bow draw
-  speed, and mining speed.
+  speed, mining speed, current-health damage, protection shred and protection
+  pierce.
 - **They do something in play**:
   - *Damage*: `living_incoming_damage_v2` scales an attacker's hit by crit,
     fire, cold, pierce and shred (the victim's armor absorption is reduced by
@@ -208,6 +209,11 @@ a85af177 and covered by unit tests only.
     speed scales the charge needed to loose, so a faster bow fires sooner.
   - *Healing*: `living_heal` scales incoming healing by *healing received*
     and refunds the **overheal** share, up to the missing health.
+  - *Current-health damage, shred and pierce*: giant slaying adds its share of
+    the victim's **current** health as physical damage. Protection shred and
+    pierce lower a player victim's real protection points (4 % each, 20 points
+    at most) before the hit's reduction is computed, so the mod's damage
+    reduction and the vanilla protection line agree.
   - *Mining*: `break_speed` scales the break speed of the held tool.
   - *Experience*: `experience_orb_pickup` adds the experience-gained share to
     the orb's value.
@@ -235,36 +241,49 @@ a85af177 and covered by unit tests only.
 - **Rarity counts follow Java**: common 1 affix, uncommon 2, rare 2, epic 3,
   mythic 4. `Ancient` is this port's extension and reuses mythic's ranges with
   five affixes; it is documented rather than invented as a Java rarity.
-- **Not rolled yet** (kept in the generated catalogue with their Java ids and
-  values): the seven attributes this port has no effect for —
+- **Not rolled** (kept in the generated catalogue with their Java ids, kinds
+  and values): the four attributes this port has no effect for —
   `neoforge:swim_speed` (aquatic), `cooldown_reduction` (timekeeping),
-  `neoforge:creative_flight` (unbound), `apothic_attributes:elytra_flight`
-  (winged), `current_hp_damage` (giant slaying), `prot_shred` (nullifying) and
-  `prot_pierce` (runebreaking) — plus every `damage_reduction`,
-  `attribute_toggle`, `stoneforming`, `radial`, `enchantment`, `enlightened`,
-  `omnetic`, `telepathic`, `catalyzing`, `psychic`, `cleaving`, `executing`,
-  `festive`, `thunderstruck`, `magical`, `spectral` and `retreating` entry.
-  Effect affixes that this port *does* implement are listed below; their
-  payouts are approximations, not Java's full per-rarity effect tables.
+  `neoforge:creative_flight` (unbound) and `apothic_attributes:elytra_flight`
+  (winged) — plus every `attribute_toggle`, `stoneforming`, `radial`,
+  `omnetic`, `catalyzing`, `psychic`, `enlightened`, `magical` and `spectral`
+  entry, and the `mob_effect` affixes whose target is an arrow hit the port
+  has no host for (bursting, spelunkers, swift, bloodletting, caustic,
+  omniscient, sophisticated, acidic, grievous, shulkers, devilish). **69 of
+  the 99 Java affixes are rolled**; the other 30 are catalogue-only.
 
 ### Effets d'affixes et boss Apothic Invader
 
 #### Done
 
-- **Fourteen effect affixes** (`native/apotheosis/api/src/affix_effects.rs`,
-  `EFFECT_AFFIXES`) on top of the attribute ones: Venomous and Withering
-  (shield), Weakening, Ensnaring (ranged), Blinding (helmet), Executing,
-  Cleaving, Thunderstruck, Retreating (shield), Durable, Telepathic, Spectral
-  and Magical (ranged), Festive. Their item classes match Java's categories;
-  their minimum rarities are uncommon for venomous/weakening/ensnaring/
-  blinding, rare for telepathic and epic for the rest. Their numbers are
-  port-owned approximations of Java's per-rarity ranges, not a second full
-  table.
-- **Their payouts run in the real hooks**: poison/wither/weakness/slowness on
-  the victim, blindness on the attacker, execution under the rolled health
-  share, a cleave to nearby foes, real lightning, a knockback away from the
-  attacker, less durability wear, drops straight to the inventory, a free
-  spectral arrow, extra magic damage, and doubled kill loot.
+- **Twenty-nine effect affixes** (`native/apotheosis/api/src/affix_effects.rs`)
+  on top of the forty attribute ones, using Java's own kinds: fifteen
+  `mob_effect` (blinding, bolstering, nimble, revitalizing, elusive,
+  weakening, ensnaring, blighted, deathbound, ivy_laced, fleeting, galvanizing,
+  reinforcing, venomous, withering), six `damage_reduction` (blast forged,
+  blockading, deflective, feathery, grounded, runed), two `enchantment`
+  (prosperous: Fortune on a tool, Looting on a bow) and six one-off kinds
+  (cleaving, executing, festive, thunderstruck, retreating, telepathic), plus
+  the port's own Durable.
+- **Their numbers are Java's rolls**, not approximations: each affix keeps its
+  per-rarity `duration`, `amplifier`, `chance`, `targets`, `cooldown` (ticks)
+  and `rolls` as generated from the 8.9.0 data, and `supported` is true only
+  where a hook can actually pay the entry.
+- **Their item classes match Java's categories**: a file with no category list
+  takes its folder's (`shield/retreating`, `generic/telepathic`), and the
+  trident-only arrow targets (ensnaring, blighted, deathbound, ivy laced) are
+  paid because a trident hit reaches `attack_target`.
+- **Their payouts run in the real hooks**: poison/wither/weakness/slowness/
+  blindness and the other mob effects at their rolled duration and amplifier,
+  execution under the rolled health share, a cleave to nearby foes, real
+  lightning, a knockback away from the attacker, less durability wear, drops
+  straight to the inventory, doubled gear from a kill, and the two
+  enchantments written as real item enchantment levels. Mob-effect payouts
+  respect Java's per-affix cooldown before firing again.
+- **Damage reduction is applied to every damage route**: the six armour affixes
+  are read per damage class (explosion, physical, projectile, fall, lightning,
+  magic) and cached per entity, so the reduction holds for hits v1 and v2 see
+  alike. Current-health damage lands as physical damage after the blow.
 - They are **extra affixes**, never replacements: `apply_affixes` still rolls
   the same number of attribute modifiers and lore lines, then adds at most one
   effect affix when the tier allows it. The roll is stored in
@@ -290,14 +309,23 @@ a85af177 and covered by unit tests only.
   grievous and knowledge effects have no equivalent here.
 - A mob's `active_effects` are merged into its NBT; a mod-added effect or a
   client-side effect icon beyond vanilla's is not shown.
-- Venomous, Withering and Retreating fire on any hit taken with a shield in
-  the off hand, not only on an actual shield block: the hook API does not
-  expose the block event. Their per-rarity amplifiers and cooldowns are not
-  modelled.
-- Magical adds its share as damage instead of adding vanilla's magic damage
-  tags to the arrow's damage source, so armour is not literally bypassed.
+- Venomous, Withering, Galvanizing, Reinforcing and Retreating fire on any hit
+  taken with a shield in the off hand, not only on an actual shield block: the
+  hook API does not expose the block event.
+- An arrow hit has no weapon stack of its own, so `arrow_target`/`arrow_self`
+  `mob_effect` affixes (bursting, spelunkers, swift, bloodletting, caustic,
+  omniscient, sophisticated, acidic, grievous, shulkers, devilish) stay
+  catalogue-only; only a trident's arrow target is paid.
+- Effects on the victim's gear are read for players only: a mob's armour lives
+  in its NBT, not in `player_equipment`.
+- Protection shred and pierce move a **player** victim's protection points;
+  a mob's protection is not modelled.
+- Thunderstruck's Java data carries only the strike damage, so this port adds
+  its own one-in-five chance of the lightning.
 - Telepathy and Festive act on the killer's main hand; a projectile kill reads
   the bow still in hand, not the arrow's own affixes.
+- Durable has no Java data entry: it is a port extension at 15 % per tier,
+  capped at 50 %.
 - A boss roll is per natural spawn, not per dimension tier: the frontier /
   ascent / summit / pinnacle chances are collapsed to 2 % for this slice.
 - Invader names are generated server-side from translated components; there
@@ -310,7 +338,8 @@ a85af177 and covered by unit tests only.
 - Overheal is modelled as `minecraft:absorption`; the original keeps a
   separate overheal pool with its own decay and display.
 - Armor pierce and shred lower the damage reduction computed by this mod, not
-  vanilla's armor points, so the armour bar does not move.
+  vanilla's armor points, so the armour bar does not move. Protection shred and
+  pierce do move a player's protection points; a mob victim has none to move.
 - Dodge is rolled server-side per hit; there is no client animation or sound.
 - The mining-speed attribute is applied through `break_speed` only, so it does
   not show on the held tool's vanilla `mining_efficiency` line.
