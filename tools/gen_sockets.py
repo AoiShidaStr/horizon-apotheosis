@@ -60,8 +60,8 @@ MESSAGES = {
     "apotheosis.purity.line": ("Purity: %s", "Pureté : %s"),
     "apotheosis.socket.total": ("Sockets: %s/%s", "Sockets : %s/%s"),
     "apotheosis.socket.line": (
-        "%2$s %1$s: %3$s %4$s",
-        "%2$s %1$s : %3$s %4$s",
+        "%2$s %1$s: %3$s",
+        "%2$s %1$s : %3$s",
     ),
     "apotheosis.socket.done": ("Socketed %s (%s).", "Gemme sertie : %s (%s)."),
     "apotheosis.socket.full": (

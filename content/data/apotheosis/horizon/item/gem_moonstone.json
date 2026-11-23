@@ -1,8 +1,0 @@
-{
-  "template": "minecraft:amethyst_shard",
-  "max_stack_size": 16,
-  "rarity": "epic",
-  "components": {
-    "minecraft:enchantment_glint_override": true
-  }
-}

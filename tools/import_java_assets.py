@@ -45,30 +45,37 @@ JAVA_NAMESPACES = (
 )
 LOCALES = ("en_us", "fr_fr")
 
-# Our ids that map to a differently named Java id.  Kept deliberately small and
-# extensible: the gems workstream will add entries such as
-# "gem_ruby": ("apotheosis", "gem"), once it knows the Java id/model.
+# Our ids that map to a differently named Java id.
 JAVA_ALIASES: dict[str, tuple[str, str]] = {
     "enchantment_library": ("apothic_enchanting", "library"),
 }
 
-# Gems and gem blocks: skipped for now (another workstream owns them).
-GEM_NAMES = (
-    "amber",
-    "amethyst",
-    "bloodstone",
-    "citrine",
-    "jade",
-    "moonstone",
-    "onyx",
-    "opal",
-    "peridot",
-    "ruby",
-    "sapphire",
-    "topaz",
+# The real Apotheosis gems: one item (`apotheosis:gem`) whose model selector
+# names `item/gem_<name>`, so each of these Java textures is imported under our
+# own texture id.  They live at `textures/items/gems/<name>.png` in the jar.
+GEM_TEXTURES = (
+    "ballast",
+    "blood_lord",
+    "brawlers",
+    "breach",
+    "combatant",
+    "earth",
+    "endersurge",
+    "guardian",
+    "inferno",
+    "lightning",
+    "lunar",
+    "mageslayer",
+    "molten_breach",
+    "royalty",
+    "samurai",
+    "slipstream",
+    "solar",
+    "splendor",
+    "tyrannical",
+    "verdant_ruin",
+    "warlord",
 )
-GEM_IDS = {f"gem_{name}" for name in GEM_NAMES}
-GEM_BLOCK_IDS = {f"gem_block_{name}" for name in GEM_NAMES}
 
 # Items that only exist in Apotheosis (the Java mod) and not in Apothic
 # Enchanting, or whose Apotheosis copy is the canonical one.
@@ -346,8 +353,6 @@ class Importer:
             ):
                 return namespace, java_name
             return None
-        if name in GEM_BLOCK_IDS:
-            return None
         order = (
             ("apotheosis", "apothic_enchanting")
             if name in APOTHEOSIS_BLOCKS
@@ -367,8 +372,6 @@ class Importer:
                 return namespace, java_name
             if self.source.exists(f"assets/{namespace}/models/block/{java_name}.json"):
                 return namespace, java_name
-            return None
-        if name in GEM_IDS or name in GEM_BLOCK_IDS:
             return None
         if name in self.block_map:
             namespace, java_name = self.block_map[name]
@@ -514,6 +517,8 @@ class Importer:
             self.import_block(name, source)
         for name, source in self.item_map.items():
             self.import_item(name, source)
+        for gem in GEM_TEXTURES:
+            self.copy_texture(f"apotheosis:item/gems/{gem}")
         lang_counts = self.import_lang()
         return {
             "blocks": len(self.blockstates),
@@ -627,9 +632,9 @@ def report(
         f"- clés lang fr_fr : {counts['lang_fr_fr']}",
         "",
         "Les ids sans équivalent Java gardent nos définitions et nos textures "
-        "originales de `content/`. Les gemmes et blocs de gemmes sont volontairement "
-        "laissés au chantier « gemmes » ; `JAVA_ALIASES` dans le script est la table "
-        "à compléter pour eux.",
+        "originales de `content/`. Les gemmes viennent de Java : une seule gemme "
+        "(`apotheosis:gem`) dont le modèle choisit la texture du type qu'elle porte, "
+        "ci-dessous en liste à part.",
         "",
         "## Blocs",
         "",
@@ -639,10 +644,7 @@ def report(
     for name in block_names:
         source = importer.block_map.get(name)
         if source is None:
-            if name in GEM_BLOCK_IDS:
-                reason = "gemme — non importée (chantier gemmes)"
-            else:
-                reason = "original — pas d'équivalent Java"
+            reason = "original — pas d'équivalent Java"
             lines.append(f"| `{name}` | {reason} | — |")
             continue
         namespace, java_name = source
@@ -662,10 +664,7 @@ def report(
     for name in item_names:
         source = importer.item_map.get(name)
         if source is None:
-            if name in GEM_IDS or name in GEM_BLOCK_IDS:
-                reason = "gemme — non importée (chantier gemmes)"
-            else:
-                reason = "original — pas d'équivalent Java"
+            reason = "original — pas d'équivalent Java"
             lines.append(f"| `{name}` | {reason} | — |")
             continue
         namespace, java_name = source
@@ -678,11 +677,12 @@ def report(
         )
     lines += [
         "",
-        "## Gemmes laissées au chantier « gemmes »",
+        "## Textures des gemmes",
         "",
-        "Objets : " + ", ".join(f"`{name}`" for name in sorted(GEM_IDS)) + ".",
-        "",
-        "Blocs : " + ", ".join(f"`{name}`" for name in sorted(GEM_BLOCK_IDS)) + ".",
+        "`apotheosis:gem` porte son type dans ses données ; son modèle "
+        "(`minecraft:select`) choisit `apotheosis:item/gem_<nom>`, dont la couche "
+        "est la texture Java `items/gems/<nom>.png`. Textures importées : "
+        + ", ".join(f"`{name}`" for name in GEM_TEXTURES) + ".",
         "",
         "## Correspondances explicites",
         "",

@@ -7,13 +7,13 @@ Source inspectée : `java-ref`
 ## Résumé
 
 - blocs avec blockstate Java : 27
-- objets avec modèle Java : 41
-- modèles copiés : 99
-- textures copiées : 85
-- clés lang en_us : 1735
-- clés lang fr_fr : 1609
+- objets avec modèle Java : 42
+- modèles copiés : 100
+- textures copiées : 107
+- clés lang en_us : 1699
+- clés lang fr_fr : 1575
 
-Les ids sans équivalent Java gardent nos définitions et nos textures originales de `content/`. Les gemmes et blocs de gemmes sont volontairement laissés au chantier « gemmes » ; `JAVA_ALIASES` dans le script est la table à compléter pour eux.
+Les ids sans équivalent Java gardent nos définitions et nos textures originales de `content/`. Les gemmes viennent de Java : une seule gemme (`apotheosis:gem`) dont le modèle choisit la texture du type qu'elle porte, ci-dessous en liste à part.
 
 ## Blocs
 
@@ -30,18 +30,6 @@ Les ids sans équivalent Java gardent nos définitions et nos textures originale
 | `echoing_sculkshelf` | `apothic_enchanting:echoing_sculkshelf` | `blockstates/echoing_sculkshelf.json` → `apothic_enchanting:block/echoing_sculkshelf` |
 | `enchantment_library` | `apothic_enchanting:library` | `blockstates/enchantment_library.json` → `apothic_enchanting:block/library`, variant `""` ajouté (notre bloc n'a pas la propriété Java) |
 | `endshelf` | `apothic_enchanting:endshelf` | `blockstates/endshelf.json` → `apothic_enchanting:block/endshelf` |
-| `gem_block_amber` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_amethyst` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_bloodstone` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_citrine` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_jade` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_moonstone` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_onyx` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_opal` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_peridot` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_ruby` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_sapphire` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_topaz` | gemme — non importée (chantier gemmes) | — |
 | `gem_cutting_table` | `apotheosis:gem_cutting_table` | `blockstates/gem_cutting_table.json` → `apotheosis:block/gem_cutting_table`, variant `""` ajouté (notre bloc n'a pas la propriété Java) |
 | `glowing_hellshelf` | `apothic_enchanting:glowing_hellshelf` | `blockstates/glowing_hellshelf.json` → `apothic_enchanting:block/glowing_hellshelf` |
 | `heart_seashelf` | `apothic_enchanting:heart_seashelf` | `blockstates/heart_seashelf.json` → `apothic_enchanting:block/heart_seashelf` |
@@ -76,32 +64,9 @@ Les ids sans équivalent Java gardent nos définitions et nos textures originale
 | `enchantment_library` | `apothic_enchanting:library` | `items/enchantment_library.json` → `apothic_enchanting:item/library` |
 | `endshelf` | `apothic_enchanting:endshelf` | `items/endshelf.json` → `apothic_enchanting:item/endshelf` |
 | `extraction_tome` | `apothic_enchanting:extraction_tome` | `items/extraction_tome.json` → `apothic_enchanting:item/extraction_tome` |
-| `gem_amber` | gemme — non importée (chantier gemmes) | — |
-| `gem_amethyst` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_amber` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_amethyst` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_bloodstone` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_citrine` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_jade` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_moonstone` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_onyx` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_opal` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_peridot` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_ruby` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_sapphire` | gemme — non importée (chantier gemmes) | — |
-| `gem_block_topaz` | gemme — non importée (chantier gemmes) | — |
-| `gem_bloodstone` | gemme — non importée (chantier gemmes) | — |
-| `gem_citrine` | gemme — non importée (chantier gemmes) | — |
+| `gem` | `apotheosis:gem` | `items/gem.json` → `apotheosis:item/gem` |
 | `gem_cutting_table` | `apotheosis:gem_cutting_table` | `items/gem_cutting_table.json` → `apotheosis:item/gem_cutting_table` |
 | `gem_dust` | `apotheosis:gem_dust` | `items/gem_dust.json` → `apotheosis:item/gem_dust` |
-| `gem_jade` | gemme — non importée (chantier gemmes) | — |
-| `gem_moonstone` | gemme — non importée (chantier gemmes) | — |
-| `gem_onyx` | gemme — non importée (chantier gemmes) | — |
-| `gem_opal` | gemme — non importée (chantier gemmes) | — |
-| `gem_peridot` | gemme — non importée (chantier gemmes) | — |
-| `gem_ruby` | gemme — non importée (chantier gemmes) | — |
-| `gem_sapphire` | gemme — non importée (chantier gemmes) | — |
-| `gem_topaz` | gemme — non importée (chantier gemmes) | — |
 | `glowing_hellshelf` | `apothic_enchanting:glowing_hellshelf` | `items/glowing_hellshelf.json` → `apothic_enchanting:item/glowing_hellshelf` |
 | `godforged_pearl` | `apotheosis:godforged_pearl` | `items/godforged_pearl.json` → `apotheosis:item/godforged_pearl` |
 | `heart_seashelf` | `apothic_enchanting:heart_seashelf` | `items/heart_seashelf.json` → `apothic_enchanting:item/heart_seashelf` |
@@ -129,11 +94,9 @@ Les ids sans équivalent Java gardent nos définitions et nos textures originale
 | `stoneshelf` | `apothic_enchanting:stoneshelf` | `items/stoneshelf.json` → `apothic_enchanting:item/stoneshelf` |
 | `timeworn_fabric` | `apotheosis:timeworn_fabric` | `items/timeworn_fabric.json` → `apotheosis:item/timeworn_fabric` |
 
-## Gemmes laissées au chantier « gemmes »
+## Textures des gemmes
 
-Objets : `gem_amber`, `gem_amethyst`, `gem_bloodstone`, `gem_citrine`, `gem_jade`, `gem_moonstone`, `gem_onyx`, `gem_opal`, `gem_peridot`, `gem_ruby`, `gem_sapphire`, `gem_topaz`.
-
-Blocs : `gem_block_amber`, `gem_block_amethyst`, `gem_block_bloodstone`, `gem_block_citrine`, `gem_block_jade`, `gem_block_moonstone`, `gem_block_onyx`, `gem_block_opal`, `gem_block_peridot`, `gem_block_ruby`, `gem_block_sapphire`, `gem_block_topaz`.
+`apotheosis:gem` porte son type dans ses données ; son modèle (`minecraft:select`) choisit `apotheosis:item/gem_<nom>`, dont la couche est la texture Java `items/gems/<nom>.png`. Textures importées : `ballast`, `blood_lord`, `brawlers`, `breach`, `combatant`, `earth`, `endersurge`, `guardian`, `inferno`, `lightning`, `lunar`, `mageslayer`, `molten_breach`, `royalty`, `samurai`, `slipstream`, `solar`, `splendor`, `tyrannical`, `verdant_ruin`, `warlord`.
 
 ## Correspondances explicites
 

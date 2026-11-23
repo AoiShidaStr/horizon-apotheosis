@@ -65,24 +65,22 @@ class ModelTests(unittest.TestCase):
 
 
 class AliasTests(unittest.TestCase):
-    def test_alias_can_enable_a_gem_later(self):
-        # The gem workstream will add e.g. gem_ruby -> apotheosis:gem; the
-        # generic gem skip must not run before that explicit table.
+    def test_an_explicit_alias_wins_over_a_same_named_java_asset(self):
         source = FakeSource(
             {
-                "assets/apotheosis/blockstates/gem_ruby.json": {},
-                "assets/apotheosis/models/item/gem_ruby.json": {},
+                "assets/apotheosis/blockstates/library.json": {},
+                "assets/apotheosis/models/item/library.json": {},
             }
         )
         importer = java.Importer(source, Path("."))
         with mock.patch.dict(
-            java.JAVA_ALIASES, {"gem_ruby": ("apotheosis", "gem_ruby")}
+            java.JAVA_ALIASES, {"library": ("apotheosis", "library")}
         ):
             self.assertEqual(
-                importer.find_block("gem_ruby"), ("apotheosis", "gem_ruby")
+                importer.find_block("library"), ("apotheosis", "library")
             )
             self.assertEqual(
-                importer.find_item("gem_ruby"), ("apotheosis", "gem_ruby")
+                importer.find_item("library"), ("apotheosis", "library")
             )
 
 

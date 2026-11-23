@@ -1,16 +1,5 @@
 {
   "values": [
-    "apotheosis:gem_ruby",
-    "apotheosis:gem_amber",
-    "apotheosis:gem_topaz",
-    "apotheosis:gem_amethyst",
-    "apotheosis:gem_sapphire",
-    "apotheosis:gem_peridot",
-    "apotheosis:gem_jade",
-    "apotheosis:gem_citrine",
-    "apotheosis:gem_onyx",
-    "apotheosis:gem_moonstone",
-    "apotheosis:gem_bloodstone",
-    "apotheosis:gem_opal"
+    "apotheosis:gem"
   ]
 }

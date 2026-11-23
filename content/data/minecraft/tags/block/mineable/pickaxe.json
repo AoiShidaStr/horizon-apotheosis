@@ -1,17 +1,5 @@
 {
   "values": [
-    "apotheosis:gem_block_ruby",
-    "apotheosis:gem_block_amber",
-    "apotheosis:gem_block_topaz",
-    "apotheosis:gem_block_amethyst",
-    "apotheosis:gem_block_sapphire",
-    "apotheosis:gem_block_peridot",
-    "apotheosis:gem_block_jade",
-    "apotheosis:gem_block_citrine",
-    "apotheosis:gem_block_onyx",
-    "apotheosis:gem_block_moonstone",
-    "apotheosis:gem_block_bloodstone",
-    "apotheosis:gem_block_opal",
     "apotheosis:gem_cutting_table",
     "apotheosis:salvaging_table",
     "apotheosis:reforging_table"
