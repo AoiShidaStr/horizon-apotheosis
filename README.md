@@ -18,73 +18,58 @@ port has been played in game yet: every part is type-checked against Horizon
 a85af177 and covered by unit tests only.
 
 > **Clean room.** Nothing here is copied from Apotheosis: neither code nor
-> art. The behaviour (tiers, gems, affixes, boss-only high tiers) comes from the
-> mod's public description; the code is this port's own, written against Horizon's
-> native hook API, and the textures are original generated 16x16 pixel art. Apotheosis' MIT
-> licence would allow reuse; this slice did not need it.
+> art. The code is this port's own, written against Horizon's native hook API.
+> The gem catalogue and the other game values come from the mod's data files
+> (MIT, values only). The Java textures, models and lang files are All Rights
+> Reserved: they never enter Git, `tools/import_java_assets.py` copies them into
+> the git-ignored `content-java/` layer at pack time, and the few textures this
+> port draws itself (gem dust) are generated 16x16 pixel art.
 
 ## Done
 
 - **Content mod `.hmod`** (`side = "both"`, id `apotheosis`) with creative
-  entries for twelve gems, gem dust, twelve decorative gem blocks, twenty-three
-  enchanting shelves and five rarity salvage materials. All of them are
-  craftable or salvageable in survival (see *Recipes* below).
-
-- **Content mod `.hmod`** (`side = "both"`, id `apotheosis`) with **65 creative
-  entries**: twelve gems, gem dust, twelve decorative gem blocks, twenty-three
-  enchanting shelves and four tome/cobweb items. All of them are craftable in
-  survival (see *Recipes* below).
-- **Twelve gems, two per tier** — `gem_ruby`, `gem_amber`, `gem_topaz`,
-  `gem_amethyst`, `gem_sapphire`, `gem_peridot`, `gem_jade`, `gem_citrine`,
-  `gem_onyx`, `gem_moonstone`, `gem_bloodstone`, `gem_opal` — as data-driven
-  items on `minecraft:amethyst_shard` that stack to 16, each with its own model,
-  generated 16x16 texture, en_us/fr_fr name and tooltip. Each gem's vanilla
-  rarity follows its tier (common → epic), so a ruby, a topaz and a sapphire
-  already differ in name colour; the four mythic and ancient gems carry
-  `minecraft:enchantment_glint_override`, so they shimmer in the inventory
-  before their tooltip is read.
+  entries for the gem item, gem dust, the enchanting shelves and the rarity
+  salvage materials. All of them are craftable or salvageable in survival (see
+  *Recipes* below).
+- **The real Apotheosis gems** — one item, `apotheosis:gem`, carrying its gem
+  type in `minecraft:custom_data` (`apotheosis:gem`) and its purity in
+  `apotheosis:gem_purity`, exactly as the mod stores them. The catalogue is
+  generated from Apotheosis 8.9.0's `data/apotheosis/gems/**`
+  (`tools/gen_java_gems.py` → `java_gems.rs`): 21 gems — the Twilight Forest
+  ones are left out, that mod is not installed — with their weights, purity
+  floors, dimension constraints and per-purity bonus values. A
+  `minecraft:select` model on `minecraft:custom_model_data` picks the imported
+  Java texture of the type (`apotheosis:item/gem_<name>`), and the name comes
+  from the Java translation key `item.apotheosis.gem.<type>`.
 - **Six tiers**, `Common`, `Uncommon`, `Rare`, `Epic`, `Mythic`, `Ancient`
   (`Tier` in `native/apotheosis/api/src/lib.rs`): the tier decides how many
   affixes an item rolls (0, 1, 2, 3, 4, 5) and how strong they are (×1 to ×4).
   Vanilla's `minecraft:rarity` component only names four of them; mythic and
   ancient are shown in the tooltip and in an affixed item's lore.
-- **Gems do something** (`modify_default_components`, API 79): each gem inserts
-  a real `minecraft:attribute_modifiers` entry in the **off-hand** slot, so the
-  game applies it through its own equipment code:
-
-  | gem | tier | off-hand bonus |
-  | --- | --- | --- |
-  | ruby | common | +1 attack damage |
-  | amber | common | +15% mining speed |
-  | topaz | uncommon | +0.01 movement speed (+10%) |
-  | amethyst | uncommon | +0.4 attack speed (+10%) |
-  | sapphire | rare | +2 max health |
-  | peridot | rare | +1 luck |
-  | jade | epic | +2 armor |
-  | citrine | epic | +0.5 attack knockback |
-  | onyx | mythic | +3 attack damage |
-  | moonstone | mythic | +3 max health |
-  | bloodstone | ancient | +4 max health |
-  | opal | ancient | +3 armor toughness |
-
-  Its tooltip (`tooltip`, API 12) shows the tier in the tier's colour and the
-  effect line, both translated (en_us/fr_fr).
+- **A gem does nothing until it is socketed**, as in Apotheosis: no off-hand
+  bonus, no default attribute. Its tooltip (`tooltip`, API 12) lists the bonus
+  it gives for each gear class at its purity, and a socketed gem's line appears
+  on the piece that holds it.
+- **Bonus types this port can apply**: `attribute` and `multi_attribute`
+  (each modifier with a supported attribute) and vanilla `enchantment`
+  (`existing_only` when the Java mode is not `global`). Every other type —
+  `durability`, `damage_reduction`, `mob_effect`, `all_stats`, `drop_transform`,
+  `radial`, `omnetic`, `mageslayer`, `bloody_arrow`, `leech_block`,
+  `anti_gravity_arrow`, and modded enchantments — is **recorded, not
+  substituted**, in the generated `unsupported`/`unsupported_attributes` fields
+  of `java_gems.rs`. Unsupported attributes are `prot_pierce`,
+  `current_hp_damage`, `ghost_health`, `generic.gravity`, `generic.scale`,
+  `generic.step_height`, `neoforge:swim_speed` and `player.*_interaction_range`.
+  The Apothic `add_multiplied_base`/`add_multiplied_total` operations are
+  carried as ordinary modifiers.
 - **Recipes for everything** (vanilla 26.3 data-pack format under
   `data/apotheosis/recipe/`):
   - **Gem dust** (`gem_dust`, a stack of 64) from one amethyst shard → 2 dust,
     and 1 gem (via the `apotheosis:gems` item tag) → 3 dust.
-  - **Each gem**: four gem dust around a themed vanilla catalyst (redstone for
-    ruby, honeycomb for amber, glowstone dust for topaz, amethyst shard for
-    amethyst, lapis for sapphire, emerald for peridot, prismarine shard for
-    jade, gold ingot for citrine, obsidian for onyx, quartz for moonstone,
-    magma cream for bloodstone, prismarine crystals for opal).
-  - **Each gem block**: 9 gems → 1 block, and 1 block → its 9 gems back.
-- **Twelve gem blocks** (`gem_block_<gem>`): decorative `minecraft:amethyst_block`
-  templates with generated faceted textures, hardness and blast resistance
-  rising with the tier, a **light level from 3 (common) to 8 (ancient)**, own
-  blockstate/model/item model, a self-drop loot table, and an entry in the
-  pickaxe tag. A Ruby Block is storage, light and decoration; the working
-  tables are blocks of their own.
+  - **Gem cutting** (`gem_cutting`) and the gem blocks do not exist in this
+    port: the Java gems are cut at the gem cutting table on Horizon, not
+    crafted. The dust recipe reads the `apotheosis:gems` tag, which now holds
+    the single `apotheosis:gem` item.
 - **Affixes on looted gear** (`loot_drops`, API 75): gear a mob drops (a
   zombie's sword, a skeleton's bow…) is rolled into a rarity and carries real
   `minecraft:attribute_modifiers`, a lore that names each affix, and the
@@ -92,15 +77,14 @@ a85af177 and covered by unit tests only.
   Attributes et affixes* below), each rolled only onto gear it can affect.
   Distinct affixes per item, scaled by tier; an affixed copy keeps the item's
   own base modifiers in front of the rolled ones.
-- **Gems from mobs**: an ordinary mob killed by a player has a 12% chance to
-  drop one of the four low gems (ruby, amber, topaz, amethyst). **High tiers
-  stay boss-only**: an ordinary mob's gear rolls uncommon → epic only
-  (55/30/15); a *wither*, *ender dragon*, *warden* or *elder guardian* rolls
-  rare → ancient (25/40/25/10) and always drops one high gem, cycling onyx,
-  moonstone, bloodstone, opal.
+- **Gems from mobs**: `gems::roll` picks a gem by dimension and Java weight,
+  above its `min_purity`; an ordinary mob killed by a player has a 12% chance
+  to drop one, a *wither*, *ender dragon*, *warden* or *elder guardian* always
+  does. Flawless and Perfect rolls stay boss-only.
 - **Gems from vanilla chests** (`loot_table_load`, API 75): every
-  `minecraft:chests/*` table has an 8% chance to roll one weighted common or
-  uncommon gem. Mythic and ancient gems remain boss-only.
+  `minecraft:chests/*` table has an 8% chance to roll the `apotheosis:chest_gems`
+  pool, one weighted entry per gem, whose function picks the type and its
+  purity.
 - **Extra drops**: a boss always drops an affixed diamond piece (or a bow); an
   ordinary mob killed by a player has a 4% chance to drop an affixed iron piece.
 - **`/apoth reforge`** (`register_commands`/`perform_command`, API 8): rolls
@@ -123,11 +107,12 @@ a85af177 and covered by unit tests only.
   (`inventory_tick`, API 39, through `Host::carried_stack`) and its bonus
   becomes a real `minecraft:attribute_modifiers` entry on the piece
   (`apotheosis:socket_<n>_<gem>`, `add_value`, `hand` or `armor` slot), beside
-  the affixes' entries, so the game applies it when the piece is worn. An
-  unsocketed gem keeps the off-hand bonus the content mod gives it.
-- **Purity** Cracked, Chipped, Flawed, Normal, Flawless, Perfect (×0.2, ×0.4,
-  ×0.7, ×1, ×1.4, ×2 on the gem's bonus), rolled where the gem drops
-  (`loot_drops`): ordinary loot 30/40/20/8/2/1, boss gems 5/20/35/28/10/2.
+  the affixes' entries, so the game applies it when the piece is worn. A gem
+  that is not socketed has no effect, as in Apotheosis.
+- **Purity** Cracked, Chipped, Flawed, Normal, Flawless, Perfect, each gem's
+  bonus value read at the purity's index from its Java data (no invented
+  multiplier), rolled where the gem drops (`loot_drops`) from the Java purity
+  weights and above the gem's `min_purity`.
   Shown in the gem's tooltip. A gem in the main hand with 4 gem dust in the
   off hand, right-clicked, is polished one step up (4 dust per step, Perfect
   is the ceiling).

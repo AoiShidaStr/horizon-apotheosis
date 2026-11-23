@@ -67,7 +67,7 @@ Deux règles :
 ### 0.3 Vérifier que le mod est bien là
 
 ```
-horizon-ctl command "give @s apotheosis:gem_ruby"
+horizon-ctl command "give @s apotheosis:gem"
 horizon-ctl inventory
 ```
 
@@ -99,9 +99,9 @@ Rien de `Exception`, `Unknown`, `not loaded`, `Failed` ne doit venir de
 
 ### 1.1 Les douze gemmes ont une infobulle et un vrai bonus
 
-Les gemmes : `gem_ruby`, `gem_amber`, `gem_topaz`, `gem_amethyst`, `gem_sapphire`,
-`gem_peridot`, `gem_jade`, `gem_citrine`, `gem_onyx`, `gem_moonstone`,
-`gem_bloodstone`, `gem_opal`.
+Les gemmes sont les 21 gemmes Java, réunies dans un seul objet `apotheosis:gem` :
+son type et sa pureté sont dans ses données, et une gemme ne fait rien avant
+d'être sertie.
 
 | Gemme | Palier | Bonus en main secondaire | Attribut à lire |
 | --- | --- | --- | --- |
@@ -464,7 +464,7 @@ Perfect 1 % ; sur un boss : 5/20/35/28/10/2), affichée dans son infobulle.
 Polissage : gemme en main, **4 poussières de gemme** en secondaire, clic droit.
 
 ```
-horizon-ctl command "give @s apotheosis:gem_ruby"
+horizon-ctl command "give @s apotheosis:gem"
 horizon-ctl command "item replace entity @s weapon.offhand with apotheosis:gem_dust 4"
 horizon-ctl select apotheosis:gem_ruby
 horizon-ctl use-item
