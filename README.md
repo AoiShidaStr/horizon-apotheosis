@@ -3,14 +3,16 @@
 A clean-room Horizon port of [Apotheosis](https://github.com/Shadows-of-Fire/Apotheosis)
 by Shadows_of_Fire (MIT) and its 1.21 companions **Apothic Enchanting**,
 **Apothic Attributes** and **Apothic Spawners**, as the Saison 1 server ran them
-on NeoForge 1.21.1. Version 0.5.0 targets Horizon a85af177 (native hook API 415).
+on NeoForge 1.21.1 (Apotheosis 8.9.0, Apothic Enchanting 1.6.4, Apothic Attributes
+2.11.0, Apothic Spawners 1.4.0). Version 0.6.0 targets Horizon a85af177 (native
+hook API 415).
 
 | Part | Section |
 | --- | --- |
-| Gems, rarities, affixes from loot, `/apoth` | *Done* / *Missing* below |
+| The 21 Java gems, rarities, loot, `/apoth` | *Done* / *Missing* below |
 | Sockets, gem purity, sigils, reforging, salvaging, gem cutting | *Gemmes, sockets, reforge et recyclage* |
-| Apothic attributes, 40 affixes, affix effects, Apothic Invader bosses | *Apothic Attributes et affixes* |
-| Enchanting shelves and Eterna, tomes, Prismatic Web, Enchantment Library | *Apothic Enchanting* |
+| Apothic attributes, the 99 Java affixes (69 applied), Apothic Invader bosses | *Apothic Attributes et affixes* |
+| Shelves and Eterna, infusion, tomes, Prismatic Web, Enchantment and Ender Library | *Apothic Enchanting* |
 | Silk-touch spawners and Apothic spawner modifiers | *Apothic Spawners* |
 
 In-game test plan (French): [`TEST-EN-JEU.md`](TEST-EN-JEU.md). Nothing in this
@@ -649,19 +651,11 @@ a85af177 and covered by unit tests only.
   carried spawner's tooltip, not in a screen.
 - **The Apotheosis bosses** are another chantier's, not this one's.
 
-## Known issues (review of 2026-11-22, not fixed yet)
+## Fixed since 0.5.0
 
-An independent review found these item duplication or loss risks in the
-sockets, sigils, reforge and salvage code. They are **not fixed** in 0.5.0;
-avoid these actions on a shared server until they are:
-
-- `sockets.rs:924`: consume_seal() retire le sigil de la pile qui occupe la case sélectionnée au moment du tick, pas de celle qui a été cliquée : use_seal() (l.837-868) ne mémorise ni la case ni l'objet, et add_socket/withdraw/rebirth/enhance ne vérifient même pas que `main` est encore un sigil avant d'appeler consume_seal (l.947, 978, 991, 1025).
-- `sockets.rs:1170`: polish() ne vérifie pas que la pile de la main (relue au tick, l.810) est encore une gemme : il applique set_purity() à n'importe quel objet et retire 4 gem dust de la main gauche. Le contrôle de use_item (l.751-757) porte sur la pile du clic, perdue entre-temps.
-- `sockets.rs:976`: withdraw() retire les gemmes des chambres et les donne avec `let _ = host.give_stack(...)` : l'échec (inventaire plein) est ignoré, alors que la pièce a déjà été réécrite sans ses chambres (l.968-971) et que le sigil est consommé (l.978).
-- `sockets.rs:1238`: salvage() rend les gemmes serties avec `let _ = host.give_stack(player, gem)` : une gemme qui ne rentre pas est perdue, et seul le matériau est contrôlé (`if given < count`, l.1249). La pièce est détruite avant (l.1229).
-- `sockets.rs:819`: Les actions différées relisent la pièce de la main gauche au tick (l.819)` et l'appliquent sans vérifier que c'est celle validée au clic (use_seal l.847-857, use_item l.743-756) : sertir, polir, ajouter une chambre, améliorer ou reroll agissent sur la pièce qui s'y trouve alors, et le consommable (gemme, poudre, sigil) est débité quand même.
-- `lib.rs:1259`: La reforge d'une pièce affixée débite les 3 niveaux (l.1251) puis pose juste `Action::Reforge` ; sockets::reforge (l.1192-1201) ne rend les niveaux que si la pile tenue n'est pas reforgable. Une autre pièce affixée tenue au tick est donc rerollée à la place de celle payée.
-- `lib.rs:1199`: `/apoth salvage` valide la pièce au moment de la commande (begin_salvage, sockets.rs:763-776, contrôle `has_affixes` sur held_stack) puis salvage() (sockets.rs:1216) détruit la pile tenue au tick suivant, sans revérifier que c'est la même.
+Two independent reviews found item duplication or loss risks (sockets, sigils,
+reforge, salvage, withdrawn gems) and stacking stats on reroll. All are fixed,
+each with a regression test; the reports are summarised in the commit history.
 
 ## Install
 
@@ -679,38 +673,28 @@ Both halves use the id `apotheosis`.
 
 ## Build
 
-- Content: `python tools/gen_content.py` regenerates the item and block data,
-  models, blockstates, loot tables, recipes, tags, names and textures;
-  `python tools/gen_sockets.py` adds the rarity salvage materials, their
-  textures, recipes, names and creative-tab entries without touching the gem
-  entries; `python tools/pack.py` writes `target/apotheosis.hmod` and
-  `target/apotheosis.hnmod`.
-- Native: the crate is checked against the pinned Horizon commit on the build
-  VPS with `tools/vps/sync.sh full` (see `tools/vps/check.sh` and
-  `tools/vps/verify.sh`); it builds as a trait mod with
-  `horizon-launcher native-build`.
+1. Import the Java assets you own into the git-ignored layer (textures, models,
+   lang; they are All Rights Reserved and never committed):
+   `python tools/import_java_assets.py "<Prism instance>/minecraft/mods"`
+   (the four Saison 1 jars).
+2. Regenerate the port's own content if needed: `python tools/gen_*.py`
+   (idempotent: running them again changes nothing).
+3. `python tools/pack.py` writes `target/apotheosis.hmod` (with the Java layer
+   when it exists; `--no-java` without) and `target/apotheosis.hnmod`; check
+   them with `cargo-horizon-mod check <file>`.
+4. Tests: the native crate's unit tests run against the pinned Horizon commit
+   (`cargo test -p mod-apotheosis` in a Horizon a85af177 workspace with this
+   crate staged, as `tools/vps/stage.sh` does); the content tests are
+   `python tools/test_content.py`, `tools/test_lang_keys.py` and
+   `tools/test_import_java_assets.py`.
 
 ### Build state (2026-11-23)
 
-- v0.5.0 compiles against the pinned commit `a85af177`:
-  `bash horizon-work/check.sh apoitems … test` ends with
-  `RESULT check=0 test=0`, and **126 unit tests pass**, including the new ones
-  for the five Java reforge costs, the simple table's rarity limit, the six gem
-  salvage ranges, and the unnaming sigil keeping a player's name. The remaining
-  warnings are pre-existing unused helpers (`gem_name_key`, `amount_text`,
-  `Purity::multiplier`, a few spawner and affix helpers).
-- The content mod has one gem item with 21 Java types and a `minecraft:select`
-  model, gem dust, five rarity salvage materials, five sigils, and four
-  working tables. It also declares `gem_fused_slate`, the iron, gold and
-  diamond smithing templates and `simple_reforging_table`. Mob drops and all
-  vanilla chest loot tables provide survival gem routes: type by Java weight
-  and dimension, purity above the gem's floor, Flawless and Perfect
-  boss-only. All 281 content JSON files parse, and `python tools/pack.py`
-  rebuilds `target/apotheosis.hmod` (535 entries, including the new recipes
-  and item/block assets) and `target/apotheosis.hnmod`.
-- The Java assets were imported locally into the git-ignored `content-java/`
-  layer: 28 blockstates, 48 items, 107 models, 115 textures; the new ids have
-  Java models (`tools/java_assets_map.md`).
+- v0.6.0 compiles against `a85af177` and **144 native unit tests pass**; the
+  three Python test suites pass; `target/apotheosis.hmod` (with the Java layer)
+  and `target/apotheosis.hnmod` pass `cargo-horizon-mod check`.
+- No Git-tracked file is identical to a file of the Java jars' `assets/`.
+- Not yet run in game nor on a dedicated server: see `TEST-EN-JEU.md`.
 
 ## Licence
 
