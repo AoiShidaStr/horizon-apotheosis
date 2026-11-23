@@ -591,12 +591,11 @@ Both halves use the id `apotheosis`.
 - `cargo horizon-mod check` passes on both packed files
   (`apotheosis.hmod`: kind `mod`, `side both`; `apotheosis.hnmod`: kind
   `native-mod`, api `native-1/a85af177…/5a64af93…`).
-- The content mod has twelve gems (two per tier), gem dust, twelve gem blocks
-  with textures, models, loot tables and a pickaxe tag, five rarity salvage
-  materials, four sigils, the three working tables, and 55 recipes. Mob drops
-  and all vanilla chest loot tables now provide survival gem routes; chest
-  gems are restricted to common and uncommon tiers and roll a purity from the
-  table's own seed. The four mythic/ancient gems shimmer. All content JSON files parse, and
+- The content mod has one gem item with 21 Java types and a `minecraft:select`
+  model, gem dust, five rarity salvage materials, four sigils and the three
+  working tables. Mob drops and all vanilla chest loot tables provide survival
+  gem routes: type by Java weight and dimension, purity above the gem's floor,
+  Flawless and Perfect boss-only. All content JSON files parse, and
   `python tools/pack.py` rebuilds `target/apotheosis.hmod` and
   `target/apotheosis.hnmod`.
 - The registry check caught `horizon-mixin.toml` still naming version `0.2.0`
