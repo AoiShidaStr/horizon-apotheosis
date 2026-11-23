@@ -31,8 +31,10 @@
 //! `affix_effects` holds the effect affixes (poison, execution, cleaving,
 //! spectral arrows, telepathy...) and the Apothic Invader boss.
 mod affix_effects;
+mod affixes;
 mod attributes;
 mod enchanting;
+mod java_affixes;
 
 use horizon_client::mod_api::{
     ArrowLooseEvent, BreakSpeedEvent, EntityJoinLevelEvent, ExperienceOrbPickupEvent, Flow, Hooks,
@@ -68,11 +70,13 @@ pub enum Tier {
 }
 
 impl Tier {
-    /// How many affixes a piece of gear of this tier rolls.
+    /// How many affixes a piece of gear of this tier rolls: Java's
+    /// common 1, uncommon 2, rare 2, epic 3, mythic 4. Ancient is this port's
+    /// extension and rolls one more than mythic.
     pub fn affixes(self) -> usize {
         match self {
-            Tier::Common => 0,
-            Tier::Uncommon => 1,
+            Tier::Common => 1,
+            Tier::Uncommon => 2,
             Tier::Rare => 2,
             Tier::Epic => 3,
             Tier::Mythic => 4,
@@ -80,7 +84,8 @@ impl Tier {
         }
     }
 
-    /// What an affix's base amount is multiplied by.
+    /// What an affix's base amount is multiplied by. Java affixes use a range
+    /// per rarity instead, so only the effect affixes still use this.
     pub fn scale(self) -> f64 {
         match self {
             Tier::Common => 1.0,
@@ -89,6 +94,17 @@ impl Tier {
             Tier::Epic => 2.0,
             Tier::Mythic => 3.0,
             Tier::Ancient => 4.0,
+        }
+    }
+
+    /// Java's rarity index, used by the affix table. Ancient reuses mythic.
+    pub fn rarity_index(self) -> usize {
+        match self {
+            Tier::Common => 0,
+            Tier::Uncommon => 1,
+            Tier::Rare => 2,
+            Tier::Epic => 3,
+            Tier::Mythic | Tier::Ancient => 4,
         }
     }
 
@@ -127,15 +143,15 @@ impl Tier {
         }
     }
 
-    /// The tier's colour, `0xRRGGBB`.
+    /// The tier's colour, `0xRRGGBB`, using Java's five rarity colours.
+    /// Ancient is this port's extension and reuses mythic's values.
     pub fn colour(self) -> u32 {
         match self {
-            Tier::Common => 0xFF_FFFF,
-            Tier::Uncommon => 0x55_FF55,
+            Tier::Common => 0x80_8080,
+            Tier::Uncommon => 0x33_FF33,
             Tier::Rare => 0x55_55FF,
-            Tier::Epic => 0xAA_00AA,
-            Tier::Mythic => 0xD8_8A2C,
-            Tier::Ancient => 0xB0_2A2A,
+            Tier::Epic => 0xBB_00BB,
+            Tier::Mythic | Tier::Ancient => 0xED_7014,
         }
     }
 
@@ -272,347 +288,6 @@ const BOSSES: [&str; 4] = [
     "minecraft:ender_dragon",
     "minecraft:warden",
     "minecraft:elder_guardian",
-];
-
-/// An affix: a name (translation key + English), the attribute it moves, its
-/// base amount at uncommon, and the equipment slots it works in.
-pub struct Affix {
-    pub id: &'static str,
-    pub name_key: &'static str,
-    pub name: &'static str,
-    pub attribute: &'static str,
-    pub attribute_name: &'static str,
-    pub base: f64,
-    /// `add_value` or `add_multiplied_base`, as `minecraft:attribute_modifiers`
-    /// spells the operation.
-    pub operation: &'static str,
-    /// A slot group: `hand`, `armor` or `any` (`EquipmentSlotGroup`).
-    pub slot: &'static str,
-    /// The item classes this affix may roll on (`attributes::MELEE` and the
-    /// like), so a bow never takes an attack-damage affix.
-    pub classes: u16,
-    /// The Apothic attribute the affix feeds, when it is one of this port's
-    /// own; vanilla attributes work through the real component instead.
-    pub attr: Option<attributes::Attr>,
-}
-
-pub const AFFIXES: [Affix; 26] = [
-    Affix {
-        id: "keen",
-        name_key: "apotheosis.affix.keen",
-        name: "Keen",
-        attribute: "minecraft:attack_damage",
-        attribute_name: "Attack Damage",
-        base: 1.0,
-        operation: "add_value",
-        slot: "hand",
-        classes: attributes::MELEE,
-        attr: None,
-    },
-    Affix {
-        id: "brutal",
-        name_key: "apotheosis.affix.brutal",
-        name: "Brutal",
-        attribute: "minecraft:attack_damage",
-        attribute_name: "Attack Damage",
-        base: 2.0,
-        operation: "add_value",
-        slot: "hand",
-        classes: attributes::MELEE,
-        attr: None,
-    },
-    Affix {
-        id: "swift",
-        name_key: "apotheosis.affix.swift",
-        name: "Swift",
-        attribute: "minecraft:movement_speed",
-        attribute_name: "Movement Speed",
-        base: 0.01,
-        operation: "add_value",
-        slot: "armor",
-        classes: attributes::ARMOR,
-        attr: None,
-    },
-    Affix {
-        id: "stalwart",
-        name_key: "apotheosis.affix.stalwart",
-        name: "Stalwart",
-        attribute: "minecraft:max_health",
-        attribute_name: "Max Health",
-        base: 2.0,
-        operation: "add_value",
-        slot: "armor",
-        classes: attributes::ARMOR,
-        attr: None,
-    },
-    Affix {
-        id: "bulwarked",
-        name_key: "apotheosis.affix.bulwarked",
-        name: "Bulwarked",
-        attribute: "minecraft:armor",
-        attribute_name: "Armor",
-        base: 1.0,
-        operation: "add_value",
-        slot: "armor",
-        classes: attributes::ARMOR | attributes::SHIELD,
-        attr: None,
-    },
-    Affix {
-        id: "hasty",
-        name_key: "apotheosis.affix.hasty",
-        name: "Hasty",
-        attribute: "minecraft:mining_efficiency",
-        attribute_name: "Mining Efficiency",
-        base: 0.15,
-        operation: "add_value",
-        slot: "hand",
-        classes: attributes::TOOL,
-        attr: None,
-    },
-    Affix {
-        id: "steadfast",
-        name_key: "apotheosis.affix.steadfast",
-        name: "Steadfast",
-        attribute: "minecraft:knockback_resistance",
-        attribute_name: "Knockback Resistance",
-        base: 0.1,
-        operation: "add_value",
-        slot: "armor",
-        classes: attributes::ARMOR,
-        attr: None,
-    },
-    Affix {
-        id: "tough",
-        name_key: "apotheosis.affix.tough",
-        name: "Tough",
-        attribute: "minecraft:armor_toughness",
-        attribute_name: "Armor Toughness",
-        base: 1.0,
-        operation: "add_value",
-        slot: "armor",
-        classes: attributes::ARMOR,
-        attr: None,
-    },
-    // The Apothic attributes proper. Their values follow the public data:
-    // life steal 5-15%, armour pierce 2-12, arrow damage 15-40%.
-    Affix {
-        id: "vampiric",
-        name_key: "apotheosis.affix.vampiric",
-        name: "Vampiric",
-        attribute: "apothic_attributes:life_steal",
-        attribute_name: "Life Steal",
-        base: 0.05,
-        operation: "add_value",
-        slot: "hand",
-        classes: attributes::MELEE,
-        attr: Some(attributes::Attr::LifeSteal),
-    },
-    Affix {
-        id: "berserking",
-        name_key: "apotheosis.affix.berserking",
-        name: "Berserking",
-        attribute: "apothic_attributes:overheal",
-        attribute_name: "Overheal",
-        base: 0.05,
-        operation: "add_value",
-        slot: "hand",
-        classes: attributes::MELEE,
-        attr: Some(attributes::Attr::Overheal),
-    },
-    Affix {
-        id: "piercing",
-        name_key: "apotheosis.affix.piercing",
-        name: "Piercing",
-        attribute: "apothic_attributes:armor_pierce",
-        attribute_name: "Armor Pierce",
-        base: 2.0,
-        operation: "add_value",
-        slot: "hand",
-        classes: attributes::MELEE | attributes::RANGED,
-        attr: Some(attributes::Attr::ArmorPierce),
-    },
-    Affix {
-        id: "shredding",
-        name_key: "apotheosis.affix.shredding",
-        name: "Shredding",
-        attribute: "apothic_attributes:armor_shred",
-        attribute_name: "Armor Shred",
-        base: 0.1,
-        operation: "add_value",
-        slot: "hand",
-        classes: attributes::MELEE,
-        attr: Some(attributes::Attr::ArmorShred),
-    },
-    Affix {
-        id: "glacial",
-        name_key: "apotheosis.affix.glacial",
-        name: "Glacial",
-        attribute: "apothic_attributes:cold_damage",
-        attribute_name: "Cold Damage",
-        base: 1.0,
-        operation: "add_value",
-        slot: "hand",
-        classes: attributes::MELEE,
-        attr: Some(attributes::Attr::ColdDamage),
-    },
-    Affix {
-        id: "infernal",
-        name_key: "apotheosis.affix.infernal",
-        name: "Infernal",
-        attribute: "apothic_attributes:fire_damage",
-        attribute_name: "Fire Damage",
-        base: 1.0,
-        operation: "add_value",
-        slot: "hand",
-        classes: attributes::MELEE,
-        attr: Some(attributes::Attr::FireDamage),
-    },
-    Affix {
-        id: "murderous",
-        name_key: "apotheosis.affix.murderous",
-        name: "Murderous",
-        attribute: "apothic_attributes:crit_damage",
-        attribute_name: "Crit Damage",
-        base: 0.1,
-        operation: "add_value",
-        slot: "hand",
-        classes: attributes::MELEE,
-        attr: Some(attributes::Attr::CritDamage),
-    },
-    Affix {
-        id: "violent",
-        name_key: "apotheosis.affix.violent",
-        name: "Violent",
-        attribute: "apothic_attributes:crit_chance",
-        attribute_name: "Crit Chance",
-        base: 0.05,
-        operation: "add_value",
-        slot: "hand",
-        classes: attributes::MELEE,
-        attr: Some(attributes::Attr::CritChance),
-    },
-    Affix {
-        id: "elusive",
-        name_key: "apotheosis.affix.elusive",
-        name: "Elusive",
-        attribute: "apothic_attributes:dodge_chance",
-        attribute_name: "Dodge Chance",
-        base: 0.05,
-        operation: "add_value",
-        slot: "armor",
-        classes: attributes::ARMOR,
-        attr: Some(attributes::Attr::DodgeChance),
-    },
-    Affix {
-        id: "blessed",
-        name_key: "apotheosis.affix.blessed",
-        name: "Blessed",
-        attribute: "apothic_attributes:healing_received",
-        attribute_name: "Healing Received",
-        base: 0.1,
-        operation: "add_value",
-        slot: "armor",
-        classes: attributes::ARMOR,
-        attr: Some(attributes::Attr::HealingReceived),
-    },
-    Affix {
-        id: "elven",
-        name_key: "apotheosis.affix.elven",
-        name: "Elven",
-        attribute: "apothic_attributes:arrow_damage",
-        attribute_name: "Arrow Damage",
-        base: 0.15,
-        operation: "add_multiplied_base",
-        slot: "hand",
-        classes: attributes::RANGED,
-        attr: Some(attributes::Attr::ArrowDamage),
-    },
-    Affix {
-        id: "agile",
-        name_key: "apotheosis.affix.agile",
-        name: "Agile",
-        attribute: "apothic_attributes:draw_speed",
-        attribute_name: "Draw Speed",
-        base: 0.1,
-        operation: "add_multiplied_base",
-        slot: "hand",
-        classes: attributes::RANGED,
-        attr: Some(attributes::Attr::DrawSpeed),
-    },
-    Affix {
-        id: "streamlined",
-        name_key: "apotheosis.affix.streamlined",
-        name: "Streamlined",
-        attribute: "apothic_attributes:arrow_velocity",
-        attribute_name: "Arrow Velocity",
-        base: 0.1,
-        operation: "add_multiplied_base",
-        slot: "hand",
-        classes: attributes::RANGED,
-        attr: Some(attributes::Attr::ArrowVelocity),
-    },
-    Affix {
-        id: "experienced",
-        name_key: "apotheosis.affix.experienced",
-        name: "Experienced",
-        attribute: "apothic_attributes:experience_gained",
-        attribute_name: "Experience Gained",
-        base: 0.25,
-        operation: "add_multiplied_base",
-        slot: "hand",
-        classes: attributes::TOOL,
-        attr: Some(attributes::Attr::ExperienceGained),
-    },
-    Affix {
-        id: "destructive",
-        name_key: "apotheosis.affix.destructive",
-        name: "Destructive",
-        attribute: "apothic_attributes:mining_speed",
-        attribute_name: "Mining Speed",
-        base: 0.15,
-        operation: "add_multiplied_base",
-        slot: "hand",
-        classes: attributes::TOOL,
-        attr: Some(attributes::Attr::MiningSpeed),
-    },
-    // Slot-specific armour affixes: a boot-only and a helmet-only one, so the
-    // pool is not merely "armour" as a whole.
-    Affix {
-        id: "surefooted",
-        name_key: "apotheosis.affix.surefooted",
-        name: "Surefooted",
-        attribute: "minecraft:knockback_resistance",
-        attribute_name: "Knockback Resistance",
-        base: 0.05,
-        operation: "add_value",
-        slot: "armor",
-        classes: attributes::BOOTS,
-        attr: None,
-    },
-    Affix {
-        id: "ironforged",
-        name_key: "apotheosis.affix.ironforged",
-        name: "Ironforged",
-        attribute: "minecraft:armor",
-        attribute_name: "Armor",
-        base: 1.0,
-        operation: "add_value",
-        slot: "armor",
-        classes: attributes::HELMET,
-        attr: None,
-    },
-    Affix {
-        id: "elastic",
-        name_key: "apotheosis.affix.elastic",
-        name: "Elastic",
-        attribute: "minecraft:movement_speed",
-        attribute_name: "Movement Speed",
-        base: 0.01,
-        operation: "add_value",
-        slot: "armor",
-        classes: attributes::LEGGINGS,
-        attr: None,
-    },
 ];
 
 /// The tooltip line a gem adds: its tier, and the tier's colour.
@@ -810,68 +485,18 @@ const BOSS_GEAR: [&str; 5] = [
     "minecraft:bow",
 ];
 
-/// The amount an affix adds at `tier`, rounded to what the tooltip shows.
-fn amount_at(affix: &Affix, tier: Tier) -> f64 {
-    let raw = affix.base * tier.scale();
-    (raw * 100.0).round() / 100.0
-}
-
-/// A tier's own lore line, at the top of an affixed item's lore.
-fn tier_tag(tier: Tier) -> Tag {
-    Tag::compound([
-        ("text", string(tier.name())),
-        ("color", string(&tier.hex())),
-        ("italic", Tag::Byte(0)),
-    ])
-}
-
-/// An affix's lore line: its name and what it adds, translated when the client
-/// has the keys and readable when it does not.
-fn affix_tag(affix: &Affix, amount: f64) -> Tag {
-    let value = if amount.fract() == 0.0 {
-        format!("+{amount:.0}")
-    } else {
-        format!("+{amount}")
-    };
-    let fallback = format!("{} {} {}", affix.name, value, affix.attribute_name);
-    let attribute_key = format!("attribute.name.{}", affix.attribute);
-    Tag::compound([
-        ("translate", string("apotheosis.affix.line")),
-        ("fallback", string(&fallback)),
-        ("color", string("#5555FF")),
-        ("italic", Tag::Byte(0)),
-        (
-            "with",
-            Tag::List(vec![
-                Tag::compound([
-                    ("translate", string(affix.name_key)),
-                    ("fallback", string(affix.name)),
-                ]),
-                string(&value),
-                Tag::compound([
-                    ("translate", string(&attribute_key)),
-                    ("fallback", string(affix.attribute_name)),
-                ]),
-            ]),
-        ),
-    ])
-}
-
 /// Rolls `tier`'s affixes onto `stack`: real `minecraft:attribute_modifiers`, a
-/// lore that says them, and the vanilla rarity that colours the name.
+/// lore that says them, Java's prefix/suffix name, and the vanilla rarity that
+/// colours the name. Only affixes this port can actually pay out enter the
+/// pool; the rest of the Java catalogue stays in `java_affixes` for later.
 pub(crate) fn apply_affixes(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) {
     let count = tier.affixes();
     if count == 0 {
         return;
     }
-    // Only affixes whose item classes include this piece: an armour affix on a
-    // sword would show a lore line that never applies, and a melee affix on a
-    // bow would pay out nothing. A piece with no matching affix gets none.
     let class = attributes::class_of(&stack.item);
-    let mut pool: Vec<usize> = (0..AFFIXES.len())
-        .filter(|i| attributes::accepts(AFFIXES[*i].classes, class))
-        .collect();
-    if pool.is_empty() {
+    let mut candidates = affixes::pool(class, tier);
+    if candidates.is_empty() {
         return;
     }
     // The item's own modifiers come first: writing the component replaces the
@@ -879,28 +504,45 @@ pub(crate) fn apply_affixes(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) {
     let mut modifiers = attributes::base_modifiers(&stack.item);
     modifiers.reserve(count);
     let mut custom = Vec::with_capacity(count);
-    let mut lore = Vec::with_capacity(count + 1);
-    lore.push(tier_tag(tier));
-    for _ in 0..count.min(pool.len()) {
-        let pick = rng.below(pool.len() as u64) as usize;
-        let affix = &AFFIXES[pool.swap_remove(pick)];
-        let amount = amount_at(affix, tier);
-        let id = format!("apotheosis:{}", affix.id);
+    let mut lore = Vec::with_capacity(count);
+    let mut chosen: Vec<&'static java_affixes::Affix> = Vec::with_capacity(count);
+    for _ in 0..count.min(candidates.len()) {
+        let pick = rng.below(candidates.len() as u64) as usize;
+        let affix = candidates.swap_remove(pick);
+        let Some(amount) = affixes::amount(affix, tier, rng) else {
+            continue;
+        };
+        let (Some(attribute), Some(operation)) = (affix.attribute, affix.operation) else {
+            continue;
+        };
         modifiers.push(Tag::compound([
-            ("type", string(affix.attribute)),
-            ("id", string(&id)),
+            ("type", string(attribute)),
+            ("id", string(affix.id)),
             ("amount", Tag::Double(amount.to_bits())),
-            ("operation", string(affix.operation)),
-            ("slot", string(affix.slot)),
+            ("operation", string(operation)),
+            ("slot", string(affixes::slot(class))),
         ]));
-        lore.push(affix_tag(affix, amount));
+        lore.push(affixes::stat_line(affix, tier, amount));
         if let Some(attr) = affix.attr {
             custom.push((attr, amount));
         }
+        chosen.push(affix);
     }
+    if chosen.is_empty() {
+        return;
+    }
+    // A reroll replaces the name our last roll wrote, but never a player's.
+    let keep_name = stack
+        .data()
+        .and_then(|data| data.other("minecraft:custom_name"))
+        .is_some_and(|name| !affixes::is_generated_name(name));
+    let name = affixes::item_name_component(&stack.item, tier, &chosen);
     let data = stack.data_mut();
     data.set_other("minecraft:attribute_modifiers", Some(Tag::List(modifiers)));
     data.set_other("minecraft:lore", Some(Tag::List(lore)));
+    if !keep_name {
+        data.set_other("minecraft:custom_name", name);
+    }
     data.set_other("minecraft:rarity", Some(string(tier.vanilla_rarity())));
     attributes::attach(stack, &custom);
     // An effect affix is extra, never a replacement: the attribute lines and
@@ -1429,19 +1071,13 @@ mod tests {
 
     #[test]
     fn higher_tiers_carry_more_and_bigger_affixes() {
-        assert_eq!(Tier::Common.affixes(), 0);
-        let mut last = 0;
-        for tier in [
-            Tier::Common,
-            Tier::Uncommon,
-            Tier::Rare,
-            Tier::Epic,
-            Tier::Mythic,
-            Tier::Ancient,
-        ] {
-            assert!(tier.affixes() >= last);
-            last = tier.affixes();
-        }
+        assert_eq!(Tier::Common.affixes(), 1);
+        assert_eq!(Tier::Uncommon.affixes(), 2);
+        assert_eq!(Tier::Rare.affixes(), 2);
+        assert_eq!(Tier::Epic.affixes(), 3);
+        assert_eq!(Tier::Mythic.affixes(), 4);
+        assert_eq!(Tier::Ancient.affixes(), 5);
+        assert_eq!(Tier::Ancient.rarity_index(), Tier::Mythic.rarity_index());
         assert!(Tier::Ancient.scale() > Tier::Epic.scale());
     }
 
@@ -1470,10 +1106,19 @@ mod tests {
         let Some(Tag::List(lore)) = data.other("minecraft:lore") else {
             panic!("no lore");
         };
-        assert_eq!(lore.len(), 3, "a tier line and one line per affix");
+        assert_eq!(lore.len(), 2, "one Java line per affix, no tier line");
         assert_eq!(
             data.other("minecraft:rarity"),
             Some(&Tag::String("rare".into()))
+        );
+        let Some(Tag::Compound(name)) = data.other("minecraft:custom_name") else {
+            panic!("no composed name");
+        };
+        assert_eq!(
+            name.get(&"translate".into()),
+            Some(&Tag::String(
+                "misc.apotheosis.affix_name.three".into()
+            ))
         );
     }
 
@@ -1499,12 +1144,30 @@ mod tests {
     }
 
     #[test]
-    fn amounts_round_to_what_the_tooltip_shows() {
-        let swift = AFFIXES.iter().find(|a| a.id == "swift").unwrap();
-        assert_eq!(amount_at(swift, Tier::Uncommon), 0.01);
-        assert_eq!(amount_at(swift, Tier::Rare), 0.02);
-        let keen = AFFIXES.iter().find(|a| a.id == "keen").unwrap();
-        assert_eq!(amount_at(keen, Tier::Ancient), 4.0);
+    fn affix_ids_are_the_java_ids() {
+        let mut stack = one("minecraft:diamond_sword");
+        let mut rng = Rng::new(13);
+        apply_affixes(&mut stack, Tier::Mythic, &mut rng);
+        let data = stack.data().expect("components");
+        let Some(Tag::List(modifiers)) = data.other("minecraft:attribute_modifiers") else {
+            panic!("no attribute modifiers");
+        };
+        let affixed: Vec<String> = modifiers
+            .iter()
+            .filter_map(|modifier| match modifier.get("id") {
+                Some(Tag::String(id)) if id.to_string_lossy().starts_with("apotheosis:") => {
+                    Some(id.to_string_lossy())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(affixed.len(), 4, "mythic rolls four Java affixes");
+        for id in affixed {
+            assert!(
+                java_affixes::AFFIXES.iter().any(|affix| affix.id == id),
+                "{id} is not a Java affix id"
+            );
+        }
     }
 
     #[test]

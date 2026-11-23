@@ -318,6 +318,7 @@ pub enum ItemClass {
     Shovel,
     Hoe,
     Shield,
+    Shears,
     Other,
 }
 
@@ -329,17 +330,18 @@ pub const LEGGINGS: u16 = 1 << 4;
 pub const BOOTS: u16 = 1 << 5;
 pub const TOOL: u16 = 1 << 6;
 pub const SHIELD: u16 = 1 << 7;
+/// The trident is its own Java category, and also a melee weapon.
+pub const TRIDENT: u16 = 1 << 8;
+pub const SHEARS: u16 = 1 << 9;
 /// Every slot a suit of armour covers.
 pub const ARMOR: u16 = HELMET | CHESTPLATE | LEGGINGS | BOOTS;
 
 impl ItemClass {
     pub fn mask(self) -> u16 {
         match self {
-            ItemClass::Sword
-            | ItemClass::Axe
-            | ItemClass::Mace
-            | ItemClass::Spear
-            | ItemClass::Trident => MELEE,
+            ItemClass::Sword | ItemClass::Axe | ItemClass::Mace | ItemClass::Spear => MELEE,
+            // Java lists the trident in both melee and ranged affix categories.
+            ItemClass::Trident => MELEE | TRIDENT,
             ItemClass::Bow | ItemClass::Crossbow => RANGED,
             ItemClass::Helmet => HELMET,
             ItemClass::Chestplate => CHESTPLATE,
@@ -347,6 +349,7 @@ impl ItemClass {
             ItemClass::Boots => BOOTS,
             ItemClass::Pickaxe | ItemClass::Shovel | ItemClass::Hoe => TOOL,
             ItemClass::Shield => SHIELD,
+            ItemClass::Shears => SHEARS,
             ItemClass::Other => 0,
         }
     }
@@ -372,6 +375,9 @@ pub fn class_of(item: &str) -> ItemClass {
     }
     if item == "minecraft:shield" {
         return ItemClass::Shield;
+    }
+    if item == "minecraft:shears" {
+        return ItemClass::Shears;
     }
     if item.ends_with("_sword") {
         return ItemClass::Sword;
@@ -897,8 +903,18 @@ pub fn tick(host: &mut dyn Host, _event: &mut PlayerTickEvent) {
 // Tooltip
 // ---------------------------------------------------------------------------
 
-/// The attribute lines an affixed item shows, under its affix lore.
+/// The attribute lines an affixed item shows when it has no affix lore. New
+/// items carry Java's one-line-per-affix tooltip, so this fallback only covers
+/// pieces rolled before that lore existed.
 pub fn tooltip(event: &mut TooltipEvent<'_>) {
+    if event
+        .stack
+        .data()
+        .and_then(|data| data.other("minecraft:lore"))
+        .is_some()
+    {
+        return;
+    }
     let set = AttrSet::of_stack(event.stack);
     if set.is_empty() {
         return;

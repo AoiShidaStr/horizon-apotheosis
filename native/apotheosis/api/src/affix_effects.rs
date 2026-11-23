@@ -92,18 +92,18 @@ pub const EFFECT_AFFIXES: [EffectAffix; 14] = [
         "venomous",
         "Venomous",
         Kind::Venomous,
-        attributes::MELEE,
-        Tier::Epic,
-        120.0,
+        attributes::SHIELD,
+        Tier::Uncommon,
+        80.0,
         "Poison for {} s",
     ),
     effect(
         "withering",
         "Withering",
         Kind::Withering,
-        attributes::MELEE,
+        attributes::SHIELD,
         Tier::Epic,
-        80.0,
+        35.0,
         "Wither for {} s",
     ),
     effect(
@@ -111,17 +111,17 @@ pub const EFFECT_AFFIXES: [EffectAffix; 14] = [
         "Weakening",
         Kind::Weakening,
         attributes::MELEE,
-        Tier::Epic,
-        120.0,
+        Tier::Uncommon,
+        65.0,
         "Weakness for {} s",
     ),
     effect(
         "ensnaring",
         "Ensnaring",
         Kind::Ensnaring,
-        attributes::MELEE,
-        Tier::Epic,
-        80.0,
+        attributes::RANGED,
+        Tier::Uncommon,
+        40.0,
         "Slowness for {} s",
     ),
     effect(
@@ -129,8 +129,8 @@ pub const EFFECT_AFFIXES: [EffectAffix; 14] = [
         "Blinding",
         Kind::Blinding,
         attributes::HELMET,
-        Tier::Epic,
-        60.0,
+        Tier::Uncommon,
+        30.0,
         "Blinds attackers for {} s",
     ),
     effect(
@@ -139,7 +139,7 @@ pub const EFFECT_AFFIXES: [EffectAffix; 14] = [
         Kind::Execution,
         attributes::MELEE,
         Tier::Epic,
-        0.10,
+        0.075,
         "Executes foes below {}% health",
     ),
     effect(
@@ -148,7 +148,7 @@ pub const EFFECT_AFFIXES: [EffectAffix; 14] = [
         Kind::Cleaving,
         attributes::MELEE,
         Tier::Epic,
-        2.0,
+        1.75,
         "Hits {} nearby foes",
     ),
     effect(
@@ -157,7 +157,7 @@ pub const EFFECT_AFFIXES: [EffectAffix; 14] = [
         Kind::Thunderstruck,
         attributes::MELEE,
         Tier::Epic,
-        4.0,
+        2.25,
         "{}% chance of lightning",
     ),
     effect(
@@ -182,8 +182,13 @@ pub const EFFECT_AFFIXES: [EffectAffix; 14] = [
         "telepathic",
         "Telepathic",
         Kind::Telepathic,
-        attributes::MELEE | attributes::RANGED | attributes::TOOL,
-        Tier::Epic,
+        attributes::ARMOR
+            | attributes::MELEE
+            | attributes::RANGED
+            | attributes::TOOL
+            | attributes::SHIELD
+            | attributes::SHEARS,
+        Tier::Rare,
         1.0,
         "Drops go to your inventory",
     ),
@@ -193,7 +198,7 @@ pub const EFFECT_AFFIXES: [EffectAffix; 14] = [
         Kind::Spectral,
         attributes::RANGED,
         Tier::Epic,
-        0.20,
+        0.175,
         "{}% chance of a spectral arrow",
     ),
     effect(
@@ -211,7 +216,7 @@ pub const EFFECT_AFFIXES: [EffectAffix; 14] = [
         Kind::Festive,
         attributes::MELEE,
         Tier::Epic,
-        0.03,
+        0.0175,
         "{}% chance of extra loot",
     ),
 ];
@@ -474,8 +479,6 @@ pub fn on_hit(host: &mut dyn Host, event: &mut LivingIncomingDamageV2Event<'_>) 
         if !effects.is_empty() {
             for (id, value) in &effects {
                 match *id {
-                    "venomous" => add_effect(host, victim, "minecraft:poison", *value as i32, 0),
-                    "withering" => add_effect(host, victim, "minecraft:wither", *value as i32, 0),
                     "weakening" => add_effect(host, victim, "minecraft:weakness", *value as i32, 0),
                     "ensnaring" => add_effect(host, victim, "minecraft:slowness", *value as i32, 0),
                     "executing" => {
@@ -519,7 +522,16 @@ pub fn on_hit(host: &mut dyn Host, event: &mut LivingIncomingDamageV2Event<'_>) 
         }
     }
     if let Some(offhand) = player_slot(host, victim, EquipmentSlot::OffHand) {
-        if effects_of(&offhand).contains_key("retreating") {
+        let shield_effects = effects_of(&offhand);
+        // Java pays these on an actual block; the hook API has no block event,
+        // so a shield in the off hand is the closest signal. See the README.
+        if let Some(value) = shield_effects.get("venomous").copied() {
+            add_effect(host, attacker, "minecraft:poison", value as i32, 0);
+        }
+        if let Some(value) = shield_effects.get("withering").copied() {
+            add_effect(host, attacker, "minecraft:wither", value as i32, 0);
+        }
+        if shield_effects.contains_key("retreating") {
             let away = [
                 event.victim_position[0] - event.source_position.unwrap_or(event.victim_position)[0],
                 0.0,
@@ -1013,7 +1025,10 @@ mod tests {
         for affix in &EFFECT_AFFIXES {
             assert!(seen.insert(affix.id), "{} twice", affix.id);
             assert!(
-                !crate::AFFIXES.iter().any(|a| a.id == affix.id),
+                !crate::java_affixes::AFFIXES.iter().any(|a| {
+                    a.kind == "attribute"
+                        && a.path.rsplit('/').next() == Some(affix.id)
+                }),
                 "{} is both an attribute and an effect affix",
                 affix.id
             );
@@ -1027,16 +1042,17 @@ mod tests {
         assert!(available(ItemClass::Helmet, Tier::Epic).contains(&"blinding"));
         assert!(!available(ItemClass::Sword, Tier::Epic).contains(&"blinding"));
         assert!(available(ItemClass::Shield, Tier::Epic).contains(&"retreating"));
-        assert!(available(ItemClass::Sword, Tier::Rare).is_empty());
+        assert!(available(ItemClass::Sword, Tier::Rare).contains(&"telepathic"));
+        assert!(!available(ItemClass::Sword, Tier::Rare).contains(&"withering"));
     }
 
     #[test]
     fn values_follow_the_tier() {
         let venomous = EFFECT_AFFIXES.iter().find(|a| a.id == "venomous").unwrap();
-        assert_eq!(value_at(venomous, Tier::Epic), 240.0);
+        assert_eq!(value_at(venomous, Tier::Epic), 160.0);
         assert!(value_at(venomous, Tier::Mythic) > value_at(venomous, Tier::Epic));
         let executing = EFFECT_AFFIXES.iter().find(|a| a.id == "executing").unwrap();
-        assert!((value_at(executing, Tier::Epic) - 0.20).abs() < 1.0e-9);
+        assert!((value_at(executing, Tier::Epic) - 0.15).abs() < 1.0e-9);
         assert!(value_at(executing, Tier::Mythic) <= 1.0);
     }
 

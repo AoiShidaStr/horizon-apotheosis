@@ -223,30 +223,55 @@ a85af177 and covered by unit tests only.
   - *Mining*: `break_speed` scales the break speed of the held tool.
   - *Experience*: `experience_orb_pickup` adds the experience-gained share to
     the orb's value.
-- **Tooltips** name each attribute and its value in blue under the affix
-  lore, translated in en_us and fr_fr.
-- **Affixes are filtered by item class**: sword and axe (melee), bow and
-  crossbow (ranged), helmet, chestplate, leggings and boots separately, tool,
-  shield. A bow can no longer roll `attack_damage`; a chestplate cannot roll a
-  bow affix; an item with no matching affix rolls none rather than falling
-  back to the whole pool.
+- **Java's affix catalogue is the source**: `tools/gen_java_affixes.py` reads
+  the 99 affixes of Apotheosis 8.9.0 and generates
+  `native/apotheosis/api/src/java_affixes.rs` (id, categories, rarities and
+  per-rarity ranges, plus Java's translation keys). The generator is
+  idempotent and only merges its language keys; it copies no asset and no Java
+  code. `affixes.rs` turns that table into the roll.
+- **The item name is Java's prefix + item + suffix**, composed from
+  `misc.apotheosis.affix_name.*` and `affix.apotheosis:<path>` keys, coloured
+  with the rarity's Java colour; a player's own custom name is left alone.
+- **Tooltips are one `+X Attribute` line per affix**, in the rolled rarity's
+  colour (common `#808080`, uncommon `#33FF33`, rare `#5555FF`, epic
+  `#BB00BB`, mythic `#ED7014`), translated in en_us and fr_fr. The separate
+  attribute block is only a fallback for old pieces without affix lore.
+- **Affixes are filtered by Java categories**: melee weapon and trident, bow,
+  breaker, shears, shield, and each armour piece. The trident is both melee and
+  its own category; shears have their own class. An item with no matching
+  affix rolls none rather than falling back to the whole pool.
 - **Base modifiers are merged**: `modify_default_components` records each
   item's own `minecraft:attribute_modifiers` before anything edits them, and
   `apply_affixes` writes them ahead of the rolled ones, so an affixed diamond
   sword keeps its innate attack damage.
-- **Names** for all 15 attributes and 18 new affixes are added to the shared
-  files by `python tools/gen_attributes.py` (merges, never replaces; the
-  creative tab and tags are checked and left untouched, no item is added).
+- **Rarity counts follow Java**: common 1 affix, uncommon 2, rare 2, epic 3,
+  mythic 4. `Ancient` is this port's extension and reuses mythic's ranges with
+  five affixes; it is documented rather than invented as a Java rarity.
+- **Not rolled yet** (kept in the generated catalogue with their Java ids and
+  values): the seven attributes this port has no effect for —
+  `neoforge:swim_speed` (aquatic), `cooldown_reduction` (timekeeping),
+  `neoforge:creative_flight` (unbound), `apothic_attributes:elytra_flight`
+  (winged), `current_hp_damage` (giant slaying), `prot_shred` (nullifying) and
+  `prot_pierce` (runebreaking) — plus every `damage_reduction`,
+  `attribute_toggle`, `stoneforming`, `radial`, `enchantment`, `enlightened`,
+  `omnetic`, `telepathic`, `catalyzing`, `psychic`, `cleaving`, `executing`,
+  `festive`, `thunderstruck`, `magical`, `spectral` and `retreating` entry.
+  Effect affixes that this port *does* implement are listed below; their
+  payouts are approximations, not Java's full per-rarity effect tables.
 
 ### Effets d'affixes et boss Apothic Invader
 
 #### Done
 
 - **Fourteen effect affixes** (`native/apotheosis/api/src/affix_effects.rs`,
-  `EFFECT_AFFIXES`) on top of the attribute ones, with upstream ids, item
-  classes and epic+ rarities: Venomous, Withering, Weakening, Ensnaring,
-  Blinding (helmet), Executing, Cleaving, Thunderstruck, Retreating (shield),
-  Durable, Telepathic, Spectral and Magical (ranged), Festive.
+  `EFFECT_AFFIXES`) on top of the attribute ones: Venomous and Withering
+  (shield), Weakening, Ensnaring (ranged), Blinding (helmet), Executing,
+  Cleaving, Thunderstruck, Retreating (shield), Durable, Telepathic, Spectral
+  and Magical (ranged), Festive. Their item classes match Java's categories;
+  their minimum rarities are uncommon for venomous/weakening/ensnaring/
+  blinding, rare for telepathic and epic for the rest. Their numbers are
+  port-owned approximations of Java's per-rarity ranges, not a second full
+  table.
 - **Their payouts run in the real hooks**: poison/wither/weakness/slowness on
   the victim, blindness on the attacker, execution under the rolled health
   share, a cleave to nearby foes, real lightning, a knockback away from the
@@ -254,7 +279,7 @@ a85af177 and covered by unit tests only.
   spectral arrow, extra magic damage, and doubled kill loot.
 - They are **extra affixes**, never replacements: `apply_affixes` still rolls
   the same number of attribute modifiers and lore lines, then adds at most one
-  effect affix from epic up. The roll is stored in
+  effect affix when the tier allows it. The roll is stored in
   `minecraft:custom_data` under `apotheosis:effects` and read back per hit.
   Tooltips show the effect line in green, translated in en_us and fr_fr.
 - **Apothic Invader boss**: `entity_join_level` queues fresh joins and
@@ -277,8 +302,10 @@ a85af177 and covered by unit tests only.
   grievous and knowledge effects have no equivalent here.
 - A mob's `active_effects` are merged into its NBT; a mod-added effect or a
   client-side effect icon beyond vanilla's is not shown.
-- Retreating fires on any hit with a shield in the off hand, not only on an
-  actual shield block: the hook API does not expose the block event.
+- Venomous, Withering and Retreating fire on any hit taken with a shield in
+  the off hand, not only on an actual shield block: the hook API does not
+  expose the block event. Their per-rarity amplifiers and cooldowns are not
+  modelled.
 - Magical adds its share as damage instead of adding vanilla's magic damage
   tags to the arrow's damage source, so armour is not literally bypassed.
 - Telepathy and Festive act on the killer's main hand; a projectile kill reads
