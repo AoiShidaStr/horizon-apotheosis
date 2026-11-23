@@ -48,6 +48,78 @@ APOTHIC_ATTRS = {
     "arrow_velocity": "ArrowVelocity",
     "draw_speed": "DrawSpeed",
     "mining_speed": "MiningSpeed",
+    "current_hp_damage": "CurrentHpDamage",
+    "prot_pierce": "ProtPierce",
+    "prot_shred": "ProtShred",
+}
+
+# Effect types whose payout a hook of this port can reach. `radial`,
+# `stoneforming`, `attribute_toggle`, `omnetic`, `enlightened`, `catalyzing`,
+# `psychic` and the ability affixes with no data stay unsupported.
+EFFECT_TYPES = {
+    "damage_reduction",
+    "executing",
+    "cleaving",
+    "festive",
+    "thunderstruck",
+    "retreating",
+    "telepathic",
+}
+
+# Java targets a damage hook can pay: the attacker's weapon or the victim's
+# worn or held gear. `arrow_target`/`arrow_self` need the projectile hit, which
+# this API gives no host for, so only a trident (melee) can pay them.
+REACHABLE_TARGETS = {
+    "attack_target",
+    "attack_self",
+    "hurt_attacker",
+    "hurt_self",
+    "block_attacker",
+    "block_self",
+}
+TRIDENT_TARGETS = {"arrow_target", "arrow_self"}
+
+# The effect names and damage kinds whose tooltip this port writes itself.
+EFFECT_TEXT = {
+    "minecraft:blindness": ("Blindness", "Cécité"),
+    "minecraft:poison": ("Poison", "Vénin"),
+    "minecraft:weakness": ("Weakness", "Faiblesse"),
+    "minecraft:slowness": ("Slowness", "Lenteur"),
+    "minecraft:wither": ("Wither", "Flétrissement"),
+    "minecraft:speed": ("Speed", "Vitesse"),
+    "minecraft:resistance": ("Resistance", "Résistance"),
+    "minecraft:instant_health": ("Instant Health", "Soin instantané"),
+    "minecraft:levitation": ("Levitation", "Lévitation"),
+    "minecraft:haste": ("Haste", "Célérité"),
+}
+# The categories a folder implies when the affix does not spell them out.
+CATEGORY_BY_FOLDER = {
+    "armor": ["apotheosis:armor"],
+    "boots": ["apotheosis:boots"],
+    "breaker": ["apotheosis:breaker"],
+    "generic": [
+        "apotheosis:armor",
+        "apotheosis:melee_weapon",
+        "apotheosis:trident",
+        "apotheosis:bow",
+        "apotheosis:breaker",
+        "apotheosis:shield",
+        "apotheosis:shears",
+    ],
+    "melee": ["apotheosis:melee_weapon", "apotheosis:trident"],
+    "ranged": ["apotheosis:bow"],
+    "shears": ["apotheosis:shears"],
+    "shield": ["apotheosis:shield"],
+    "weapon": ["apotheosis:weapon"],
+}
+
+DAMAGE_TEXT = {
+    "explosion": ("Explosion", "Explosion"),
+    "physical": ("Physical", "Physique"),
+    "projectile": ("Projectile", "Projectile"),
+    "fall": ("Fall", "Chute"),
+    "lightning": ("Lightning", "Foudre"),
+    "magic": ("Magic", "Magie"),
 }
 
 # `minecraft:generic.foo` is the 1.21.1 spelling; Horizon's flattened
@@ -161,8 +233,12 @@ def number(value):
 
 
 def value_range(value):
-    """A Java AffixValue as (min, max, step); a plain number is a fixed one."""
-    if isinstance(value, (int, float)):
+    """A Java AffixValue as (min, max, step); a plain number is a fixed one.
+
+    Effect rolls carry their numbers under named fields (`duration`,
+    `amplifier`, ...), so they are read by `effect_values` instead.
+    """
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         return (float(value), float(value), 0.0)
     if not isinstance(value, dict):
         return None
@@ -170,11 +246,50 @@ def value_range(value):
         low = value.get("min", value.get("max", 0.0))
         high = value.get("max", low)
         return (float(low), float(high), float(value.get("step", 0.0)))
-    # Effect values carry their numbers under named fields.
-    for key in ("duration", "chance", "amplifier", "targets"):
-        if key in value:
-            return value_range(value[key])
     return None
+
+
+def effect_values(raw):
+    """One rarity's effect roll: its ranges, cooldown and roll count.
+
+    `None` when the rarity carries no effect roll, which is also how Java's
+    plain-value affixes (executing, thunderstruck, damage reduction) stay in
+    `values`.
+    """
+    if not isinstance(raw, dict):
+        return None
+    found = {"duration": None, "amplifier": None, "chance": None,
+             "targets": None, "cooldown": 0, "rolls": 0}
+    hit = False
+    for key in ("duration", "amplifier", "chance", "targets"):
+        if key in raw:
+            found[key] = value_range(raw[key])
+            hit = True
+    if "cooldown" in raw:
+        found["cooldown"] = int(raw["cooldown"])
+        hit = True
+    if "rolls" in raw:
+        found["rolls"] = int(raw["rolls"])
+        hit = True
+    return found if hit else None
+
+
+def effect_support(kind, data):
+    """Whether a non-attribute affix can be paid out by this port's hooks."""
+    if kind == "mob_effect":
+        effect = data.get("mob_effect") or ""
+        if not effect.startswith("minecraft:"):
+            return False
+        target = data.get("target") or ""
+        if target in REACHABLE_TARGETS:
+            return True
+        categories = data.get("categories") or data.get("types") or []
+        return target in TRIDENT_TARGETS and "apotheosis:trident" in categories
+    if kind == "enchantment":
+        # Only the two vanilla enchantments the game itself applies: Fortune on
+        # a tool, Looting on a bow (the loot hook reads the killer's weapon).
+        return data.get("enchantment") in ("minecraft:fortune", "minecraft:looting")
+    return kind in EFFECT_TYPES
 
 
 def rarity_list(data):
@@ -234,22 +349,31 @@ def affix_entries():
             kind = data.get("type", "apotheosis:attribute").split(":", 1)[-1]
             raw_attribute = data.get("attribute")
             game_attribute, variant, supported = attribute_support(raw_attribute)
-            supported = supported and kind == "attribute"
+            if kind != "attribute":
+                game_attribute, variant = None, None
+                supported = effect_support(kind, data)
             rarities = rarity_list(data)
             values = {}
+            effects = {}
             for rarity_name, raw in data.get("values", {}).items():
                 short = rarity_name.rsplit(":", 1)[-1]
                 if short in RARITIES:
                     parsed = value_range(raw)
                     if parsed is not None:
                         values[short] = parsed
+                    rolled = effect_values(raw)
+                    if rolled is not None:
+                        effects[short] = rolled
             definition = data.get("definition", {})
             weights = definition.get("weights", {})
             weight = int(weights.get("weight", 0)) if isinstance(weights, dict) else 0
             if isinstance(weights, dict) and not weight:
                 weight = max((int(v.get("weight", 0)) for v in weights.values()
                               if isinstance(v, dict)), default=0)
-            categories = data.get("categories") or data.get("types") or []
+            # A file with no category list takes its folder's: Java's
+            # `shield/retreating` and `generic/telepathic` rely on this.
+            categories = (data.get("categories") or data.get("types")
+                          or CATEGORY_BY_FOLDER.get(path.split("/", 1)[0], []))
             names = NAMES.get(path)
             if names is None:
                 english = fallback_name(path)
@@ -268,12 +392,39 @@ def affix_entries():
                 "categories": categories,
                 "rarities": rarities,
                 "values": values,
+                "effects": effects,
+                "effect": data.get("mob_effect"),
+                "effect_target": data.get("target"),
+                "damage_kind": data.get("damage_type"),
+                "enchantment": data.get("enchantment"),
                 "weight": weight,
                 "attr": variant,
                 "supported": supported,
             })
     entries.sort(key=lambda entry: entry["path"])
     return entries
+
+
+def optional_string(value):
+    return "Some(%s)" % rust_string(value) if value else "None"
+
+
+def range_literal(value):
+    return "Some(Range { min: %s, max: %s, step: %s })" % (
+        number(value[0]), number(value[1]), number(value[2]))
+
+
+def effect_literal(value):
+    """One rarity's `Effect`, or `None`."""
+    if value is None:
+        return "None"
+    fields = []
+    for key in ("duration", "amplifier", "chance", "targets"):
+        fields.append("%s: %s" % (key, "None" if value[key] is None
+                                  else range_literal(value[key])))
+    fields.append("cooldown: %d" % value["cooldown"])
+    fields.append("rolls: %d" % value["rolls"])
+    return "Some(Effect { %s })" % ", ".join(fields)
 
 
 def render(entries):
@@ -293,6 +444,19 @@ def render(entries):
         "    pub min: f64,",
         "    pub max: f64,",
         "    pub step: f64,",
+        "}",
+        "",
+        "/// The extra numbers a `mob_effect`, `cleaving` or `festive` rarity rolls.",
+        "#[derive(Clone, Copy, Debug)]",
+        "pub struct Effect {",
+        "    /// Ticks, for a timed effect.",
+        "    pub duration: Option<Range>,",
+        "    pub amplifier: Option<Range>,",
+        "    pub chance: Option<Range>,",
+        "    pub targets: Option<Range>,",
+        "    /// Ticks between two payouts of the same affix on one entity.",
+        "    pub cooldown: u32,",
+        "    pub rolls: u32,",
         "}",
         "",
         "/// One affix from `data/apotheosis/affixes/**`.",
@@ -319,6 +483,16 @@ def render(entries):
         "    pub rarities: &'static [u8],",
         "    /// Value ranges for common, uncommon, rare, epic, mythic.",
         "    pub values: [Option<Range>; 5],",
+        "    /// Effect rolls for common, uncommon, rare, epic, mythic.",
+        "    pub effects: [Option<Effect>; 5],",
+        "    /// The vanilla effect id of a `mob_effect` affix.",
+        "    pub effect: Option<&'static str>,",
+        "    /// Java's application target: `attack_target`, `hurt_self`, ...",
+        "    pub effect_target: Option<&'static str>,",
+        "    /// The vanilla damage class of a `damage_reduction` affix.",
+        "    pub damage_kind: Option<&'static str>,",
+        "    /// The vanilla enchantment of an `enchantment` affix.",
+        "    pub enchantment: Option<&'static str>,",
         "    pub weight: u32,",
         "    /// The port's storage slot for an Apothic attribute.",
         "    pub attr: Option<crate::attributes::Attr>,",
@@ -335,6 +509,8 @@ def render(entries):
             % (number(value[0]), number(value[1]), number(value[2]))
             for value in values
         )
+        rolled = [entry["effects"].get(rarity) for rarity in RARITIES]
+        effect_text = ", ".join(effect_literal(value) for value in rolled)
         rarity_indices = ", ".join(str(RARITIES.index(r)) for r in entry["rarities"])
         categories = ", ".join(rust_string(c) for c in entry["categories"])
         attr = ("Some(crate::attributes::Attr::%s)" % entry["attr"]
@@ -356,6 +532,11 @@ def render(entries):
             "        categories: &[%s]," % categories,
             "        rarities: &[%s]," % rarity_indices,
             "        values: [%s]," % value_text,
+            "        effects: [%s]," % effect_text,
+            "        effect: %s," % optional_string(entry["effect"]),
+            "        effect_target: %s," % optional_string(entry["effect_target"]),
+            "        damage_kind: %s," % optional_string(entry["damage_kind"]),
+            "        enchantment: %s," % optional_string(entry["enchantment"]),
             "        weight: %d," % entry["weight"],
             "        attr: %s," % attr,
             "        supported: %s," % ("true" if entry["supported"] else "false"),
@@ -382,6 +563,31 @@ def merge_lang():
         tables[table]["misc.apotheosis.affix_name.three"] = three
         tables[table]["misc.apotheosis.affix_name.four"] = four
         tables[table]["apotheosis.affix.stat"] = line
+    for effect, (english, french) in EFFECT_TEXT.items():
+        key = "apotheosis.effect." + effect.rsplit(":", 1)[-1]
+        tables["en_us"][key] = english
+        tables["fr_fr"][key] = french
+    for damage, (english, french) in DAMAGE_TEXT.items():
+        key = "apotheosis.damage." + damage
+        tables["en_us"][key] = english
+        tables["fr_fr"][key] = french
+    # The effect lines' own shapes, one per kind rather than per affix.
+    texts = {
+        "effect": ("%s for %s s", "%s pendant %s s"),
+        "reduction": ("-%s%% %s damage", "-%s%% de dégâts %s"),
+        "executing": ("Executes below %s%% health", "Exécute sous %s%% de vie"),
+        "cleaving": ("%s%% chance to hit %s foes", "%s%% de chances de toucher %s ennemis"),
+        "thunderstruck": ("Lightning for %s damage", "Foudre pour %s dégâts"),
+        "festive": ("%s%% chance of extra loot", "%s%% de chances de butin en plus"),
+        "durable": ("%s%% less wear", "%s%% d'usure en moins"),
+        "enchantment": ("+%s %s", "+%s %s"),
+        "retreating": ("Knocks attackers back on block", "Repousse les attaquants au blocage"),
+        "telepathic": ("Drops go to your inventory", "Le butin va dans l'inventaire"),
+    }
+    for kind, (english, french) in texts.items():
+        key = "apotheosis.affix.effect." + kind
+        tables["en_us"][key] = english
+        tables["fr_fr"][key] = french
     for language, additions in tables.items():
         path = os.path.join(LANG, language + ".json")
         table = read_json(path)

@@ -10,8 +10,8 @@ Source inspectée : `java-ref`
 - objets avec modèle Java : 41
 - modèles copiés : 99
 - textures copiées : 85
-- clés lang en_us : 1735
-- clés lang fr_fr : 1609
+- clés lang en_us : 1761
+- clés lang fr_fr : 1635
 
 Les ids sans équivalent Java gardent nos définitions et nos textures originales de `content/`. Les gemmes et blocs de gemmes sont volontairement laissés au chantier « gemmes » ; `JAVA_ALIASES` dans le script est la table à compléter pour eux.
 
