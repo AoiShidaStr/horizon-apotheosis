@@ -1,0 +1,5 @@
+{
+  "multipart": [
+    { "apply": { "model": "apotheosis:block/reforging_table" } }
+  ]
+}
