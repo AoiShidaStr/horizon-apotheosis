@@ -313,10 +313,22 @@ a85af177 and covered by unit tests only.
   magic) and cached per entity, so the reduction holds for hits v1 and v2 see
   alike. Current-health damage lands as physical damage after the blow.
 - They are **extra affixes**, never replacements: `apply_affixes` still rolls
-  the same number of attribute modifiers and lore lines, then adds at most one
-  effect affix when the tier allows it. The roll is stored in
+  the same number of attribute modifiers and lore lines, then adds the effect
+  affixes Java's rarity guarantees (rare one `basic_effect`, epic one plus one
+  `ability`, mythic/ancient two plus one), drawn from that class's supported
+  pool and never twice the same. The rolls are stored in
   `minecraft:custom_data` under `apotheosis:effects` and read back per hit.
   Tooltips show the effect line in green, translated in en_us and fr_fr.
+  The enchantment levels an effect affix adds are recorded under
+  `apotheosis:effect_enchants`, so a reroll takes back only those and leaves
+  the item's own enchantments alone.
+- **A reforge only replaces the port's own work**: attribute values it wrote
+  are recorded under `apotheosis:affix_attrs` and subtracted before the new
+  ones, and its lore lines (`apotheosis.affix.*`) and modifiers (Java affix
+  ids) are the only ones it removes, so another mod's lore, modifiers or a
+  player's anvil-renamed name survive. A kept name is recoloured with the
+  tier's colour. Vanilla's `minecraft:rarity` stops at `epic`, so the real
+  Java rarity is also written to `apotheosis:rarity`.
 - **Apothic Invader boss**: `entity_join_level` queues fresh joins and
   `mob_spawned` consumes the one matching a natural spawn. An overworld spawn
   must be at night and on the surface (column heightmap); Nether and End
