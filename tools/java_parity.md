@@ -9,13 +9,13 @@ ignoré par git.
 
 ## Ce qui est porté
 
-39 blocs et 26 objets sont déclarés sous
-`content/data/apotheosis/horizon/`, avec 83 recettes sous
+32 blocs et 15 objets sont déclarés sous
+`content/data/apotheosis/horizon/`, avec 52 recettes sous
 `content/data/apotheosis/recipe/`.
 
-Blocs : `basic_bookshelf`, `beeshelf`, `blazing_hellshelf`, `crystal_seashelf`, `deepshelf`, `dormant_deepshelf`, `draconic_endshelf`, `echoing_deepshelf`, `echoing_sculkshelf`, `enchantment_library`, `endshelf`, `gem_block_amber`, `gem_block_amethyst`, `gem_block_bloodstone`, `gem_block_citrine`, `gem_block_jade`, `gem_block_moonstone`, `gem_block_onyx`, `gem_block_opal`, `gem_block_peridot`, `gem_block_ruby`, `gem_block_sapphire`, `gem_block_topaz`, `gem_cutting_table`, `glowing_hellshelf`, `heart_seashelf`, `hellshelf`, `infused_hellshelf`, `infused_seashelf`, `melonshelf`, `pearl_endshelf`, `reforging_table`, `salvaging_table`, `seashelf`, `sightshelf`, `sightshelf_t2`, `soul_touched_deepshelf`, `soul_touched_sculkshelf`, `stoneshelf`.
+Blocs : `apothic_enchanting_table`, `basic_bookshelf`, `beeshelf`, `blazing_hellshelf`, `crystal_seashelf`, `deepshelf`, `dormant_deepshelf`, `draconic_endshelf`, `echoing_deepshelf`, `echoing_sculkshelf`, `enchantment_library`, `ender_library`, `endshelf`, `filtering_shelf`, `gem_cutting_table`, `geode_shelf`, `glowing_hellshelf`, `heart_seashelf`, `hellshelf`, `infused_hellshelf`, `infused_seashelf`, `melonshelf`, `pearl_endshelf`, `reforging_table`, `salvaging_table`, `seashelf`, `sightshelf`, `sightshelf_t2`, `soul_touched_deepshelf`, `soul_touched_sculkshelf`, `stoneshelf`, `treasure_shelf`.
 
-Objets : `arcane_sands`, `extraction_tome`, `gem_amber`, `gem_amethyst`, `gem_bloodstone`, `gem_citrine`, `gem_dust`, `gem_jade`, `gem_moonstone`, `gem_onyx`, `gem_opal`, `gem_peridot`, `gem_ruby`, `gem_sapphire`, `gem_topaz`, `godforged_pearl`, `improved_scrap_tome`, `luminous_crystal_shard`, `mysterious_scrap_metal`, `prismatic_web`, `scrap_tome`, `sigil_of_enhancement`, `sigil_of_rebirth`, `sigil_of_socketing`, `sigil_of_withdrawal`, `timeworn_fabric`.
+Objets : `arcane_sands`, `extraction_tome`, `gem`, `gem_dust`, `godforged_pearl`, `improved_scrap_tome`, `luminous_crystal_shard`, `mysterious_scrap_metal`, `prismatic_web`, `scrap_tome`, `sigil_of_enhancement`, `sigil_of_rebirth`, `sigil_of_socketing`, `sigil_of_withdrawal`, `timeworn_fabric`.
 
 ## Blocs Java absents
 
@@ -26,14 +26,9 @@ Objets : `arcane_sands`, `extraction_tome`, `gem_amber`, `gem_amethyst`, `gem_bl
 | apotheosis:ender_gem_case | absent | non porté dans ce lot |
 | apotheosis:gem_case | hors périmètre | hors périmètre : les gemmes sont un autre chantier |
 | apotheosis:simple_reforging_table | absent | bloc de table : la recette est portable, le comportement de la table ne l'est pas sans toucher au sertissage |
-| apothic_enchanting:apothic_enchanting_table | absent | non porté dans ce lot |
-| apothic_enchanting:ender_library | absent | non porté dans ce lot |
-| apothic_enchanting:filtering_shelf | absent | non porté dans ce lot |
-| apothic_enchanting:geode_shelf | absent | non porté dans ce lot |
 | apothic_enchanting:infused_endshelf | absent | non porté dans ce lot |
 | apothic_enchanting:prismatic_altar | absent | non porté dans ce lot |
 | apothic_enchanting:raven_enchanting_table | absent | non porté dans ce lot |
-| apothic_enchanting:treasure_shelf | absent | non porté dans ce lot |
 
 ## Objets Java absents
 
@@ -49,7 +44,6 @@ Objets : `arcane_sands`, `extraction_tome`, `gem_amber`, `gem_amethyst`, `gem_bl
 | apotheosis:ender_gem_case | absent | non porté dans ce lot |
 | apotheosis:ender_lead | absent | objet utilitaire ou décoratif : recette et comportement non portés |
 | apotheosis:frontier_spawner_upgrade_rune | absent | rune de palier : recette portable, objet non déclaré dans ce lot |
-| apotheosis:gem | absent | non porté dans ce lot |
 | apotheosis:gem_case | hors périmètre | hors périmètre : les gemmes sont un autre chantier |
 | apotheosis:gem_cutting_table | hors périmètre | hors périmètre : les gemmes sont un autre chantier |
 | apotheosis:gem_fused_slate | absent | objet produit par infusion : `recipe/infusion` n'est pas data-driven sous Horizon |
@@ -246,7 +240,6 @@ Objets : `arcane_sands`, `extraction_tome`, `gem_amber`, `gem_amethyst`, `gem_bl
 | wooden_tools | absent | recyclage par groupe d'objets : logique native, pas de type data-driven |
 | youthful | absent | type non porté : apothic_spawners:spawner_modifier |
 | youthful_spawner_rune | absent | recette vanilla portable : résultat ou ingrédient absent |
-| apothic_enchanting_table | absent | recette vanilla portable : résultat ou ingrédient absent |
 | boots_tome | absent | recette vanilla portable : résultat ou ingrédient absent |
 | bow_tome | absent | recette vanilla portable : résultat ou ingrédient absent |
 | budding_amethyst | absent | infusion d'enchantement : requires Eterna/Quanta/Arcana, pas de type data-driven |
@@ -255,11 +248,8 @@ Objets : `arcane_sands`, `extraction_tome`, `gem_amber`, `gem_amethyst`, `gem_bl
 | cobweb | absent | recette vanilla portable : résultat ou ingrédient absent |
 | echo_shard | absent | infusion d'enchantement : requires Eterna/Quanta/Arcana, pas de type data-driven |
 | ender_lead | absent | infusion d'enchantement : requires Eterna/Quanta/Arcana, pas de type data-driven |
-| ender_library | absent | type non porté : apothic_enchanting:keep_nbt_infusion |
-| filtering_shelf | absent | recette vanilla portable : résultat ou ingrédient absent |
 | fishing_tome | absent | recette vanilla portable : résultat ou ingrédient absent |
 | flimsy_ender_lead | absent | recette vanilla portable : résultat ou ingrédient absent |
-| geode_shelf | absent | recette vanilla portable : résultat ou ingrédient absent |
 | helmet_tome | absent | recette vanilla portable : résultat ou ingrédient absent |
 | inert_trident | absent | recette vanilla portable : résultat ou ingrédient absent |
 | infused_breath | absent | infusion d'enchantement : requires Eterna/Quanta/Arcana, pas de type data-driven |
@@ -272,7 +262,6 @@ Objets : `arcane_sands`, `extraction_tome`, `gem_amber`, `gem_amethyst`, `gem_bl
 | other_tome | absent | recette vanilla portable : résultat ou ingrédient absent |
 | pickaxe_tome | absent | recette vanilla portable : résultat ou ingrédient absent |
 | pufferfish | absent | recette vanilla portable : résultat ou ingrédient absent |
-| treasure_shelf | absent | recette vanilla portable : résultat ou ingrédient absent |
 | trident | absent | infusion d'enchantement : requires Eterna/Quanta/Arcana, pas de type data-driven |
 | weapon_tome | absent | recette vanilla portable : résultat ou ingrédient absent |
 | xp_bottle | absent | infusion d'enchantement : requires Eterna/Quanta/Arcana, pas de type data-driven |
