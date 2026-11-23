@@ -871,8 +871,10 @@ def main():
         write_json(os.path.join(CONTENT, "assets", ID, "items", table + ".json"), {
             "model": {"type": "minecraft:model", "model": "%s:block/%s" % (ID, table)}
         })
+        # Multipart form: this port's own file, not the variants one the Java
+        # jar ships (its assets are All Rights Reserved).
         write_json(os.path.join(CONTENT, "assets", ID, "blockstates", table + ".json"), {
-            "variants": {"": {"model": "%s:block/%s" % (ID, table)}}
+            "multipart": [{"apply": {"model": "%s:block/%s" % (ID, table)}}]
         })
         write_json(os.path.join(CONTENT, "assets", ID, "models", "block", table + ".json"), {
             "parent": "minecraft:block/cube_bottom_top",
