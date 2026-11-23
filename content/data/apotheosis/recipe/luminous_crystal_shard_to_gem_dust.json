@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "apotheosis:luminous_crystal_shard"
+  ],
+  "result": {
+    "id": "apotheosis:gem_dust",
+    "count": 3
+  }
+}

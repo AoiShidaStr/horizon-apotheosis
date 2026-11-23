@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "GGG",
+    "GEG",
+    "GGG"
+  ],
+  "key": {
+    "G": "minecraft:gold_ingot",
+    "E": "minecraft:ender_pearl"
+  },
+  "result": {
+    "id": "apotheosis:godforged_pearl"
+  }
+}

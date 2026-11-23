@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "GGG",
+    "GSG",
+    "SSS"
+  ],
+  "key": {
+    "G": "minecraft:gold_ingot",
+    "S": "apotheosis:mysterious_scrap_metal"
+  },
+  "result": {
+    "id": "apotheosis:reforging_table"
+  }
+}

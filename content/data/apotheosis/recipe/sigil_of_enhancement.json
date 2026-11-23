@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " A ",
+    "AEA",
+    " A "
+  ],
+  "key": {
+    "A": "apotheosis:arcane_sands",
+    "E": "minecraft:emerald"
+  },
+  "result": {
+    "id": "apotheosis:sigil_of_enhancement"
+  }
+}
