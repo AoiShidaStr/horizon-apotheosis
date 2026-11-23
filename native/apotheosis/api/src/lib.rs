@@ -659,9 +659,13 @@ impl Hooks for Apotheosis {
 
     fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
         // The Apotheosis tables (reforge, salvage, gem cutting) first, then a
-        // spawner modifier on a spawner block.
+        // spawner modifier on a spawner block, then an infusion on the
+        // apothic enchanting table.
         match sockets::use_item_on(host, event) {
-            Flow::Continue => spawners::on_use_item_on(host, event),
+            Flow::Continue => match spawners::on_use_item_on(host, event) {
+                Flow::Continue => enchanting::on_use_item_on(host, event),
+                Flow::Cancel => Flow::Cancel,
+            },
             Flow::Cancel => Flow::Cancel,
         }
     }

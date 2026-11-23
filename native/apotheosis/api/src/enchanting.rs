@@ -1,6 +1,7 @@
 use horizon_client::mod_api::{
     BlockEntityEvent, BlockEntityTickEvent, BlockEntityTicksEvent, Compound, EquipmentSlot, Flow,
     Hand, Host, ItemStack, PrepareItemEnchantEvent, RightClickBlockEvent, Tag, Text, UseItemEvent,
+    UseItemOnEvent,
 };
 use std::sync::{Arc, Mutex};
 
@@ -39,6 +40,13 @@ const SHELVES: &[(&str, ShelfStats)] = &[
     ("echoing_deepshelf", ShelfStats { eterna: 5.0, max_eterna: 75.0, arcana: 15.0, ..ShelfStats::DEFAULT }),
     ("echoing_sculkshelf", ShelfStats { eterna: 10.0, max_eterna: 80.0, quanta: 10.0, arcana: 15.0, clues: 1, ..ShelfStats::DEFAULT }),
     ("endshelf", ShelfStats { eterna: 5.0, max_eterna: 90.0, quanta: 5.0, arcana: 5.0, ..ShelfStats::DEFAULT }),
+    // A filtering shelf gives 0.5 Eterna per enchanted book in its six slots
+    // (max 30) and 1 Arcana per book, and filters those books' enchantments
+    // out of the offers. API 415 has no block-entity inventory hook, so its
+    // books cannot be read: the shelf is recognised with the stats an empty
+    // one has in Java (zero), and its filtering waits for that hook.
+    ("filtering_shelf", ShelfStats { ..ShelfStats::DEFAULT }),
+    ("geode_shelf", ShelfStats { eterna: 5.0, max_eterna: 60.0, quanta: -15.0, ..ShelfStats::DEFAULT }),
     ("glowing_hellshelf", ShelfStats { eterna: 5.0, max_eterna: 60.0, quanta: 5.0, arcana: 3.3333, ..ShelfStats::DEFAULT }),
     ("heart_seashelf", ShelfStats { eterna: 15.0, max_eterna: 60.0, arcana: 20.0, ..ShelfStats::DEFAULT }),
     ("hellshelf", ShelfStats { eterna: 3.0, max_eterna: 45.0, quanta: 3.0, ..ShelfStats::DEFAULT }),
@@ -52,6 +60,7 @@ const SHELVES: &[(&str, ShelfStats)] = &[
     ("soul_touched_deepshelf", ShelfStats { eterna: 5.0, max_eterna: 75.0, quanta: 15.0, ..ShelfStats::DEFAULT }),
     ("soul_touched_sculkshelf", ShelfStats { eterna: 10.0, max_eterna: 80.0, quanta: 15.0, arcana: 10.0, clues: 1, ..ShelfStats::DEFAULT }),
     ("stoneshelf", ShelfStats { eterna: -3.0, arcana: -7.5, ..ShelfStats::DEFAULT }),
+    ("treasure_shelf", ShelfStats { eterna: 5.0, max_eterna: 70.0, quanta: -15.0, arcana: -15.0, ..ShelfStats::DEFAULT }),
     ("wither_skull", ShelfStats { quanta: 10.0, ..ShelfStats::DEFAULT }),
 ];
 
@@ -407,6 +416,272 @@ pub(super) fn on_use_item(host: &mut dyn Host, event: &mut UseItemEvent<'_>) -> 
 }
 
 // ---------------------------------------------------------------------------
+// Infusion
+// ---------------------------------------------------------------------------
+//
+// Apothic Enchanting's infusion lives in its enchanting table's menu, which
+// API 415 cannot reach. The mod's own table block does it on a right click
+// instead: the item in hand is infused when the shelves around the table meet
+// the recipe's stats, and the click charges the levels Java charges for it.
+
+const INFUSION_TABLE: &str = "apotheosis:apothic_enchanting_table";
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct StackStats {
+    eterna: f32,
+    quanta: f32,
+    arcana: f32,
+}
+
+/// One `recipe/infusion` entry: the item that goes in, the stats the table must
+/// reach (`min`) and the most it may reach (`max`, negative for no bound).
+#[derive(Clone, Copy, Debug)]
+struct InfusionRecipe {
+    input: &'static str,
+    output: &'static str,
+    count: u32,
+    min: StackStats,
+    max: StackStats,
+}
+
+const UNBOUNDED: StackStats = StackStats {
+    eterna: -1.0,
+    quanta: -1.0,
+    arcana: -1.0,
+};
+
+// The updatable infusions whose input and result both exist in this port, with
+// the requirements of their Java data files. Recipes needing an item the port
+// does not carry (infused breath, ender leads, the inert trident, the music
+// discs) are left out: nothing in hand could ever match them.
+const INFUSIONS: &[InfusionRecipe] = &[
+    InfusionRecipe {
+        input: "minecraft:amethyst_block",
+        output: "minecraft:budding_amethyst",
+        count: 1,
+        min: StackStats { eterna: 60.0, quanta: 30.0, arcana: 50.0 },
+        max: StackStats { quanta: 50.0, ..UNBOUNDED },
+    },
+    InfusionRecipe {
+        input: "minecraft:carrot",
+        output: "minecraft:golden_carrot",
+        count: 1,
+        min: StackStats { eterna: 20.0, quanta: 10.0, arcana: 0.0 },
+        max: StackStats { eterna: 20.0, quanta: 30.0, arcana: -1.0 },
+    },
+    InfusionRecipe {
+        input: "apotheosis:dormant_deepshelf",
+        output: "apotheosis:deepshelf",
+        count: 1,
+        min: StackStats { eterna: 60.0, quanta: 40.0, arcana: 40.0 },
+        max: UNBOUNDED,
+    },
+    InfusionRecipe {
+        input: "minecraft:echo_shard",
+        output: "minecraft:echo_shard",
+        count: 4,
+        min: StackStats { eterna: 70.0, quanta: 50.0, arcana: 50.0 },
+        max: UNBOUNDED,
+    },
+    InfusionRecipe {
+        input: "apotheosis:enchantment_library",
+        output: "apotheosis:ender_library",
+        count: 1,
+        min: StackStats { eterna: 100.0, quanta: 45.0, arcana: 100.0 },
+        max: StackStats { eterna: 100.0, quanta: 50.0, arcana: 100.0 },
+    },
+    InfusionRecipe {
+        input: "apotheosis:hellshelf",
+        output: "apotheosis:infused_hellshelf",
+        count: 1,
+        min: StackStats { eterna: 45.0, quanta: 30.0, arcana: 0.0 },
+        max: UNBOUNDED,
+    },
+    InfusionRecipe {
+        input: "minecraft:honey_bottle",
+        output: "minecraft:experience_bottle",
+        count: 1,
+        min: StackStats { eterna: 20.0, quanta: 25.0, arcana: 25.0 },
+        max: UNBOUNDED,
+    },
+    InfusionRecipe {
+        input: "minecraft:honey_bottle",
+        output: "minecraft:experience_bottle",
+        count: 8,
+        min: StackStats { eterna: 60.0, quanta: 25.0, arcana: 25.0 },
+        max: UNBOUNDED,
+    },
+    InfusionRecipe {
+        input: "minecraft:honey_bottle",
+        output: "minecraft:experience_bottle",
+        count: 32,
+        min: StackStats { eterna: 100.0, quanta: 25.0, arcana: 25.0 },
+        max: UNBOUNDED,
+    },
+    InfusionRecipe {
+        input: "apotheosis:improved_scrap_tome",
+        output: "apotheosis:extraction_tome",
+        count: 4,
+        min: StackStats { eterna: 60.0, quanta: 25.0, arcana: 45.0 },
+        max: StackStats { quanta: 75.0, ..UNBOUNDED },
+    },
+    InfusionRecipe {
+        input: "apotheosis:scrap_tome",
+        output: "apotheosis:improved_scrap_tome",
+        count: 4,
+        min: StackStats { eterna: 45.0, quanta: 25.0, arcana: 35.0 },
+        max: StackStats { quanta: 50.0, ..UNBOUNDED },
+    },
+    InfusionRecipe {
+        input: "apotheosis:seashelf",
+        output: "apotheosis:infused_seashelf",
+        count: 1,
+        min: StackStats { eterna: 45.0, quanta: 15.0, arcana: 10.0 },
+        max: UNBOUNDED,
+    },
+];
+
+/// Floating point sums of shelf stats never land exactly on a requirement.
+const STAT_EPSILON: f32 = 1.0e-4;
+
+fn within(value: f32, min: f32, max: f32) -> bool {
+    value + STAT_EPSILON >= min && (max < 0.0 || value <= max + STAT_EPSILON)
+}
+
+impl InfusionRecipe {
+    fn accepts(&self, stats: StackStats) -> bool {
+        within(stats.eterna, self.min.eterna, self.max.eterna)
+            && within(stats.quanta, self.min.quanta, self.max.quanta)
+            && within(stats.arcana, self.min.arcana, self.max.arcana)
+    }
+}
+
+/// The easiest infusion `item` can go through, for the message that tells a
+/// player what the table would need.
+fn easiest_infusion(item: &str) -> Option<&'static InfusionRecipe> {
+    INFUSIONS
+        .iter()
+        .filter(|recipe| recipe.input == item)
+        .min_by(|a, b| a.min.eterna.total_cmp(&b.min.eterna))
+}
+
+/// The infusion of `item` the table's stats allow, the hardest one when
+/// several fit: `InfusionRecipe.findMatch` sorts by required Eterna first.
+fn find_infusion(item: &str, stats: StackStats) -> Option<&'static InfusionRecipe> {
+    INFUSIONS
+        .iter()
+        .filter(|recipe| recipe.input == item && recipe.accepts(stats))
+        .max_by(|a, b| a.min.eterna.total_cmp(&b.min.eterna))
+}
+
+/// The levels the click charges: the table's cost for the slot the infusion
+/// fills, clamped to the recipe's own Eterna requirement as Java does.
+fn infusion_cost(recipe: &InfusionRecipe, eterna: f32) -> i32 {
+    let table = (eterna.round() as i32).max(3);
+    let required = (recipe.min.eterna.ceil() as i32).max(3);
+    table.min(required)
+}
+
+fn item_name(item: &str) -> String {
+    format!("item.{}", item.replace(':', "."))
+}
+
+fn stat(text: f32) -> Text {
+    Text::literal(text.to_string())
+}
+
+/// An item used on the apothic enchanting table: the shelves two blocks out
+/// decide which infusion it can undergo, and the click applies it at once.
+pub(super) fn on_use_item_on(host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
+    if host.block(event.pos) != INFUSION_TABLE {
+        return Flow::Continue;
+    }
+    let Some(player) = host.acting_player() else {
+        return Flow::Continue;
+    };
+    let stats = read_table_stats(host, event.pos);
+    let available = StackStats {
+        eterna: stats.eterna,
+        quanta: stats.quanta,
+        arcana: stats.arcana,
+    };
+    let Some(recipe) = find_infusion(&event.stack.item, available) else {
+        host.tell(
+            player.uuid,
+            match easiest_infusion(&event.stack.item) {
+                Some(recipe) => Text::translate_with_fallback(
+                    "apotheosis.infusion.requirements",
+                    "Needs Eterna %s, Quanta %s and Arcana %s; the shelves give %s, %s and %s.",
+                    &[
+                        stat(recipe.min.eterna),
+                        stat(recipe.min.quanta),
+                        stat(recipe.min.arcana),
+                        stat(available.eterna),
+                        stat(available.quanta),
+                        stat(available.arcana),
+                    ],
+                ),
+                None => Text::translate_with_fallback(
+                    "apotheosis.infusion.no_match",
+                    "Nothing in your hand can be infused here.",
+                    &[],
+                ),
+            },
+        );
+        // The click belongs to the table, so vanilla never opens a block GUI.
+        return Flow::Cancel;
+    };
+    if event.stack.count != 1 {
+        host.tell(
+            player.uuid,
+            Text::translate_with_fallback(
+                "apotheosis.infusion.single",
+                "The table infuses one item at a time.",
+                &[],
+            ),
+        );
+        return Flow::Cancel;
+    }
+    let cost = infusion_cost(recipe, available.eterna);
+    if player.game_mode != 1 && player.xp_level < cost {
+        host.tell(
+            player.uuid,
+            Text::translate_with_fallback(
+                "apotheosis.infusion.levels",
+                "You need %s experience levels.",
+                &[Text::literal(cost.to_string())],
+            ),
+        );
+        return Flow::Cancel;
+    }
+    let Some(current) = host.carried_stack(i32::from(player.selected_slot)) else {
+        return Flow::Continue;
+    };
+    if current.item != event.stack.item {
+        return Flow::Continue;
+    }
+    // The hand's stack is the only copy: replacing it in place consumes the
+    // input and hands out the result in one write, so nothing can duplicate.
+    *current = ItemStack::new(recipe.output, recipe.count);
+    if player.game_mode != 1 {
+        let _ = host.give_levels(player.uuid, -cost);
+    }
+    host.tell(
+        player.uuid,
+        Text::translate_with_fallback(
+            "apotheosis.infusion.done",
+            "Infused %s.",
+            &[Text::translate_with_fallback(
+                &item_name(recipe.output),
+                recipe.output,
+                &[],
+            )],
+        ),
+    );
+    Flow::Cancel
+}
+
+// ---------------------------------------------------------------------------
 // Enchantment Library
 // ---------------------------------------------------------------------------
 //
@@ -417,24 +692,52 @@ pub(super) fn on_use_item(host: &mut dyn Host, event: &mut UseItemEvent<'_>) -> 
 // server thread, which leaves nothing to duplicate with a menu, a hopper or a
 // second player.
 
-/// The library block and the id its block entity saves under.
+/// The library blocks and the ids their block entities save under.
 pub(super) const LIBRARY: &str = "apotheosis:enchantment_library";
+pub(super) const ENDER_LIBRARY: &str = "apotheosis:ender_library";
 const LIBRARY_ENTITY: &str = "apotheosis:enchantment_library";
+const ENDER_LIBRARY_ENTITY: &str = "apotheosis:ender_library";
 /// The saved compound's key holding the stored points.
 const LIBRARY_POINTS: &str = "points";
-/// The highest level a library holds and hands out: one point a level.
+/// The highest level the ordinary library holds and hands out: one point a
+/// level.
 pub(super) const LIBRARY_MAX_LEVEL: u32 = 30;
+/// Apothic Enchanting builds its Ender Library with max level 31, against the
+/// ordinary library's 16; this port's ordinary library already stores a point
+/// per level up to 30, so the Ender one is the same store one level higher.
+pub(super) const ENDER_LIBRARY_MAX_LEVEL: u32 = 31;
+
+/// The block entity id and the level cap of the library block `block`.
+fn library_kind(block: &str) -> Option<(&'static str, u32)> {
+    match block {
+        LIBRARY => Some((LIBRARY_ENTITY, LIBRARY_MAX_LEVEL)),
+        ENDER_LIBRARY => Some((ENDER_LIBRARY_ENTITY, ENDER_LIBRARY_MAX_LEVEL)),
+        _ => None,
+    }
+}
 /// Libraries whose points are mirrored in memory, and how many offers a player
 /// may have selected.
 const LIBRARY_CACHE: usize = 64;
 const SELECTION_CACHE: usize = 256;
 
 /// Stored points of one library, by enchantment. `dirty` marks a change the
-/// block entity's next tick has to save.
-#[derive(Clone, Debug, Default, PartialEq)]
+/// block entity's next tick has to save; `max_level` is the cap its block
+/// gives it (30 for the library, 31 for the Ender Library).
+#[derive(Clone, Debug, PartialEq)]
 struct Library {
     points: Vec<(Arc<str>, u32)>,
+    max_level: u32,
     dirty: bool,
+}
+
+impl Default for Library {
+    fn default() -> Self {
+        Self {
+            points: Vec::new(),
+            max_level: LIBRARY_MAX_LEVEL,
+            dirty: false,
+        }
+    }
 }
 
 impl Library {
@@ -443,16 +746,16 @@ impl Library {
         if levels == 0 {
             return;
         }
+        let cap = self.max_level;
         let current = self
             .points
             .iter_mut()
             .find(|(id, _)| id == enchantment)
             .map(|(_, points)| points);
         match current {
-            Some(points) => *points = (*points + levels).min(LIBRARY_MAX_LEVEL),
+            Some(points) => *points = (*points + levels).min(cap),
             None => {
-                self.points
-                    .push((enchantment.clone(), levels.min(LIBRARY_MAX_LEVEL)));
+                self.points.push((enchantment.clone(), levels.min(cap)));
                 self.points.sort_by(|a, b| a.0.cmp(&b.0));
             }
         }
@@ -483,7 +786,7 @@ impl Library {
     fn offers(&self) -> Vec<(Arc<str>, u32)> {
         let mut offers = Vec::new();
         for (id, points) in &self.points {
-            for level in 1..=(*points).min(LIBRARY_MAX_LEVEL) {
+            for level in 1..=(*points).min(self.max_level) {
                 offers.push((id.clone(), level));
             }
         }
@@ -502,17 +805,20 @@ fn selections() -> &'static Mutex<Vec<((u128, String, [i32; 3]), (Arc<str>, u32)
     &SELECTIONS
 }
 
-/// The mirror of the library at `pos`, empty when none is cached yet.
-fn library_at(dimension: &str, pos: [i32; 3]) -> Library {
+/// The mirror of the library at `pos`, empty when none is cached yet, with
+/// the cap of the block standing there.
+fn library_at(dimension: &str, pos: [i32; 3], max_level: u32) -> Library {
     let key = (dimension.to_owned(), pos);
-    libraries()
+    let mut library = libraries()
         .lock()
         .map(|all| {
             all.iter()
                 .find(|(at, _)| *at == key)
                 .map_or_else(Library::default, |(_, library)| library.clone())
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+    library.max_level = max_level;
+    library
 }
 
 fn store_library(dimension: &str, pos: [i32; 3], library: Library) {
@@ -548,7 +854,7 @@ fn encode_points(points: &[(Arc<str>, u32)]) -> String {
     text
 }
 
-fn decode_points(text: &str) -> Vec<(Arc<str>, u32)> {
+fn decode_points(text: &str, max_level: u32) -> Vec<(Arc<str>, u32)> {
     let mut points: Vec<(Arc<str>, u32)> = Vec::new();
     for entry in text.split(';') {
         let Some((id, level)) = entry.rsplit_once('=') else {
@@ -560,9 +866,9 @@ fn decode_points(text: &str) -> Vec<(Arc<str>, u32)> {
         if id.is_empty() || level == 0 {
             continue;
         }
-        let level = level.min(LIBRARY_MAX_LEVEL);
+        let level = level.min(max_level);
         match points.iter_mut().find(|(known, _)| known.as_ref() == id) {
-            Some((_, known)) => *known = (*known).saturating_add(level).min(LIBRARY_MAX_LEVEL),
+            Some((_, known)) => *known = (*known).saturating_add(level).min(max_level),
             None => points.push((Arc::from(id), level)),
         }
     }
@@ -570,13 +876,14 @@ fn decode_points(text: &str) -> Vec<(Arc<str>, u32)> {
     points
 }
 
-fn read_library(nbt: &Compound) -> Library {
+fn read_library(nbt: &Compound, max_level: u32) -> Library {
     let points = match nbt.get(&LIBRARY_POINTS.into()) {
-        Some(Tag::String(text)) => decode_points(&text.to_string_lossy()),
+        Some(Tag::String(text)) => decode_points(&text.to_string_lossy(), max_level),
         _ => Vec::new(),
     };
     Library {
         points,
+        max_level,
         dirty: false,
     }
 }
@@ -621,9 +928,9 @@ fn enchantment_name(id: &str) -> String {
 /// points, past the cap the extra levels are lost. The book is consumed only
 /// once the points are recorded.
 pub(super) fn on_right_click_block(host: &mut dyn Host, event: &mut RightClickBlockEvent) -> Flow {
-    if host.block(event.pos) != LIBRARY {
+    let Some((_, max_level)) = library_kind(&host.block(event.pos)) else {
         return Flow::Continue;
-    }
+    };
     let Some(player) = host.acting_player() else {
         return Flow::Continue;
     };
@@ -638,7 +945,7 @@ pub(super) fn on_right_click_block(host: &mut dyn Host, event: &mut RightClickBl
         return Flow::Continue;
     };
     let held = living.hand_item(host, Hand::Main);
-    let mut library = library_at(&dimension, event.pos);
+    let mut library = library_at(&dimension, event.pos, max_level);
 
     match held.as_ref().map(|stack| stack.item.as_ref()) {
         Some("minecraft:enchanted_book") => {
@@ -806,12 +1113,12 @@ pub(super) fn on_right_click_block(host: &mut dyn Host, event: &mut RightClickBl
 
 /// Every library block gets a block entity, saved with its chunk.
 pub(super) fn on_block_entity(event: &BlockEntityEvent<'_>) -> Option<(String, Compound)> {
-    (event.block == LIBRARY).then(|| (LIBRARY_ENTITY.to_owned(), Compound::new()))
+    library_kind(event.block).map(|(entity, _)| (entity.to_owned(), Compound::new()))
 }
 
-/// The library's block entity ticks, so pending points reach the save.
+/// A library's block entity ticks, so pending points reach the save.
 pub(super) fn on_block_entity_ticks(event: &mut BlockEntityTicksEvent<'_>) {
-    if event.block == LIBRARY {
+    if library_kind(event.block).is_some() {
         event.ticks = true;
     }
 }
@@ -820,26 +1127,30 @@ pub(super) fn on_block_entity_ticks(event: &mut BlockEntityTicksEvent<'_>) {
 /// after a click changed them. A library broken before its next tick keeps its
 /// cached points until the cache forgets it, never a duplicated book.
 pub(super) fn on_block_entity_tick(host: &mut dyn Host, event: &mut BlockEntityTickEvent<'_>) {
+    let Some((_, max_level)) = library_kind(&host.block(event.pos)) else {
+        return;
+    };
     let dimension = host.dimension().to_owned();
     let key = (dimension.clone(), event.pos);
     let Ok(mut all) = libraries().lock() else {
         return;
     };
     if let Some((_, library)) = all.iter_mut().find(|(at, _)| *at == key) {
+        library.max_level = max_level;
         if library.dirty {
             write_library(&mut event.entity.nbt, library);
             library.dirty = false;
         } else {
             // A library placed where another stood starts empty again: the
             // saved compound, not the cache, is what the chunk holds.
-            let saved = read_library(&event.entity.nbt);
+            let saved = read_library(&event.entity.nbt, max_level);
             if saved.points != library.points {
                 library.points = saved.points;
             }
         }
         return;
     }
-    let library = read_library(&event.entity.nbt);
+    let library = read_library(&event.entity.nbt, max_level);
     if all.len() >= LIBRARY_CACHE {
         all.remove(0);
     }
@@ -1003,12 +1314,98 @@ mod tests {
         library.absorb(&Arc::from("minecraft:protection"), 2);
         let mut nbt = Compound::new();
         write_library(&mut nbt, &library);
-        let read = read_library(&nbt);
+        let read = read_library(&nbt, LIBRARY_MAX_LEVEL);
         assert_eq!(read.points, library.points);
         assert!(!read.dirty);
         // Malformed entries are skipped rather than guessed.
-        assert!(decode_points(";;=2;minecraft:sharpness=x;=1;=0").is_empty());
-        assert_eq!(decode_points("a=1;a=2"), vec![(Arc::from("a"), 3)]);
+        assert!(decode_points(";;=2;minecraft:sharpness=x;=1;=0", LIBRARY_MAX_LEVEL).is_empty());
+        assert_eq!(
+            decode_points("a=1;a=2", LIBRARY_MAX_LEVEL),
+            vec![(Arc::from("a"), 3)]
+        );
+    }
+
+    #[test]
+    fn the_three_shelves_keep_their_java_stats() {
+        let geode = shelf_stats("apotheosis:geode_shelf").unwrap();
+        assert_eq!((geode.eterna, geode.max_eterna, geode.quanta), (5.0, 60.0, -15.0));
+        let treasure = shelf_stats("apotheosis:treasure_shelf").unwrap();
+        assert_eq!(
+            (treasure.eterna, treasure.max_eterna, treasure.quanta, treasure.arcana),
+            (5.0, 70.0, -15.0, -15.0)
+        );
+        // Without a block-entity inventory hook an empty filtering shelf is
+        // all the port can read, and Java's empty shelf gives nothing.
+        let filtering = shelf_stats("apotheosis:filtering_shelf").unwrap();
+        assert_eq!((filtering.eterna, filtering.arcana), (0.0, 0.0));
+    }
+
+    #[test]
+    fn both_libraries_carry_their_own_top_level() {
+        assert_eq!(library_kind(LIBRARY), Some((LIBRARY_ENTITY, 30)));
+        assert_eq!(library_kind(ENDER_LIBRARY), Some((ENDER_LIBRARY_ENTITY, 31)));
+        assert_eq!(library_kind("minecraft:bookshelf"), None);
+
+        let mut ender = read_library(&Compound::new(), ENDER_LIBRARY_MAX_LEVEL);
+        ender.absorb(&Arc::from("minecraft:sharpness"), 99);
+        assert_eq!(ender.stored("minecraft:sharpness"), 31);
+        // A point saved by the Ender Library is capped when read back into the
+        // ordinary one, and the reverse keeps every point it can pay for.
+        assert_eq!(
+            decode_points("minecraft:sharpness=31", LIBRARY_MAX_LEVEL),
+            vec![(Arc::from("minecraft:sharpness"), 30)]
+        );
+        assert_eq!(
+            decode_points("minecraft:sharpness=30", ENDER_LIBRARY_MAX_LEVEL),
+            vec![(Arc::from("minecraft:sharpness"), 30)]
+        );
+    }
+
+    #[test]
+    fn infusion_takes_the_hardest_recipe_the_table_reaches() {
+        let honey = StackStats { eterna: 100.0, quanta: 25.0, arcana: 25.0 };
+        assert_eq!(find_infusion("minecraft:honey_bottle", honey).unwrap().count, 32);
+        let honey = StackStats { eterna: 60.0, quanta: 25.0, arcana: 25.0 };
+        assert_eq!(find_infusion("minecraft:honey_bottle", honey).unwrap().count, 8);
+        let honey = StackStats { eterna: 20.0, quanta: 25.0, arcana: 25.0 };
+        assert_eq!(find_infusion("minecraft:honey_bottle", honey).unwrap().count, 1);
+        // Below the easiest recipe, or on an item no recipe takes, nothing fits.
+        let honey = StackStats { eterna: 19.0, quanta: 25.0, arcana: 25.0 };
+        assert!(find_infusion("minecraft:honey_bottle", honey).is_none());
+        assert!(find_infusion("minecraft:stone", honey).is_none());
+        assert_eq!(easiest_infusion("minecraft:honey_bottle").unwrap().count, 1);
+
+        // The Ender Library keeps the library item and asks for a perfect table.
+        let perfect = StackStats { eterna: 100.0, quanta: 45.0, arcana: 100.0 };
+        let recipe = find_infusion(LIBRARY, perfect).unwrap();
+        assert_eq!(recipe.output, ENDER_LIBRARY);
+        assert_eq!(
+            find_infusion(LIBRARY, StackStats { quanta: 50.0, ..perfect }).map(|recipe| recipe.output),
+            Some(ENDER_LIBRARY)
+        );
+        assert!(find_infusion(LIBRARY, StackStats { quanta: 51.0, ..perfect }).is_none());
+    }
+
+    #[test]
+    fn infusion_honours_the_upper_bounds_of_its_recipes() {
+        // A carrot infuses up to 30 Quanta; the golden carrot recipe is the
+        // only one that fits, and its Eterna bound stops a stronger table.
+        let fits = StackStats { eterna: 20.0, quanta: 30.0, arcana: 0.0 };
+        assert_eq!(find_infusion("minecraft:carrot", fits).unwrap().output, "minecraft:golden_carrot");
+        assert!(find_infusion("minecraft:carrot", StackStats { quanta: 31.0, ..fits }).is_none());
+        assert!(find_infusion("minecraft:carrot", StackStats { eterna: 21.0, ..fits }).is_none());
+        // Quanta -1 in a data file means no bound at all.
+        let echo = StackStats { eterna: 70.0, quanta: 100.0, arcana: 100.0 };
+        assert_eq!(find_infusion("minecraft:echo_shard", echo).unwrap().count, 4);
+    }
+
+    #[test]
+    fn infusion_charges_the_recipe_level_not_the_whole_table() {
+        let carrot = easiest_infusion("minecraft:carrot").unwrap();
+        assert_eq!(infusion_cost(carrot, 20.0), 20);
+        assert_eq!(infusion_cost(carrot, 100.0), 20);
+        // A table too weak for the recipe still never charges less than 3.
+        assert_eq!(infusion_cost(carrot, 1.5), 3);
     }
 
     #[test]

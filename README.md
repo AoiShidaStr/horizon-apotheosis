@@ -349,15 +349,6 @@ a85af177 and covered by unit tests only.
 - **Affixes from chest loot tables** — chest tables can supply gems, but their
   gear remains un-affixed; `loot_table_load` cannot roll the item components
   the later loot generation creates.
-- **The enchanting library** and its tomes (Scrap, Extraction) are not
-  implemented. Enchanting stats themselves are ported (see *Apothic Enchanting*
-  below), with the limits listed there; configurable spawners are ported (see
-  *Apothic Spawners*).
-
-- **The enchanting library** and **configurable spawners** (silk-touched
-  spawners with a chosen mob) are not implemented. Enchanting stats and the
-  tomes are ported (see *Apothic Enchanting* below), with the limits listed
-  there.
 - **Natural ore generation** for gems: gems come from mobs, bosses, recipes
   and reforge only.
 - Affix names, lore and command answers are translated, but an affixed item
@@ -368,7 +359,8 @@ a85af177 and covered by unit tests only.
 
 ### Done
 
-- **Twenty-three shelf blocks** on `minecraft:bookshelf` templates, with original
+- **Twenty-six shelf blocks** on `minecraft:bookshelf` (and, for the three
+  newest, `minecraft:stone`) templates, with original
   generated 16x16 textures, own blockstate/model, `block.apotheosis.<shelf>`
   names in en_us and fr_fr, an entry in the creative tab, a self-drop loot
   table and the axe mining tag. Their stats are public Apothic Enchanting
@@ -399,6 +391,17 @@ a85af177 and covered by unit tests only.
   | beeshelf | -30 | 0 | 100 | 0 | 0 |
   | melonshelf | -2 | 0 | -10 | 0 | 0 |
   | stoneshelf | -3 | 0 | 0 | -7.5 | 0 |
+  | geode_shelf | 5 | 60 | -15 | 0 | 0 |
+  | treasure_shelf | 5 | 70 | -15 | -15 | 0 |
+  | filtering_shelf | 0 | 30 | 0 | 0 | 0 |
+
+  The three newer shelves keep their Java ids (`apotheosis:geode_shelf`,
+  `apotheosis:treasure_shelf`, `apotheosis:filtering_shelf`), their stone
+  template and `minecraft:stone` sound, hardness 1.75, the pickaxe tag, their
+  Java shaped recipes (`geode_shelf`: calcite corners around a bookshelf with
+  a budding amethyst, `treasure_shelf`: gold and diamond above deepshelf over
+  emerald, `filtering_shelf`: prismarine bricks around an infused seashelf) and
+  are `enchantment_power_provider`s like the wooden ones.
 
   Vanilla `minecraft:amethyst_cluster`, `minecraft:skeleton_skull` /
   `minecraft:wither_skeleton_skull` and `minecraft:wither_skull` are recognised
@@ -428,9 +431,9 @@ a85af177 and covered by unit tests only.
   one `minecraft:bookshelf` surrounded by four of its theme catalyst — honeycomb,
   blaze rod or powder, glowstone, nether wart, pufferfish, prismarine shard or
   crystals, heart of the sea, sculk, echo shard, ender pearl, dragon head,
-  spyglass, emerald, melon slice or polished andesite. The custom
-  `apothic_enchanting:infusion` station does not exist in Horizon, so no recipe
-  depends on it.
+  spyglass, emerald, melon slice or polished andesite. Only the Ender Library
+  depends on the mod's own infusion table (see below); every other recipe is a
+  vanilla shaped one.
 - **Three tomes and the Prismatic Cobweb** (`use_item`, API 13), used on a
   right click: hold the tome in one hand and the enchanted item in the other.
   API 415 has no anvil hook, so this replaces the original's anvil step. Each
@@ -451,6 +454,18 @@ a85af177 and covered by unit tests only.
   shaped recipes: eight books around an anvil give eight scrap tomes, diamonds
   or netherite scraps upgrade one to the superior or extraction tome, and four
   prismarine shards around a cobweb give the Prismatic Cobweb.
+- **The Ender Library** (`apotheosis:ender_library`), built the way Java builds
+  it: an infusion of the ordinary library (`recipe/infusion/ender_library`,
+  Eterna 100 / Quanta 45 / Arcana 100 at most 100/50/100). It is the same
+  block entity and the same right-click gestures as the library below, with a
+  level cap of 31 instead of 30 (Apothic Enchanting builds it with
+  `new EnchLibraryBlock(EnderLibraryTile::new, 31)`); the ordinary library's
+  Java cap of 16 levels is kept at this port's one-point-per-level 30, so the
+  Ender one is exactly one level above it. Own texture, names, creative-tab
+  entry, self-drop loot table and axe tag. Java gets the block by infusing a
+  placed library; a world where the infusion table is out of reach can craft
+  the same upgrade without the table (an ender chest between two books over a
+  bookshelf), and the infusion stays the cheaper Eterna-free path.
 - **The Enchantment Library** (`block_entity` / `block_entity_ticks` /
   `block_entity_tick` API 15–17, `right_click_block` API 21). The block stores
   enchantments as points — one point per level, capped at level 30 per
@@ -464,6 +479,24 @@ a85af177 and covered by unit tests only.
   vanilla recipe (eight books around a bookshelf). No menu and no item slot is
   involved — every click is applied at once on the server thread, so rapid
   clicks, two players and a broken block cannot duplicate a book.
+- **Infusion at the Apothic Enchanting Table** (`apotheosis:apothic_enchanting_table`,
+  `use_item_on` API 13). API 415 cannot open or drive a block's menu, so the
+  table does on a right click what the Java menu's third slot does: the item in
+  hand is matched against the mod's `recipe/infusion` entries at the stats the
+  surrounding shelves give (`findMatch`, hardest Eterna requirement first), and
+  the click applies it at once — one item in, the result in the hand, the same
+  experience levels Java charges (the table's cost clamped to the recipe's
+  Eterna requirement, at least 3, free in creative). Twelve infusions are
+  ported, the ones whose input and result both exist here: budding amethyst,
+  golden carrot, deepshelf, the four echo shards, the Ender Library, the two
+  infused shelves, the three experience-bottle sizes, and the four-tome
+  upgrades (scrap → superior, superior → extraction). Recipes needing an item
+  this port does not carry (infused breath, ender leads, the inert trident,
+  magic discs) are left out. The block uses the `minecraft:obsidian` template
+  so no vanilla screen opens over it, has its own texture, names and creative
+  entry, the pickaxe tag, a self-drop loot table and a recipe (obsidian around
+  an enchanting table). A click that cannot be infused says what the shelves
+  give and what the recipe needs instead of silently doing nothing.
 
 ### Missing
 
@@ -490,9 +523,19 @@ a85af177 and covered by unit tests only.
   or dedicated host's guests (`lan_stations.rs`); the integrated single-player
   table computes its offers locally without calling the hook. Local play gets
   the tag-based power above, capped at vanilla's 15 providers.
-- **Infusion and rectifiers.** No infusion altar or rectifier is added; the
-  recipes stop at vanilla crafting. The tomes are used by a right click rather
-  than in an anvil, since API 415 has no anvil hook.
+- **The filtering shelf filters nothing.** Java gives it 0.5 Eterna and one
+  Arcana per enchanted book in its six slots and removes those books'
+  enchantments from the table's offers. API 415 has no block-entity inventory
+  hook (an item cannot be inserted into a shelf, and its contents cannot be
+  read), so the block exists with its recipe, model and names, counts as an
+  `enchantment_power_provider` like an empty Java shelf, and contributes no
+  stats: the values an empty filtering shelf has in Java. Storing books and
+  filtering the offers wait for an inventory hook above API 415.
+- **No rectifier and no enchanting screen.** No rectifier block is added, and
+  the infusion table and both libraries work by right clicks rather than by
+  menus: API 415's menu hooks only reach a LAN host's guests. The infusion
+  table also cannot show the Java preview of which recipe the shelves allow;
+  the requirements are reported in chat when a click cannot be infused.
 - **The Enchantment Library has no screen and drops no contents.** API 415's
   menu hooks only reach a LAN host's guests and vanilla-menu clicks cannot be
   intercepted, so the library is driven by right clicks and shows offers in
