@@ -1,0 +1,9 @@
+{
+  "template": "minecraft:oak_planks",
+  "item": true,
+  "properties": {
+    "hardness": 2.5,
+    "explosion_resistance": 6.0,
+    "requires_tool": true
+  }
+}

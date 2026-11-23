@@ -498,5 +498,18 @@
   "apotheosis.infusion.single": "The table infuses one item at a time.",
   "apotheosis.infusion.requirements": "Needs Eterna %s, Quanta %s and Arcana %s; the shelves give %s, %s and %s.",
   "apotheosis.infusion.levels": "You need %s experience levels.",
-  "apotheosis.infusion.done": "Infused %s."
+  "apotheosis.infusion.done": "Infused %s.",
+  "item.apotheosis.sigil_of_unnaming": "Sigil of Unnaming",
+  "item.apotheosis.sigil_of_unnaming.desc": "Removes the affix name from an item",
+  "item.apotheosis.gem_fused_slate": "Gem-Fused Slate",
+  "item.apotheosis.iron_upgrade_smithing_template": "Iron Upgrade Template",
+  "item.apotheosis.gold_upgrade_smithing_template": "Gold Upgrade Template",
+  "item.apotheosis.diamond_upgrade_smithing_template": "Diamond Upgrade Template",
+  "block.apotheosis.simple_reforging_table": "Simple Reforging Table",
+  "apotheosis.salvage.gem": "Salvaged into %s gem dust.",
+  "apotheosis.unnaming.none": "That piece has no name to remove.",
+  "apotheosis.unnaming.custom": "That name was not written by affixes; it is left alone.",
+  "apotheosis.unnaming.done": "The affix name was removed.",
+  "apotheosis.table.reforge.rarity": "This table cannot reforge that rarity; use the reforging table.",
+  "apotheosis.reforge.missing": "You do not have the materials this reforge needs."
 }

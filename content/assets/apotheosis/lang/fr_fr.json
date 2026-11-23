@@ -221,7 +221,7 @@
   "apotheosis.seal.no_piece": "Tenez un objet affixé en main secondaire pour y utiliser un sceau.",
   "apotheosis.enhance.done": "Amélioré : %s.",
   "apotheosis.enhance.max": "Cette pièce est déjà ancienne.",
-  "apotheosis.cut.no_dust": "La table de taille de gemme demande %s poussière(s) de gemme et les matériaux de pureté.",
+  "apotheosis.cut.no_dust": "La table de taille demande %s poussière de gemme.",
   "apotheosis.table.reforge.hint": "La table de recréation agit sur l'équipement tenu en main.",
   "apotheosis.table.salvage.hint": "La table de récupération recycle l'objet affixé tenu en main.",
   "apotheosis.table.cut.hint": "La table de taille aiguise la gemme tenue en main.",
@@ -498,5 +498,18 @@
   "apotheosis.infusion.single": "La table n'infuse qu'un objet à la fois.",
   "apotheosis.infusion.requirements": "Requiert %s d'Eterna, %s de Quanta et %s d'Arcana ; les étagères fournissent %s, %s et %s.",
   "apotheosis.infusion.levels": "Il vous faut %s niveaux d'expérience.",
-  "apotheosis.infusion.done": "%s infusé."
+  "apotheosis.infusion.done": "%s infusé.",
+  "item.apotheosis.sigil_of_unnaming": "Sceau d'effacement",
+  "item.apotheosis.sigil_of_unnaming.desc": "Retire le nom d'affixe d'un objet",
+  "item.apotheosis.gem_fused_slate": "Ardoise fusionnée",
+  "item.apotheosis.iron_upgrade_smithing_template": "Modèle d'amélioration en fer",
+  "item.apotheosis.gold_upgrade_smithing_template": "Modèle d'amélioration en or",
+  "item.apotheosis.diamond_upgrade_smithing_template": "Modèle d'amélioration en diamant",
+  "block.apotheosis.simple_reforging_table": "Table simple de recréation",
+  "apotheosis.salvage.gem": "Recyclé en %s poussière de gemme.",
+  "apotheosis.unnaming.none": "Cet objet n'a aucun nom à retirer.",
+  "apotheosis.unnaming.custom": "Ce nom n'a pas été écrit par les affixes ; il est conservé.",
+  "apotheosis.unnaming.done": "Le nom d'affixe a été retiré.",
+  "apotheosis.table.reforge.rarity": "Cette table ne peut pas reforger cette rareté ; utilisez la table de reforger.",
+  "apotheosis.reforge.missing": "Vous n'avez pas les matériaux nécessaires à ce reforger."
 }
