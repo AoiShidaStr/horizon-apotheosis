@@ -441,7 +441,7 @@ impl Hooks for Apotheosis {
         if let Some((gem, purity)) = gems::of_stack(event.stack) {
             for (line, colour) in gems::description(gem, purity) {
                 event.lines.push((
-                    Text::translate_with_fallback("apotheosis.gem.bonus", &line, &[])
+                    Text::translate_with_fallback("apotheosis.gem.bonus", "%s", &[Text::literal(line)])
                         .with_color(colour),
                     colour,
                 ));
