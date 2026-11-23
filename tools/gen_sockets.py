@@ -85,10 +85,6 @@ MESSAGES = {
         "Reforged: the piece in your hand rolls again.",
         "Reforgé : la pièce tenue relance ses affixes.",
     ),
-    "apotheosis.reforge.not_affixed": (
-        "Hold an affixed piece to reforge it.",
-        "Tenez un objet affixé pour le reforger.",
-    ),
     "apotheosis.salvage.not_affixed": (
         "Hold an affixed piece to salvage it.",
         "Tenez un objet affixé pour le recycler.",
@@ -178,7 +174,7 @@ SEALS = [
      "Sceau de sertissage", "Adds one socket to an item",
      "Ajoute un socket à un objet", 0xC98A3A, "plus"),
     ("sigil_of_withdrawal", "uncommon", "Sigil of Withdrawal",
-     "Sceau de retrait", "Removes all socketed gems from an item",
+     "Sceau de retrait", "Pulls every socketed gem back out of an item",
      "Retire toutes les gemmes serties d'un objet", 0x8A9BA8, "minus"),
     ("sigil_of_rebirth", "rare", "Sigil of Rebirth",
      "Sceau de renaissance", "Rerolls an affixed item's rarity and affixes",
@@ -809,8 +805,6 @@ def main():
         })
         en["item.%s.%s" % (ID, material)] = name_en
         fr["item.%s.%s" % (ID, material)] = name_fr
-        en["apotheosis.material.%s.note" % material] = note_en
-        fr["apotheosis.material.%s.note" % material] = FRENCH_NOTES[material]
 
     for (seal, rarity, name_en, name_fr, desc_en, desc_fr, _colour, _glyph) in SEALS:
         write_json(os.path.join(CONTENT, "data", ID, "horizon", "item", seal + ".json"), {
@@ -877,8 +871,10 @@ def main():
         write_json(os.path.join(CONTENT, "assets", ID, "items", table + ".json"), {
             "model": {"type": "minecraft:model", "model": "%s:block/%s" % (ID, table)}
         })
+        # Multipart form: this port's own file, not the variants one the Java
+        # jar ships (its assets are All Rights Reserved).
         write_json(os.path.join(CONTENT, "assets", ID, "blockstates", table + ".json"), {
-            "variants": {"": {"model": "%s:block/%s" % (ID, table)}}
+            "multipart": [{"apply": {"model": "%s:block/%s" % (ID, table)}}]
         })
         write_json(os.path.join(CONTENT, "assets", ID, "models", "block", table + ".json"), {
             "parent": "minecraft:block/cube_bottom_top",
