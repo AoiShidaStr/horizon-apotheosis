@@ -235,6 +235,27 @@ pub fn item_name_component(
     ]))
 }
 
+/// Colours a kept `minecraft:custom_name` with the tier's Java colour. Java has
+/// a rarity component that colours a renamed piece; Horizon only knows
+/// vanilla's four rarities, so the name itself carries the colour and a mythic
+/// piece stays orange after an anvil rename. The name's own text and styling
+/// (a gradient, extra spans) are kept.
+pub fn recolour_name(name: &Tag, tier: Tier) -> Tag {
+    let colour = string(&tier.hex());
+    match name {
+        Tag::String(text) => Tag::compound([
+            ("text", Tag::String(text.clone())),
+            ("color", colour),
+        ]),
+        Tag::Compound(fields) => {
+            let mut fields = fields.clone();
+            fields.insert("color".into(), colour);
+            Tag::Compound(fields)
+        }
+        other => other.clone(),
+    }
+}
+
 /// Whether a `minecraft:custom_name` was written by an earlier roll of ours,
 /// in which case a reroll may replace it; a player's name is left alone.
 pub fn is_generated_name(name: &Tag) -> bool {

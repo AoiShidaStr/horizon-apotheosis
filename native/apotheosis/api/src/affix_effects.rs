@@ -5,8 +5,9 @@
 //! Apotheosis source or texture is copied. The catalogue (`java_affixes`)
 //! carries Java's per-rarity rolls for every effect affix this port can pay
 //! out: duration, amplifier, chance, targets, cooldown and roll count. A piece
-//! rolls one of them as an extra affix, so an item's attribute line count is
-//! unchanged; the roll is written to `minecraft:custom_data`
+//! rolls the ones its rarity guarantees as extra affixes (`effect_counts`), so
+//! an item's attribute line count is unchanged; the rolls are written to
+//! `minecraft:custom_data`
 //! (`apotheosis:effects`) and read back at the hook that pays it out.
 //!
 //! `supported` in the catalogue means a hook here can pay the affix. A bow's
@@ -39,6 +40,10 @@ use std::time::{Duration, Instant};
 /// `minecraft:custom_data` key holding this port's effect affix rolls.
 const EFFECTS_KEY: &str = "apotheosis:effects";
 
+/// `minecraft:custom_data` key recording the enchantment levels the last effect
+/// affix added, so the next pass takes them back before adding its own.
+const EFFECT_ENCHANTS_KEY: &str = "apotheosis:effect_enchants";
+
 /// The port's own durability affix. Apotheosis 8.9's data has no `durable`
 /// affix, so it is not in the generated catalogue; it stays here for the gear
 /// rolled before the catalogue reached this slice.
@@ -68,6 +73,28 @@ pub struct Entry {
     rarities: &'static [u8],
     /// The item classes it may roll on (`attributes::MELEE` and the like).
     classes: u16,
+}
+
+impl Entry {
+    /// Java's `affix_type` (`basic_effect` or `ability`). The port's own durable
+    /// affix is not in the Java data and fills a basic slot.
+    fn affix_type(&self) -> &'static str {
+        self.affix.map_or("basic_effect", |affix| affix.affix_type)
+    }
+}
+
+/// The effect affixes Java's rarity data guarantees at `tier`: the number of
+/// `basic_effect` rules and `ability` rules in `data/apotheosis/rarities/*.json`
+/// (common 0/0, uncommon 0/0, rare 1/0, epic 1/1, mythic 2/1). Ancient is this
+/// port's extension and reuses mythic's row. The chanced extra rules are not
+/// modelled, so a piece never rolls more than this.
+pub fn effect_counts(tier: Tier) -> (usize, usize) {
+    match tier {
+        Tier::Common | Tier::Uncommon => (0, 0),
+        Tier::Rare => (1, 0),
+        Tier::Epic => (1, 1),
+        Tier::Mythic | Tier::Ancient => (2, 1),
+    }
 }
 
 /// The effect kind of a catalogue affix, when a hook can pay it.
@@ -173,12 +200,21 @@ pub fn available(class: ItemClass, tier: Tier) -> Vec<&'static str> {
         .collect()
 }
 
-/// Picks an effect affix for `class` at `tier`, if one is available.
-fn choose(class: ItemClass, tier: Tier, rng: &mut Rng) -> Option<&'static Entry> {
+/// Picks an effect affix of `affix_type` for `class` at `tier`, if one is
+/// available that the piece does not already carry.
+fn choose(
+    class: ItemClass,
+    tier: Tier,
+    affix_type: &str,
+    taken: &[&'static str],
+    rng: &mut Rng,
+) -> Option<&'static Entry> {
     let pool: Vec<&'static Entry> = catalogue()
         .iter()
         .filter(|entry| {
-            entry.rarities.contains(&(tier.rarity_index() as u8))
+            entry.affix_type() == affix_type
+                && !taken.contains(&entry.id)
+                && entry.rarities.contains(&(tier.rarity_index() as u8))
                 && attributes::accepts(entry.classes, class)
         })
         .collect();
@@ -327,49 +363,60 @@ fn description(entry: &Entry, roll: Roll) -> (String, String, Vec<String>) {
     }
 }
 
-/// Adds one effect affix to a piece being affixed: its lore line, and its
-/// roll in `minecraft:custom_data`. Called by `apply_affixes` at epic and
-/// above, after the attribute affixes, so their count is untouched.
-pub fn add_effect_affix(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) -> Option<&'static str> {
+/// Adds the effect affixes Java's rarity guarantees for `tier`, each with its
+/// lore line and its roll in `minecraft:custom_data`. Called by `apply_affixes`
+/// after the attribute affixes, so their count is untouched.
+pub fn add_effect_affix(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) -> Vec<&'static str> {
     let class = attributes::class_of(&stack.item);
-    // A reroll drops the previous effect, lore, roll and reduction alike.
+    // A reroll drops the previous effects: their lore, rolls and damage
+    // reductions, and the enchantment levels they added.
     clear_effects(stack);
     attributes::clear_reduction(stack);
-    // One effect affix on most high-tier pieces; ancient always gets one.
-    let chance = if tier >= Tier::Ancient { 100 } else { 55 };
-    if !rng.chance(chance) {
-        return None;
-    }
-    let entry = choose(class, tier, rng)?;
-    let roll = match entry.affix {
-        Some(affix) => draw(affix, tier, rng),
-        None => Roll {
-            value: (0.15 * tier.scale()).min(0.5),
-            ..Roll::default()
-        },
-    };
-    let (key, fallback, args) = description(entry, roll);
+    let (basic, abilities) = effect_counts(tier);
+    let mut added: Vec<&'static str> = Vec::with_capacity(basic + abilities);
+    for affix_type in std::iter::repeat_n("basic_effect", basic)
+        .chain(std::iter::repeat_n("ability", abilities))
+    {
+        let Some(entry) = choose(class, tier, affix_type, &added, rng) else {
+            // No supported affix of that kind for this class and tier: a tool
+            // has no supported ability at all, for instance.
+            continue;
+        };
+        let roll = match entry.affix {
+            Some(affix) => draw(affix, tier, rng),
+            None => Roll {
+                value: (0.15 * tier.scale()).min(0.5),
+                ..Roll::default()
+            },
+        };
+        let (key, fallback, args) = description(entry, roll);
 
-    // The enchantment affix is permanent, not a hit effect: it adds levels to
-    // the item's own component, which the game then applies itself.
-    if entry.kind == Kind::Enchantment {
-        if let Some(affix) = entry.affix {
-            add_enchantment(stack, affix.enchantment.unwrap_or("minecraft:fortune"), roll.value);
+        // The enchantment affix is permanent, not a hit effect: it adds levels
+        // to the item's own component, which the game then applies itself.
+        if entry.kind == Kind::Enchantment {
+            if let Some(affix) = entry.affix {
+                add_enchantment(stack, affix.enchantment.unwrap_or("minecraft:fortune"), roll.value);
+            }
         }
-    }
-    // Damage reduction is read from the armour cache, not from a hit hook.
-    if entry.kind == Kind::DamageReduction {
-        if let Some(affix) = entry.affix {
-            attributes::attach_reduction(
-                stack,
-                affix.damage_kind.unwrap_or("physical"),
-                roll.value,
-            );
+        // Damage reduction is read from the armour cache, not from a hit hook.
+        if entry.kind == Kind::DamageReduction {
+            if let Some(affix) = entry.affix {
+                attributes::attach_reduction(
+                    stack,
+                    affix.damage_kind.unwrap_or("physical"),
+                    roll.value,
+                );
+            }
         }
+        store(stack, entry.id, roll);
+        append_lore(stack, &key, &fallback, &args);
+        added.push(entry.id);
     }
-    store(stack, entry.id, roll);
+    added
+}
 
-    // Lore, after the attribute lines.
+/// Appends one effect line after the attribute lines.
+fn append_lore(stack: &mut ItemStack, key: &str, fallback: &str, args: &[String]) {
     let mut lore = match stack
         .data()
         .and_then(|data| data.other("minecraft:lore"))
@@ -378,8 +425,8 @@ pub fn add_effect_affix(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) -> Opt
         _ => Vec::new(),
     };
     lore.push(Tag::compound([
-        ("translate", string(&key)),
-        ("fallback", string(&fallback)),
+        ("translate", string(key)),
+        ("fallback", string(fallback)),
         ("color", string("#55FF55")),
         ("italic", Tag::Byte(0)),
         (
@@ -390,7 +437,6 @@ pub fn add_effect_affix(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) -> Opt
     stack
         .data_mut()
         .set_other("minecraft:lore", Some(Tag::List(lore)));
-    Some(entry.id)
 }
 
 /// Writes one roll into the stack's `minecraft:custom_data`.
@@ -428,8 +474,10 @@ fn custom_data(stack: &ItemStack) -> Compound {
     }
 }
 
-/// Drops the effect rolls a previous affix pass wrote.
+/// Drops the effect rolls a previous affix pass wrote, and the enchantment
+/// levels that pass added.
 fn clear_effects(stack: &mut ItemStack) {
+    remove_effect_enchantments(stack);
     let mut custom = custom_data(stack);
     if custom.remove(&EFFECTS_KEY.into()).is_some() {
         stack
@@ -469,7 +517,8 @@ pub fn effects_of(stack: &ItemStack) -> Vec<(&'static Entry, Roll)> {
 }
 
 /// Adds whole levels of `id` to the item's own enchantments, the typed
-/// component the game reads for Fortune and Looting.
+/// component the game reads for Fortune and Looting, and records them so the
+/// next pass can take them back without touching the item's own levels.
 fn add_enchantment(stack: &mut ItemStack, id: &str, levels: f64) {
     let add = levels.round().max(0.0) as u32;
     if add == 0 {
@@ -481,6 +530,47 @@ fn add_enchantment(stack: &mut ItemStack, id: &str, levels: f64) {
         None => table.push((std::sync::Arc::from(id), add)),
     }
     stack.data_mut().enchantments = table;
+    let mut custom = custom_data(stack);
+    let mut recorded = match custom.get(&EFFECT_ENCHANTS_KEY.into()) {
+        Some(Tag::Compound(compound)) => compound.clone(),
+        _ => Compound::new(),
+    };
+    let before = number(recorded.get(&id.into())).unwrap_or(0.0) as u32;
+    recorded.insert(id.into(), Tag::Int((before + add) as i32));
+    custom.insert(EFFECT_ENCHANTS_KEY.into(), Tag::Compound(recorded));
+    stack
+        .data_mut()
+        .set_other("minecraft:custom_data", Some(Tag::Compound(custom)));
+}
+
+/// Takes back the enchantment levels the last effect affix added, leaving the
+/// item's own enchantments (or another module's) where they were.
+fn remove_effect_enchantments(stack: &mut ItemStack) {
+    let mut custom = custom_data(stack);
+    let Some(Tag::Compound(recorded)) = custom.remove(&EFFECT_ENCHANTS_KEY.into()) else {
+        return;
+    };
+    let mut table: Vec<(std::sync::Arc<str>, u32)> = stack.enchantments().to_vec();
+    for (id, value) in recorded.iter() {
+        let Tag::Int(level) = value else {
+            continue;
+        };
+        let key = id.to_string_lossy();
+        if let Some(index) = table.iter().position(|(name, _)| &**name == key.as_str()) {
+            let left = table[index]
+                .1
+                .saturating_sub(u32::try_from(*level).unwrap_or(0));
+            if left == 0 {
+                table.remove(index);
+            } else {
+                table[index].1 = left;
+            }
+        }
+    }
+    stack.data_mut().enchantments = table;
+    stack
+        .data_mut()
+        .set_other("minecraft:custom_data", Some(Tag::Compound(custom)));
 }
 
 /// Per-entity, per-affix cooldowns, in the ticks Java's data names.
@@ -1246,22 +1336,42 @@ mod tests {
         assert!((0.15..=0.4).contains(&roll.value));
     }
 
+    /// The effect affixes of one kind an item carries.
+    fn count_kind(stack: &ItemStack, kind: &str) -> usize {
+        effects_of(stack)
+            .iter()
+            .filter(|(entry, _)| entry.affix_type() == kind)
+            .count()
+    }
+
     #[test]
-    fn an_affixed_piece_writes_one_effect_roll() {
-        let mut stack = one("minecraft:diamond_sword");
-        let mut rng = Rng::new(3);
-        for _ in 0..40 {
-            stack = one("minecraft:diamond_sword");
-            apply_affixes(&mut stack, Tier::Epic, &mut rng);
-            if !effects_of(&stack).is_empty() {
-                break;
-            }
+    fn effect_counts_follow_java_rarities() {
+        assert_eq!(effect_counts(Tier::Common), (0, 0));
+        assert_eq!(effect_counts(Tier::Uncommon), (0, 0));
+        assert_eq!(effect_counts(Tier::Rare), (1, 0));
+        assert_eq!(effect_counts(Tier::Epic), (1, 1));
+        assert_eq!(effect_counts(Tier::Mythic), (2, 1));
+        assert_eq!(effect_counts(Tier::Ancient), (2, 1));
+    }
+
+    #[test]
+    fn a_piece_rolls_the_effects_its_rarity_guarantees() {
+        for seed in 0..12 {
+            let mut rare = one("minecraft:diamond_sword");
+            apply_affixes(&mut rare, Tier::Rare, &mut Rng::new(seed));
+            assert_eq!(count_kind(&rare, "basic_effect"), 1, "rare/seed {seed}");
+            assert_eq!(count_kind(&rare, "ability"), 0, "rare/seed {seed}");
+
+            let mut epic = one("minecraft:diamond_sword");
+            apply_affixes(&mut epic, Tier::Epic, &mut Rng::new(seed));
+            assert_eq!(count_kind(&epic, "basic_effect"), 1, "epic/seed {seed}");
+            assert_eq!(count_kind(&epic, "ability"), 1, "epic/seed {seed}");
+
+            let mut mythic = one("minecraft:diamond_sword");
+            apply_affixes(&mut mythic, Tier::Mythic, &mut Rng::new(seed));
+            assert_eq!(count_kind(&mythic, "basic_effect"), 2, "mythic/seed {seed}");
+            assert_eq!(count_kind(&mythic, "ability"), 1, "mythic/seed {seed}");
         }
-        let effects = effects_of(&stack);
-        assert_eq!(effects.len(), 1, "one effect affix at most");
-        // A reroll replaces the roll instead of stacking a second one.
-        apply_affixes(&mut stack, Tier::Ancient, &mut rng);
-        assert!(effects_of(&stack).len() <= 1);
     }
 
     #[test]
@@ -1277,25 +1387,53 @@ mod tests {
         let Some(Tag::List(lore)) = data.other("minecraft:lore") else {
             panic!("no lore");
         };
-        assert!(lore.len() >= modifiers.len() + 1);
-        assert!(lore.len() <= modifiers.len() + 2, "one effect affix at most");
+        // Five stat lines and ancient's three effect lines.
+        assert_eq!(lore.len(), modifiers.len() + 3);
     }
 
     #[test]
-    fn a_reroll_clears_the_previous_effect() {
+    fn a_reroll_clears_the_previous_effects() {
         let mut stack = one("minecraft:diamond_sword");
         let mut rng = Rng::new(11);
-        for _ in 0..40 {
-            stack = one("minecraft:diamond_sword");
-            apply_affixes(&mut stack, Tier::Ancient, &mut rng);
-            if !effects_of(&stack).is_empty() {
-                break;
-            }
-        }
-        assert!(!effects_of(&stack).is_empty());
-        // An ancient piece always rolls an effect affix: the old one is gone.
         apply_affixes(&mut stack, Tier::Ancient, &mut rng);
+        assert_eq!(effects_of(&stack).len(), 3);
+        // A second ancient roll replaces the three, never stacks three more.
+        apply_affixes(&mut stack, Tier::Ancient, &mut rng);
+        assert_eq!(effects_of(&stack).len(), 3);
+        // And a rare reroll drops the extra effects instead of keeping them.
+        apply_affixes(&mut stack, Tier::Rare, &mut rng);
         assert_eq!(effects_of(&stack).len(), 1);
+    }
+
+    #[test]
+    fn a_reroll_does_not_stack_the_enchantment_levels() {
+        // The item's own Fortune II is not this module's to remove.
+        let mut stack = one("minecraft:diamond_pickaxe");
+        stack.data_mut().enchantments = vec![(std::sync::Arc::from("minecraft:fortune"), 2)];
+        for seed in 0..40 {
+            let mut rng = Rng::new(seed);
+            apply_affixes(&mut stack, Tier::Epic, &mut rng);
+            let added: u32 = effects_of(&stack)
+                .iter()
+                .filter(|(entry, _)| entry.kind == Kind::Enchantment)
+                .map(|(_, roll)| roll.value.round().max(0.0) as u32)
+                .sum();
+            assert_eq!(
+                stack.enchantment_level("minecraft:fortune"),
+                2 + added,
+                "seed {seed}: the last pass's levels stayed"
+            );
+        }
+    }
+
+    #[test]
+    fn clearing_the_effects_takes_back_only_the_added_levels() {
+        let mut stack = one("minecraft:diamond_pickaxe");
+        stack.data_mut().enchantments = vec![(std::sync::Arc::from("minecraft:fortune"), 2)];
+        add_enchantment(&mut stack, "minecraft:fortune", 3.0);
+        assert_eq!(stack.enchantment_level("minecraft:fortune"), 5);
+        clear_effects(&mut stack);
+        assert_eq!(stack.enchantment_level("minecraft:fortune"), 2);
     }
 
     #[test]

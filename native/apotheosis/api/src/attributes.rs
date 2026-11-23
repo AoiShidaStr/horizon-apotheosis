@@ -432,6 +432,70 @@ pub fn damage_class(damage_type: &str) -> &'static str {
     }
 }
 
+/// Adds `attrs` to the stack's `apotheosis:attributes` and records exactly what
+/// it added under the custom-data key `record`, taking back whatever that key
+/// named on the previous pass first. A reroll therefore replaces its own
+/// bonuses instead of stacking them, and values written by a gem or anything
+/// else are left alone.
+pub fn attach_recorded(stack: &mut ItemStack, attrs: &[(Attr, f64)], record: &str) {
+    let mut custom = match stack
+        .data()
+        .and_then(|data| data.other(CUSTOM_DATA))
+    {
+        Some(Tag::Compound(compound)) => compound.clone(),
+        _ => Compound::new(),
+    };
+    let previous = match custom.get(&record.into()) {
+        Some(Tag::Compound(compound)) => Some(compound.clone()),
+        _ => None,
+    };
+    if attrs.is_empty() && previous.is_none() {
+        return;
+    }
+    let mut inner = match custom.get(&ATTR_KEY.into()) {
+        Some(Tag::Compound(compound)) => compound.clone(),
+        _ => Compound::new(),
+    };
+    // Take back the values the last pass wrote, leaving foreign ones in place.
+    if let Some(previous) = previous {
+        for (name, value) in previous.iter() {
+            let key = name.to_string_lossy();
+            if !Attr::ALL.iter().any(|attr| attr.key() == key) {
+                continue;
+            }
+            let amount = number(Some(value)).unwrap_or(0.0);
+            let left = number(inner.get(name)).unwrap_or(0.0) - amount;
+            if left.abs() < 1e-9 {
+                inner.remove(name);
+            } else {
+                inner.insert(name.clone(), Tag::Double(left.to_bits()));
+            }
+        }
+    }
+    // Then add this pass's values and record them for the next reroll.
+    let mut written = Compound::new();
+    for (attr, value) in attrs {
+        let key = attr.key().into();
+        let current = number(inner.get(&key)).unwrap_or(0.0);
+        inner.insert(key.clone(), Tag::Double((current + value).to_bits()));
+        let recorded = number(written.get(&key)).unwrap_or(0.0);
+        written.insert(key, Tag::Double((recorded + value).to_bits()));
+    }
+    if inner.is_empty() {
+        custom.remove(&ATTR_KEY.into());
+    } else {
+        custom.insert(ATTR_KEY.into(), Tag::Compound(inner));
+    }
+    if written.is_empty() {
+        custom.remove(&record.into());
+    } else {
+        custom.insert(record.into(), Tag::Compound(written));
+    }
+    stack
+        .data_mut()
+        .set_other(CUSTOM_DATA, Some(Tag::Compound(custom)));
+}
+
 /// Writes `attrs` into the stack's `minecraft:custom_data`, adding to whatever
 /// the item already carried. Repeated attributes are summed.
 pub fn attach(stack: &mut ItemStack, attrs: &[(Attr, f64)]) {
