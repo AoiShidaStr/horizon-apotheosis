@@ -4,8 +4,9 @@
 //! Clean-room: ids and public numbers come from Apotheosis' data files; no
 //! Apotheosis source or texture is copied. Effect affixes are extra affixes:
 //! they never replace an attribute affix, so an item's attribute line count is
-//! unchanged. They roll from epic up (the tiers where upstream's effect
-//! affixes appear most), live in `minecraft:custom_data`
+//! unchanged. Their minimum tier follows Java's per-affix values (uncommon for
+//! the shield/melee/ranged debuffs, rare for telepathy, epic for the rest), and
+//! they live in `minecraft:custom_data`
 //! (`apotheosis:effects`), and are read back at the hooks that pay them out.
 //!
 //! Bosses use the two spawn hooks in order: `entity_join_level` names the
@@ -1042,6 +1043,8 @@ mod tests {
         assert!(available(ItemClass::Helmet, Tier::Epic).contains(&"blinding"));
         assert!(!available(ItemClass::Sword, Tier::Epic).contains(&"blinding"));
         assert!(available(ItemClass::Shield, Tier::Epic).contains(&"retreating"));
+        assert!(available(ItemClass::Shield, Tier::Uncommon).contains(&"venomous"));
+        assert!(!available(ItemClass::Sword, Tier::Uncommon).contains(&"venomous"));
         assert!(available(ItemClass::Sword, Tier::Rare).contains(&"telepathic"));
         assert!(!available(ItemClass::Sword, Tier::Rare).contains(&"withering"));
     }

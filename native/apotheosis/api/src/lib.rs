@@ -57,8 +57,9 @@ pub fn hooks() -> Box<dyn Hooks> {
 struct Apotheosis;
 
 /// The tiers this slice adds. Vanilla's `minecraft:rarity` component names four
-/// (`common`..`epic`); the two above it are this port's own, shown in the
-/// tooltip and in an affixed item's lore.
+/// (`common`..`epic`); the two above it are this port's own. Java's rarity
+/// colours and per-rarity affix counts drive the affix roll; `Ancient` is this
+/// port's extension.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Tier {
     Common,
