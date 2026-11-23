@@ -7,17 +7,15 @@
 //! The hooks below are the real game's trait API (plus `sockets`' own
 //! `use_item_on` and `loot_function` for the tables and the chest gems):
 //! Seven hooks, all on the real game's trait API:
-//! - `modify_default_components`: each gem carries a real
-//!   `minecraft:attribute_modifiers` entry, so a gem in the off hand grants its
-//!   bonus (the game applies equipment modifiers itself).
-//! - `tooltip`: a gem's tier and its off-hand effect, in the tier's colour
-//!   (vanilla item rarity only goes up to epic; mythic and ancient are shown
-//!   here).
+//! - `modify_default_components`: a gem keeps its own item definition; its
+//!   bonuses are written onto the gear it is socketed into, as Apotheosis does.
+//! - `tooltip`: a gem's purity, the bonuses its Java data gives the gear it is
+//!   socketed into, and how to socket it.
 //! - `loot_table_load`: vanilla chest loot tables gain a small chance to
-//!   contain a low-tier gem, so gems have a survival source beyond mob drops.
+//!   contain a gem, so gems have a survival source beyond mob drops.
 //! - `loot_drops`: gear a mob drops is rolled into a rarity with affixes (real
-//!   attribute modifiers plus lore), and a boss kill adds a mythic or ancient
-//!   gem. Ordinary mobs never drop those two tiers.
+//!   attribute modifiers plus lore), and a kill adds a gem of the level's
+//!   dimension, at its Java weight and purity floor.
 //! - `register_commands` / `perform_command`: `/apoth reforge` rolls affixes
 //!   onto plain gear, for experience levels.
 //! - `prepare_item_enchant`: Apothic Eterna from nearby shelf blocks raises the
@@ -28,13 +26,17 @@
 //!
 //! `attributes` holds the Apothic Attributes half: the combat, mining, bow and
 //! experience attributes affixes carry, filtered by what a piece of gear is.
+//! `gems` makes the Java gem catalogue (`java_gems`, generated) into items and
+//! resolves what a gem gives a piece at its purity.
 //! `affix_effects` holds the effect affixes (poison, execution, cleaving,
 //! spectral arrows, telepathy...) and the Apothic Invader boss.
 mod affix_effects;
 mod affixes;
 mod attributes;
 mod enchanting;
+mod gems;
 mod java_affixes;
+mod java_gems;
 
 use horizon_client::mod_api::{
     ArrowLooseEvent, BreakSpeedEvent, EntityJoinLevelEvent, ExperienceOrbPickupEvent, Flow, Hooks,
@@ -167,122 +169,6 @@ fn string(value: &str) -> Tag {
     Tag::String(value.into())
 }
 
-/// A gem: the item, its tier, and the attribute it grants from the off hand.
-pub struct Gem {
-    pub id: &'static str,
-    pub tier: Tier,
-    /// `minecraft:` attribute the off-hand gem adds to.
-    pub attribute: &'static str,
-    pub amount: f64,
-    /// The effect line's translation key, and its English text.
-    pub effect_key: &'static str,
-    pub effect: &'static str,
-}
-
-/// Two gems per tier, so every tier is a choice rather than a single item.
-pub const GEMS: [Gem; 12] = [
-    Gem {
-        id: "apotheosis:gem_ruby",
-        tier: Tier::Common,
-        attribute: "minecraft:attack_damage",
-        amount: 1.0,
-        effect_key: "apotheosis.gem.ruby.effect",
-        effect: "In the off hand: +1 Attack Damage",
-    },
-    Gem {
-        id: "apotheosis:gem_amber",
-        tier: Tier::Common,
-        attribute: "minecraft:mining_efficiency",
-        amount: 0.15,
-        effect_key: "apotheosis.gem.amber.effect",
-        effect: "In the off hand: +15% Mining Speed",
-    },
-    Gem {
-        id: "apotheosis:gem_topaz",
-        tier: Tier::Uncommon,
-        attribute: "minecraft:movement_speed",
-        amount: 0.01,
-        effect_key: "apotheosis.gem.topaz.effect",
-        effect: "In the off hand: +10% Movement Speed",
-    },
-    Gem {
-        id: "apotheosis:gem_amethyst",
-        tier: Tier::Uncommon,
-        attribute: "minecraft:attack_speed",
-        amount: 0.4,
-        effect_key: "apotheosis.gem.amethyst.effect",
-        effect: "In the off hand: +10% Attack Speed",
-    },
-    Gem {
-        id: "apotheosis:gem_sapphire",
-        tier: Tier::Rare,
-        attribute: "minecraft:max_health",
-        amount: 2.0,
-        effect_key: "apotheosis.gem.sapphire.effect",
-        effect: "In the off hand: +2 Max Health",
-    },
-    Gem {
-        id: "apotheosis:gem_peridot",
-        tier: Tier::Rare,
-        attribute: "minecraft:luck",
-        amount: 1.0,
-        effect_key: "apotheosis.gem.peridot.effect",
-        effect: "In the off hand: +1 Luck",
-    },
-    Gem {
-        id: "apotheosis:gem_jade",
-        tier: Tier::Epic,
-        attribute: "minecraft:armor",
-        amount: 2.0,
-        effect_key: "apotheosis.gem.jade.effect",
-        effect: "In the off hand: +2 Armor",
-    },
-    Gem {
-        id: "apotheosis:gem_citrine",
-        tier: Tier::Epic,
-        attribute: "minecraft:attack_knockback",
-        amount: 0.5,
-        effect_key: "apotheosis.gem.citrine.effect",
-        effect: "In the off hand: +0.5 Attack Knockback",
-    },
-    Gem {
-        id: "apotheosis:gem_onyx",
-        tier: Tier::Mythic,
-        attribute: "minecraft:attack_damage",
-        amount: 3.0,
-        effect_key: "apotheosis.gem.onyx.effect",
-        effect: "In the off hand: +3 Attack Damage",
-    },
-    Gem {
-        id: "apotheosis:gem_moonstone",
-        tier: Tier::Mythic,
-        attribute: "minecraft:max_health",
-        amount: 3.0,
-        effect_key: "apotheosis.gem.moonstone.effect",
-        effect: "In the off hand: +3 Max Health",
-    },
-    Gem {
-        id: "apotheosis:gem_bloodstone",
-        tier: Tier::Ancient,
-        attribute: "minecraft:max_health",
-        amount: 4.0,
-        effect_key: "apotheosis.gem.bloodstone.effect",
-        effect: "In the off hand: +4 Max Health",
-    },
-    Gem {
-        id: "apotheosis:gem_opal",
-        tier: Tier::Ancient,
-        attribute: "minecraft:armor_toughness",
-        amount: 3.0,
-        effect_key: "apotheosis.gem.opal.effect",
-        effect: "In the off hand: +3 Armor Toughness",
-    },
-];
-
-pub fn gem(item: &str) -> Option<&'static Gem> {
-    GEMS.iter().find(|g| g.id == item)
-}
-
 /// Mobs whose death drops a mythic or ancient gem.
 const BOSSES: [&str; 4] = [
     "minecraft:wither",
@@ -290,11 +176,6 @@ const BOSSES: [&str; 4] = [
     "minecraft:warden",
     "minecraft:elder_guardian",
 ];
-
-/// The tooltip line a gem adds: its tier, and the tier's colour.
-pub fn tier_line(item: &str) -> Option<(String, u32)> {
-    gem(item).map(|g| (format!("Tier: {}", g.tier.name()), g.tier.colour()))
-}
 
 /// Whether a dropped item can carry affixes: a weapon, a tool or a piece of
 /// armour. Recognised from the item id, which is all a `loot_drops` hook is
@@ -384,33 +265,10 @@ pub(crate) const BOSS_TIERS: [(Tier, u64); 4] = [
     (Tier::Ancient, 10),
 ];
 
-/// The gems an ordinary mob can drop: the low tiers, so a player finds gems by
-/// fighting before they build the reforge route.
-const LOW_GEMS: [&str; 4] = [
-    "apotheosis:gem_ruby",
-    "apotheosis:gem_amber",
-    "apotheosis:gem_topaz",
-    "apotheosis:gem_amethyst",
-];
-
-/// The gems only a boss drops: the two high tiers.
-const HIGH_GEMS: [&str; 4] = [
-    "apotheosis:gem_onyx",
-    "apotheosis:gem_moonstone",
-    "apotheosis:gem_bloodstone",
-    "apotheosis:gem_opal",
-];
-
-/// Low-tier gems can also turn up in vanilla's chest loot, but never the
-/// mythic or ancient gems reserved for bosses.
-const CHEST_GEMS: [(&str, u64); 4] = [
-    ("apotheosis:gem_ruby", 6),
-    ("apotheosis:gem_amber", 4),
-    ("apotheosis:gem_topaz", 2),
-    ("apotheosis:gem_amethyst", 1),
-];
-
 const CHEST_GEM_POOL: &str = "apotheosis:chest_gems";
+
+/// A counter that makes every loot roll's seed its own.
+static DROPS: AtomicU64 = AtomicU64::new(0);
 
 /// Adds a modest, weighted gem roll to vanilla chest tables. The name guard
 /// makes the edit safe if a table is passed through the hook more than once.
@@ -431,13 +289,15 @@ fn add_chest_gem_pool(id: &str, table: &mut serde_json::Value) {
         return;
     }
 
-    let entries: Vec<_> = CHEST_GEMS
+    // One entry per Java gem, at its Java weight: the loot function picks the
+    // gem's type and purity, so a chest gem is a real gem of the level's table.
+    let entries: Vec<_> = java_gems::GEMS
         .iter()
-        .map(|(item, weight)| {
+        .map(|gem| {
             serde_json::json!({
                 "type": "minecraft:item",
-                "name": item,
-                "weight": weight,
+                "name": gems::ITEM,
+                "weight": gem.weight,
                 "functions": [{ "function": "apotheosis:gem_purity" }],
             })
         })
@@ -451,14 +311,6 @@ fn add_chest_gem_pool(id: &str, table: &mut serde_json::Value) {
         },
         "entries": entries,
     }));
-}
-
-/// Which gem a boss drops. Bosses cycle through the high gems so a session sees
-/// all four tiers-worth of them.
-static DROPS: AtomicU64 = AtomicU64::new(0);
-
-fn boss_gem() -> &'static str {
-    HIGH_GEMS[(DROPS.fetch_add(1, Ordering::Relaxed) % HIGH_GEMS.len() as u64) as usize]
 }
 
 /// A stack of one item.
@@ -581,46 +433,20 @@ impl Hooks for Apotheosis {
         // Before anything edits them: the item's own modifiers are what an
         // affixed copy must keep.
         attributes::remember_default_modifiers(event);
-        let Some(gem) = gem(event.item) else {
-            return;
-        };
-        let modifiers = serde_json::json!([{
-            "type": gem.attribute,
-            "id": gem.id,
-            "amount": gem.amount,
-            "operation": "add_value",
-            "slot": "offhand",
-        }]);
-        event
-            .components
-            .insert("minecraft:attribute_modifiers".into(), modifiers);
     }
 
     fn tooltip(&self, _host: &dyn Host, event: &mut TooltipEvent<'_>) {
         attributes::tooltip(event);
         spawners::on_tooltip(event);
-        let Some(gem) = gem(&event.stack.item) else {
-            sockets::tooltip(event);
-            return;
-        };
-        let (text, colour) = (format!("Tier: {}", gem.tier.name()), gem.tier.colour());
-        event.lines.push((
-            Text::translate_with_fallback(
-                "apotheosis.tooltip.tier",
-                &text,
-                &[Text::translate_with_fallback(
-                    gem.tier.name_key(),
-                    gem.tier.name(),
-                    &[],
-                )],
-            )
-            .with_color(colour),
-            colour,
-        ));
-        event.lines.push((
-            Text::translate_with_fallback(gem.effect_key, gem.effect, &[]).with_color(0x55_55FF),
-            0x55_55FF,
-        ));
+        if let Some((gem, purity)) = gems::of_stack(event.stack) {
+            for (line, colour) in gems::description(gem, purity) {
+                event.lines.push((
+                    Text::translate_with_fallback("apotheosis.gem.bonus", &line, &[])
+                        .with_color(colour),
+                    colour,
+                ));
+            }
+        }
         sockets::tooltip(event);
     }
 
@@ -666,8 +492,11 @@ impl Hooks for Apotheosis {
         let n = DROPS.fetch_add(1, Ordering::Relaxed);
         let mut rng = Rng::new(seed_of(&event.context, n));
 
+        // A gem of the level's dimension, at a purity at or above its Java
+        // floor: a boss draws from better steps than an ordinary mob.
         if boss {
-            event.drops.push(one(boss_gem()));
+            let (gem, purity) = gems::roll(event.context.dimension, true, &mut rng);
+            event.drops.push(gems::stack(gem, purity));
         }
         // The gear this mob dropped, upgraded in place: a zombie's sword, a
         // skeleton's bow.
@@ -687,9 +516,8 @@ impl Hooks for Apotheosis {
         }
         // A low gem from an ordinary mob, often enough to matter.
         if !boss && rng.chance(12) {
-            event
-                .drops
-                .push(one(LOW_GEMS[rng.below(LOW_GEMS.len() as u64) as usize]));
+            let (gem, purity) = gems::roll(event.context.dimension, false, &mut rng);
+            event.drops.push(gems::stack(gem, purity));
         }
         // And one of its own: a boss always, an ordinary mob rarely.
         let gear = |rng: &mut Rng| -> &'static str {
@@ -717,8 +545,7 @@ impl Hooks for Apotheosis {
             if stack.data().is_none() {
                 sockets::roll_dropped_purity(stack, &mut rng, boss);
             }
-        }
-    }
+        }    }
 
     fn living_incoming_damage(&self, event: &mut LivingIncomingDamageEvent<'_>) -> Flow {
         if attributes::incoming_damage(event) {
@@ -1002,71 +829,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_tier_names_itself() {
-        assert_eq!(tier_line("apotheosis:gem_onyx").unwrap().0, "Tier: Mythic");
-        assert_eq!(
-            tier_line("apotheosis:gem_bloodstone").unwrap().0,
-            "Tier: Ancient"
-        );
-    }
-
-    #[test]
-    fn vanilla_items_get_no_line() {
-        assert!(tier_line("minecraft:diamond_sword").is_none());
-    }
-
-    #[test]
-    fn bosses_cycle_through_the_high_gems() {
-        DROPS.store(0, Ordering::Relaxed);
-        assert_eq!(boss_gem(), "apotheosis:gem_onyx");
-        assert_eq!(boss_gem(), "apotheosis:gem_moonstone");
-        assert_eq!(boss_gem(), "apotheosis:gem_bloodstone");
-        assert_eq!(boss_gem(), "apotheosis:gem_opal");
-        assert_eq!(boss_gem(), "apotheosis:gem_onyx");
-    }
-
-    #[test]
-    fn every_tier_has_two_gems_and_the_high_ones_are_boss_only() {
-        for tier in [
-            Tier::Common,
-            Tier::Uncommon,
-            Tier::Rare,
-            Tier::Epic,
-            Tier::Mythic,
-            Tier::Ancient,
-        ] {
-            assert_eq!(
-                GEMS.iter().filter(|g| g.tier == tier).count(),
-                2,
-                "{tier:?} should have two gems"
-            );
-        }
-        for gem in &GEMS {
-            let high = gem.tier >= Tier::Mythic;
-            assert_eq!(
-                high,
-                HIGH_GEMS.contains(&gem.id),
-                "{} in the wrong pool",
-                gem.id
-            );
-            if !high {
-                assert!(
-                    LOW_GEMS.contains(&gem.id) || gem.tier == Tier::Rare || gem.tier == Tier::Epic
-                );
-            }
+    fn every_java_gem_names_itself() {
+        for gem in &java_gems::GEMS {
+            let stack = gems::stack(gem, crate::sockets::Purity::Normal);
+            assert_eq!(gems::id_of(&stack), Some(gem.id));
+            assert!(stack
+                .data()
+                .and_then(|data| data.other("minecraft:custom_name"))
+                .is_some());
         }
     }
 
     #[test]
-    fn every_gem_grants_a_bonus() {
-        for gem in &GEMS {
-            assert!(gem.amount > 0.0, "{} grants nothing", gem.id);
-            assert!(
-                gem.attribute.starts_with("minecraft:"),
-                "{} names no attribute",
-                gem.id
-            );
-        }
+    fn a_gem_is_not_equipment() {
+        assert!(!is_equipment(gems::ITEM));
     }
 
     #[test]
@@ -1076,7 +852,7 @@ mod tests {
         assert!(is_equipment("minecraft:bow"));
         assert!(is_equipment("minecraft:netherite_pickaxe"));
         assert!(!is_equipment("minecraft:dirt"));
-        assert!(!is_equipment("apotheosis:gem_ruby"));
+        assert!(!is_equipment(gems::ITEM));
     }
 
     #[test]
@@ -1199,12 +975,11 @@ mod tests {
         assert_eq!(pools[0]["condition"]["type"], "minecraft:random_chance");
         assert_eq!(pools[0]["condition"]["chance"], 0.08);
         let entries = pools[0]["entries"].as_array().unwrap();
-        assert_eq!(entries.len(), CHEST_GEMS.len());
-        assert!(entries.iter().all(|entry| {
-            entry["name"]
-                .as_str()
-                .is_some_and(|item| CHEST_GEMS.iter().any(|(gem, _)| *gem == item))
-        }));
+        assert_eq!(entries.len(), java_gems::GEMS.len());
+        assert!(entries
+            .iter()
+            .all(|entry| entry["name"].as_str() == Some(gems::ITEM)));
+        assert!(entries.iter().all(|entry| entry["weight"].as_u64().is_some()));
     }
 
     #[test]

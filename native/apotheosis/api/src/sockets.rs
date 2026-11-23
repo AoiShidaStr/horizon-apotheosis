@@ -14,14 +14,16 @@
 //! entries; an unsocketed gem keeps the off-hand bonus the content mod gives it.
 
 use horizon_client::mod_api::{
-    Compound, EquipmentSlot, Flow, Host, InventoryTickEvent, ItemStack, LootFunctionEvent, Tag, Text,
-    TooltipEvent, UseItemEvent, UseItemOnEvent, serde_json,
+    Compound, EquipmentSlot, Flow, Host, InventoryTickEvent, ItemStack, LootFunctionEvent, Tag,
+    Text, TooltipEvent, UseItemEvent, UseItemOnEvent, serde_json,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-use crate::{apply_affixes, gem, is_equipment, Rng, Tier};
+use crate::attributes::{self, Attr};
+use crate::gems::{self, Resolved};
+use crate::{apply_affixes, is_equipment, Rng, Tier};
 
 /// The off hand's slot in `native_inventory`'s `Player` numbering.
 const OFFHAND: i32 = -106;
@@ -31,10 +33,12 @@ pub const POLISH_COST: u32 = 4;
 pub const MAX_SOCKETS: u8 = 3;
 
 const CUSTOM: &str = "minecraft:custom_data";
-const PURITY_KEY: &str = "apotheosis:gem_purity";
 const SOCKETS_KEY: &str = "apotheosis:sockets";
 const SOCKETED_KEY: &str = "apotheosis:socketed";
 const TIER_KEY: &str = "apotheosis:tier";
+/// What the last `refresh` wrote into the item, so a reforge can take it back.
+const SOCKET_ATTRS_KEY: &str = "apotheosis:socket_attrs";
+const SOCKET_ENCHANTS_KEY: &str = "apotheosis:socket_enchants";
 
 /// A gem's purity: the multiplier its bonus carries. Apotheosis names six
 /// steps; the numbers are the ratio of each step's value to a normal gem's in
@@ -164,7 +168,7 @@ fn roll_purity(purity_weights: &[(Purity, u64)], rng: &mut Rng) -> Purity {
 /// Marks a gem stack with the purity it dropped at.
 pub fn set_purity(stack: &mut ItemStack, purity: Purity) {
     set_custom(stack, |map| {
-        map.insert(PURITY_KEY.into(), Tag::Int(purity.index() as i32));
+        map.insert(gems::PURITY_KEY.into(), Tag::Int(purity.index() as i32));
     });
 }
 
@@ -172,19 +176,20 @@ pub fn set_purity(stack: &mut ItemStack, purity: Purity) {
 /// one) is normal.
 pub fn purity_of(stack: &ItemStack) -> Purity {
     let tag = custom(stack);
-    match tag.get(PURITY_KEY) {
+    match tag.get(gems::PURITY_KEY) {
         Some(Tag::Int(index)) => Purity::from_index(*index as u8),
         _ => Purity::Normal,
     }
 }
 
-/// Gives a freshly dropped gem its purity.
+/// Gives a freshly dropped gem its purity, never below the floor its Java data
+/// sets for it.
 pub fn roll_dropped_purity(stack: &mut ItemStack, rng: &mut Rng, boss: bool) {
-    if gem(&stack.item).is_none() {
+    let Some(gem) = gems::of_stack(stack).map(|(gem, _)| gem) else {
         return;
-    }
-    let purity = roll_purity(if boss { &BOSS_PURITY } else { &ORDINARY_PURITY }, rng);
-    set_purity(stack, purity);
+    };
+    let rolled = roll_purity(if boss { &BOSS_PURITY } else { &ORDINARY_PURITY }, rng);
+    set_purity(stack, rolled.max(gem.min_purity));
 }
 
 /// How many sockets a piece of a given tier rolls: none at common, up to three
@@ -265,31 +270,28 @@ pub fn after_affixes(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) {
     refresh(stack);
 }
 
-/// Puts gem `gem` at `purity` into `gear`'s first free socket. False when the
-/// gear has no free socket or already holds that gem.
+/// Puts gem `gem_id` at `purity` into `gear`'s first free socket. False when
+/// the gear has no free socket, already holds that gem, or the gem has no bonus
+/// for a piece of this kind.
 pub fn insert_gem(gear: &mut ItemStack, gem_id: &str, purity: Purity) -> bool {
-    if gem(gem_id).is_none() {
+    let Some(entry) = gems::get(gem_id) else {
+        return false;
+    };
+    if gems::resolved(entry, purity, &gear.item).is_empty() {
         return false;
     }
     let total = socket_total(gear);
     let mut sockets = socketed(gear);
-    if sockets.len() >= usize::from(total) || sockets.iter().any(|s| s.gem == gem_id) {
+    if sockets.len() >= usize::from(total) || sockets.iter().any(|s| s.gem == entry.id) {
         return false;
     }
     sockets.push(Socket {
-        gem: gem_id.to_owned(),
+        gem: entry.id.to_owned(),
         purity,
     });
     write_sockets(gear, total, &sockets);
     refresh(gear);
     true
-}
-
-/// A socketed gem's bonus on this piece: its base amount scaled by purity,
-/// rounded to four places so a small movement-speed bonus is not lost.
-pub fn socketed_amount(gem_id: &str, purity: Purity) -> Option<f64> {
-    let gem = gem(gem_id)?;
-    Some((gem.amount * purity.multiplier() * 10_000.0).round() / 10_000.0)
 }
 
 /// The rarity material a piece of `tier` salvages into, and how many at most.
@@ -321,7 +323,7 @@ pub fn salvage_yield(tier: Tier, rng: &mut Rng) -> (String, u32, u32) {
 
 /// The rarity component's name, for the tooltip line of a socketed gem.
 fn gem_name_key(gem_id: &str) -> String {
-    format!("item.{}", gem_id.replacen(':', ".", 1))
+    format!("item.apotheosis.gem.{gem_id}")
 }
 
 fn amount_text(amount: f64) -> String {
@@ -412,6 +414,7 @@ fn socket_slot_group(item: &str) -> &'static str {
 }
 
 fn refresh(stack: &mut ItemStack) {
+    undo_socket_extras(stack);
     let total = socket_total(stack);
     let sockets = socketed(stack);
     let slots = socket_slot_group(&stack.item);
@@ -436,25 +439,38 @@ fn refresh(stack: &mut ItemStack) {
         _ => Vec::new(),
     };
 
+    let mut apothic: Vec<(Attr, f64)> = Vec::new();
+    let mut plan: Vec<(String, u8, bool)> = Vec::new();
     for (index, socket) in sockets.iter().enumerate() {
-        let Some(entry) = gem(&socket.gem) else {
+        let Some(entry) = gems::get(&socket.gem) else {
             continue;
         };
-        let Some(amount) = socketed_amount(&socket.gem, socket.purity) else {
-            continue;
-        };
-        let id = format!(
-            "apotheosis:socket_{index}_{}",
-            socket.gem.rsplit(':').next().unwrap_or(&socket.gem)
-        );
-        modifiers.push(Tag::compound([
-            ("type", Tag::String(entry.attribute.into())),
-            ("id", Tag::String(id.as_str().into())),
-            ("amount", Tag::Double(amount.to_bits())),
-            ("operation", Tag::String("add_value".into())),
-            ("slot", Tag::String(slots.into())),
-        ]));
-        lore.push(socket_lore(socket, entry, amount));
+        let resolved = gems::resolved(entry, socket.purity, &stack.item);
+        for (n, bonus) in resolved.iter().enumerate() {
+            match bonus {
+                Resolved::Attribute {
+                    attribute,
+                    operation,
+                    amount,
+                } => {
+                    let id = format!("apotheosis:socket_{index}_{n}");
+                    modifiers.push(Tag::compound([
+                        ("type", Tag::String((*attribute).into())),
+                        ("id", Tag::String(id.as_str().into())),
+                        ("amount", Tag::Double(amount.to_bits())),
+                        ("operation", Tag::String((*operation).into())),
+                        ("slot", Tag::String(slots.into())),
+                    ]));
+                }
+                Resolved::Enchantment {
+                    id,
+                    level,
+                    existing_only,
+                } => plan.push(((*id).to_owned(), *level, *existing_only)),
+            }
+        }
+        apothic.extend(gems::apothic(&resolved));
+        lore.push(socket_lore(socket, entry));
     }
 
     if total > 0 {
@@ -465,15 +481,15 @@ fn refresh(stack: &mut ItemStack) {
             ),
             (
                 "fallback",
-                Tag::String(format!("Sockets: {}/{}", sockets.len(), total).as_str().into()),
+                Tag::String(format!("Sockets: {}/{total}", sockets.len()).as_str().into()),
             ),
             ("color", Tag::String("#808080".into())),
             ("italic", Tag::Byte(0)),
             (
                 "with",
                 Tag::List(vec![
-                    Tag::String(format!("{}", sockets.len()).as_str().into()),
-                    Tag::String(format!("{total}").as_str().into()),
+                    Tag::String(sockets.len().to_string().as_str().into()),
+                    Tag::String(total.to_string().as_str().into()),
                 ]),
             ),
         ]));
@@ -485,16 +501,134 @@ fn refresh(stack: &mut ItemStack) {
         (!modifiers.is_empty()).then_some(Tag::List(modifiers)),
     );
     data.set_other("minecraft:lore", (!lore.is_empty()).then_some(Tag::List(lore)));
+
+    // The Apothic Attributes live in the item's custom data, not in the
+    // modifier list; what this refresh wrote is recorded so the next one can
+    // take it back instead of stacking it.
+    if !apothic.is_empty() {
+        attributes::attach(stack, &apothic);
+        let mut entries = Compound::new();
+        for (attr, amount) in &apothic {
+            entries.insert(attr.key().to_string().as_str().into(), Tag::Double(amount.to_bits()));
+        }
+        set_custom(stack, |map| {
+            map.insert(SOCKET_ATTRS_KEY.into(), Tag::Compound(entries));
+        });
+    }
+    let added = apply_enchantments(stack, &plan);
+    if !added.is_empty() {
+        let mut entries = Compound::new();
+        for (id, level) in &added {
+            entries.insert(id.as_str().into(), Tag::Int(i32::from(*level)));
+        }
+        set_custom(stack, |map| {
+            map.insert(SOCKET_ENCHANTS_KEY.into(), Tag::Compound(entries));
+        });
+    }
 }
 
-fn socket_lore(socket: &Socket, entry: &crate::Gem, amount: f64) -> Tag {
-    let fallback = format!(
-        "{} {}: {} {}",
-        socket.purity.name(),
-        entry.id.rsplit(':').next().unwrap_or(entry.id),
-        amount_text(amount),
-        entry.attribute.rsplit(':').next().unwrap_or(entry.attribute)
-    );
+/// Takes back the attributes and enchantment levels the last refresh wrote, so
+/// a reforge or a withdrawn gem leaves no bonus behind.
+fn undo_socket_extras(stack: &mut ItemStack) {
+    let previous = custom(stack);
+    if let Some(Tag::Compound(attrs)) = previous.get(SOCKET_ATTRS_KEY) {
+        let pairs: Vec<(Attr, f64)> = attrs
+            .iter()
+            .filter_map(|(key, value)| {
+                let attr = Attr::ALL
+                    .into_iter()
+                    .find(|attr| attr.key() == key.to_string_lossy().to_string())?;
+                let amount = match value {
+                    Tag::Double(bits) => f64::from_bits(*bits),
+                    _ => return None,
+                };
+                Some((attr, -amount))
+            })
+            .collect();
+        if !pairs.is_empty() {
+            attributes::attach(stack, &pairs);
+        }
+    }
+    if let Some(Tag::Compound(levels)) = previous.get(SOCKET_ENCHANTS_KEY) {
+        let mut current = enchantment_levels(stack);
+        for (id, value) in levels.iter() {
+            let Tag::Int(level) = value else {
+                continue;
+            };
+            let key = id.to_string_lossy();
+            let before = current.get(&key.to_string()).copied().unwrap_or(0);
+            let left = before.saturating_sub(u8::try_from(*level).unwrap_or(0));
+            if left == 0 {
+                current.remove(&key.to_string());
+            } else {
+                current.insert(key.to_string(), left);
+            }
+        }
+        write_enchantment_levels(stack, &current);
+    }
+    set_custom(stack, |map| {
+        let attrs_key = SOCKET_ATTRS_KEY.into();
+        map.remove(&attrs_key);
+        let enchants_key = SOCKET_ENCHANTS_KEY.into();
+        map.remove(&enchants_key);
+    });
+}
+
+/// A piece's enchantment levels, by id.
+fn enchantment_levels(stack: &ItemStack) -> std::collections::BTreeMap<String, u8> {
+    stack
+        .enchantments()
+        .iter()
+        .map(|(id, level)| (id.to_string(), (*level).min(255) as u8))
+        .collect()
+}
+
+/// Writes `levels` as the item's `minecraft:enchantments` component.
+fn write_enchantment_levels(stack: &mut ItemStack, levels: &std::collections::BTreeMap<String, u8>) {
+    if levels.is_empty() {
+        stack
+            .data_mut()
+            .set_loot_component("minecraft:enchantments", &serde_json::Value::Null);
+        return;
+    }
+    let mut map = serde_json::Map::new();
+    for (id, level) in levels {
+        map.insert(id.clone(), serde_json::json!(*level));
+    }
+    stack
+        .data_mut()
+        .set_loot_component("minecraft:enchantments", &serde_json::json!({ "levels": map }));
+}
+
+/// Raises the planned enchantments, returning the levels it actually added so
+/// the next refresh can take them back.
+fn apply_enchantments(stack: &mut ItemStack, plan: &[(String, u8, bool)]) -> Vec<(String, u8)> {
+    let mut levels = enchantment_levels(stack);
+    let mut added = Vec::new();
+    for (id, level, existing_only) in plan {
+        let current = levels.get(id).copied().unwrap_or(0);
+        if *existing_only && current == 0 {
+            continue;
+        }
+        if *level <= current {
+            continue;
+        }
+        levels.insert(id.clone(), *level);
+        added.push((id.clone(), *level - current));
+    }
+    if !added.is_empty() {
+        write_enchantment_levels(stack, &levels);
+    }
+    added
+}
+
+fn socket_lore(socket: &Socket, entry: &crate::java_gems::Gem) -> Tag {
+    let text = gems::description(entry, socket.purity)
+        .into_iter()
+        .map(|(line, _)| line)
+        .collect::<Vec<_>>()
+        .join("; ");
+    let fallback = format!("{} {}: {text}", socket.purity.name(), entry.name);
     Tag::compound([
         ("translate", Tag::String("apotheosis.socket.line".into())),
         ("fallback", Tag::String(fallback.as_str().into())),
@@ -504,27 +638,17 @@ fn socket_lore(socket: &Socket, entry: &crate::Gem, amount: f64) -> Tag {
             "with",
             Tag::List(vec![
                 Tag::compound([
-                    ("translate", Tag::String(gem_name_key(&socket.gem).as_str().into())),
                     (
-                        "fallback",
-                        Tag::String(entry.id.rsplit(':').next().unwrap_or(entry.id).into()),
+                        "translate",
+                        Tag::String(format!("item.apotheosis.gem.{}", entry.id).as_str().into()),
                     ),
+                    ("fallback", Tag::String(entry.name.into())),
                 ]),
                 Tag::compound([
                     ("translate", Tag::String(socket.purity.name_key().into())),
                     ("fallback", Tag::String(socket.purity.name().into())),
                 ]),
-                Tag::String(amount_text(amount).as_str().into()),
-                Tag::compound([
-                    (
-                        "translate",
-                        Tag::String(format!("attribute.name.{}", entry.attribute).as_str().into()),
-                    ),
-                    (
-                        "fallback",
-                        Tag::String(entry.attribute.rsplit(':').next().unwrap_or(entry.attribute).into()),
-                    ),
-                ]),
+                Tag::String(text.as_str().into()),
             ]),
         ),
     ])
@@ -540,7 +664,7 @@ pub fn tooltip(event: &mut TooltipEvent<'_>) {
         ));
         return;
     }
-    if gem(&event.stack.item).is_some() {
+    if gems::of_stack(event.stack).is_some() {
         let purity = purity_of(event.stack);
         event.lines.push((
             Text::translate_with_fallback(
@@ -596,27 +720,23 @@ pub fn tooltip(event: &mut TooltipEvent<'_>) {
         0x80_8080,
     ));
     for socket in sockets {
-        let Some(entry) = gem(&socket.gem) else {
+        let Some(entry) = gems::get(&socket.gem) else {
             continue;
         };
-        let Some(amount) = socketed_amount(&socket.gem, socket.purity) else {
-            continue;
-        };
-        let fallback = format!(
-            "{} {}: {} {}",
-            socket.purity.name(),
-            entry.id.rsplit(':').next().unwrap_or(entry.id),
-            amount_text(amount),
-            entry.attribute.rsplit(':').next().unwrap_or(entry.attribute)
-        );
+        let text = gems::description(entry, socket.purity)
+            .into_iter()
+            .map(|(line, _)| line)
+            .collect::<Vec<_>>()
+            .join("; ");
+        let fallback = format!("{} {}: {text}", socket.purity.name(), entry.name);
         event.lines.push((
             Text::translate_with_fallback(
                 "apotheosis.socket.line",
                 &fallback,
                 &[
                     Text::translate_with_fallback(
-                        &gem_name_key(&socket.gem),
-                        entry.id.rsplit(':').next().unwrap_or(entry.id),
+                        &format!("item.apotheosis.gem.{}", entry.id),
+                        entry.name,
                         &[],
                     ),
                     Text::translate_with_fallback(
@@ -624,12 +744,7 @@ pub fn tooltip(event: &mut TooltipEvent<'_>) {
                         socket.purity.name(),
                         &[],
                     ),
-                    Text::literal(amount_text(amount)),
-                    Text::translate_with_fallback(
-                        &format!("attribute.name.{}", entry.attribute),
-                        entry.attribute.rsplit(':').next().unwrap_or(entry.attribute),
-                        &[],
-                    ),
+                    Text::literal(text),
                 ],
             )
             .with_color(socket.purity.colour()),
@@ -822,7 +937,7 @@ pub fn use_item(host: &mut dyn Host, event: &mut UseItemEvent<'_>) -> Flow {
     if let Some(seal) = seal(&event.stack.item) {
         return use_seal(host, event, seal);
     }
-    if gem(&event.stack.item).is_none() {
+    if gems::of_stack(&event.stack).is_none() {
         return Flow::Continue;
     }
     let Some(player) = host.acting_player() else {
@@ -1045,7 +1160,7 @@ pub fn use_item_on(host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow 
             Flow::Cancel
         }
         Table::Cutting => {
-            if gem(&event.stack.item).is_none() || purity_of(&event.stack) >= Purity::Perfect {
+            if gems::of_stack(&event.stack).is_none() || purity_of(&event.stack) >= Purity::Perfect {
                 host.feedback(Text::translate_with_fallback(
                     "apotheosis.table.cut.hint",
                     "The gem cutting table sharpens the gem in your hand.",
@@ -1227,7 +1342,7 @@ pub fn next_tier(tier: Tier) -> Tier {
 /// The gem cutting table: 4 gem dust out of the inventory raise the held gem's
 /// purity a step.
 fn cut(host: &mut dyn Host, slot: i32, main: &ItemStack) {
-    if gem(&main.item).is_none() {
+    if gems::of_stack(main).is_none() {
         return;
     }
     let purity = purity_of(main);
@@ -1267,21 +1382,39 @@ pub fn chest_gem_purity(seed: i64) -> Purity {
     roll_purity(&ORDINARY_PURITY, &mut rng)
 }
 
-/// A gem in a chest rolls its purity from the loot roll's own seed.
+/// A gem in a chest becomes a real gem of the level, at its Java weight, and
+/// rolls its purity from the loot roll's own seed.
 pub fn loot_function(event: &mut LootFunctionEvent<'_>) {
-    if event.kind != "apotheosis:gem_purity" {
+    if event.kind != "apotheosis:gem_purity" || &*event.stack.item != gems::ITEM {
         return;
     }
-    if gem(&event.stack.item).is_none() {
-        return;
-    }
-    let purity = chest_gem_purity(event.ctx.seed);
-    let custom = serde_json::json!({ PURITY_KEY: purity.index() });
-    event.stack.components.retain(|(id, _)| id != CUSTOM);
+    let mut rng = Rng::new(event.ctx.seed as u64);
+    let (gem, _) = gems::roll("minecraft:overworld", false, &mut rng);
+    let purity = chest_gem_purity(event.ctx.seed).max(gem.min_purity);
+    let custom_name = serde_json::json!({
+        "translate": format!("item.apotheosis.gem.{}", gem.id),
+        "fallback": gem.name,
+        "color": purity.hex(),
+        "italic": false,
+    });
+    event.stack.components.retain(|(id, _)| {
+        id != CUSTOM && id != "minecraft:custom_name" && id != "minecraft:custom_model_data"
+    });
+    event.stack.components.push((
+        CUSTOM.to_owned(),
+        serde_json::json!({
+            gems::GEM_KEY: gem.id,
+            gems::PURITY_KEY: purity.index(),
+        }),
+    ));
     event
         .stack
         .components
-        .push((CUSTOM.to_owned(), custom));
+        .push(("minecraft:custom_model_data".to_owned(), serde_json::json!(gem.id)));
+    event
+        .stack
+        .components
+        .push(("minecraft:custom_name".to_owned(), custom_name));
 }
 
 /// Rerolls a piece's rarity and affixes in place, keeping its sockets and the
@@ -1315,12 +1448,12 @@ fn write_slot(host: &mut dyn Host, slot: i32, stack: ItemStack) {
 }
 
 fn socket(host: &mut dyn Host, slot: i32, main: &ItemStack, off: &ItemStack) {
-    let Some(entry) = gem(&main.item) else {
+    let Some(entry) = gems::of_stack(main).map(|(gem, _)| gem) else {
         return;
     };
     let purity = purity_of(main);
     let mut gear = off.clone();
-    if !insert_gem(&mut gear, &main.item, purity) {
+    if !insert_gem(&mut gear, entry.id, purity) {
         host.feedback(Text::translate_with_fallback(
             "apotheosis.socket.full",
             "No free socket there, or that gem is already in it.",
@@ -1337,8 +1470,8 @@ fn socket(host: &mut dyn Host, slot: i32, main: &ItemStack, off: &ItemStack) {
         "Socketed %s (%s).",
         &[
             Text::translate_with_fallback(
-                &gem_name_key(&main.item),
-                entry.id.rsplit(':').next().unwrap_or(entry.id),
+                &format!("item.apotheosis.gem.{}", entry.id),
+                entry.name,
                 &[],
             ),
             Text::translate_with_fallback(purity.name_key(), purity.name(), &[]),
@@ -1347,7 +1480,7 @@ fn socket(host: &mut dyn Host, slot: i32, main: &ItemStack, off: &ItemStack) {
 }
 
 fn can_polish(main: &ItemStack, off: &ItemStack) -> bool {
-    gem(&main.item).is_some()
+    gems::of_stack(main).is_some()
         && &*off.item == "apotheosis:gem_dust"
         && off.count >= POLISH_COST
         && purity_of(main) < Purity::Perfect
@@ -1510,13 +1643,13 @@ mod tests {
     }
 
     #[test]
-    fn a_gem_fills_a_socket_once_and_scales_with_purity() {
+    fn a_gem_fills_a_socket_once_and_takes_its_java_value() {
         let mut gear = ItemStack::new("minecraft:diamond_sword", 1);
         let mut rng = Rng::new(5);
         after_affixes(&mut gear, Tier::Epic, &mut rng);
         assert_eq!(socket_total(&gear), 3);
-        assert!(insert_gem(&mut gear, "apotheosis:gem_ruby", Purity::Flawless));
-        assert!(!insert_gem(&mut gear, "apotheosis:gem_ruby", Purity::Perfect));
+        assert!(insert_gem(&mut gear, "apotheosis:core/ballast", Purity::Flawless));
+        assert!(!insert_gem(&mut gear, "apotheosis:core/ballast", Purity::Perfect));
         assert_eq!(socketed(&gear).len(), 1);
 
         let Some(Tag::List(modifiers)) = gear
@@ -1529,18 +1662,12 @@ mod tests {
             .iter()
             .find(|entry| is_socket_modifier(entry))
             .expect("a socket modifier");
+        // Java's ballast gem gives a flawless melee weapon +7 attack damage.
         assert_eq!(
             socket_modifier.get("amount"),
-            Some(&Tag::Double(
-                socketed_amount("apotheosis:gem_ruby", Purity::Flawless)
-                    .unwrap()
-                    .to_bits()
-            ))
+            Some(&Tag::Double(7.0f64.to_bits()))
         );
-        assert_eq!(
-            socketed_amount("apotheosis:gem_ruby", Purity::Perfect),
-            Some(2.0)
-        );
+        assert_eq!(socket_modifier.get("type"), Some(&Tag::String("minecraft:attack_damage".into())));
     }
 
     #[test]
@@ -1549,7 +1676,7 @@ mod tests {
         write_sockets(&mut shield, 1, &[]);
         assert!(insert_gem(
             &mut shield,
-            "apotheosis:gem_ruby",
+            "apotheosis:core/brawlers",
             Purity::Normal
         ));
 
@@ -1589,7 +1716,7 @@ mod tests {
             Some(Tag::List(entries)) => entries.len(),
             _ => panic!("no modifiers"),
         };
-        assert!(insert_gem(&mut gear, "apotheosis:gem_jade", Purity::Normal));
+        assert!(insert_gem(&mut gear, "apotheosis:core/ballast", Purity::Normal));
         let after = match gear
             .data()
             .and_then(|data| data.other("minecraft:attribute_modifiers"))
@@ -1604,7 +1731,7 @@ mod tests {
     fn a_piece_without_sockets_cannot_take_a_gem() {
         let mut gear = ItemStack::new("minecraft:iron_sword", 1);
         assert_eq!(socket_total(&gear), 0);
-        assert!(!insert_gem(&mut gear, "apotheosis:gem_onyx", Purity::Normal));
+        assert!(!insert_gem(&mut gear, "apotheosis:core/guardian", Purity::Normal));
     }
 
     #[test]
@@ -1612,7 +1739,7 @@ mod tests {
         let mut gear = ItemStack::new("minecraft:diamond_sword", 1);
         let mut rng = Rng::new(21);
         after_affixes(&mut gear, Tier::Epic, &mut rng);
-        assert!(insert_gem(&mut gear, "apotheosis:gem_topaz", Purity::Chipped));
+        assert!(insert_gem(&mut gear, "apotheosis:core/brawlers", Purity::Chipped));
         let sockets = socket_total(&gear);
 
         // What `reforge` does to the stack.
@@ -1783,9 +1910,9 @@ mod tests {
     fn three_gems() -> ItemStack {
         let mut gear = affixed("minecraft:diamond_chestplate", Tier::Ancient, 31);
         assert_eq!(socket_total(&gear), MAX_SOCKETS);
-        assert!(insert_gem(&mut gear, "apotheosis:gem_ruby", Purity::Normal));
-        assert!(insert_gem(&mut gear, "apotheosis:gem_sapphire", Purity::Flawless));
-        assert!(insert_gem(&mut gear, "apotheosis:gem_onyx", Purity::Perfect));
+        assert!(insert_gem(&mut gear, "apotheosis:core/ballast", Purity::Normal));
+        assert!(insert_gem(&mut gear, "apotheosis:core/guardian", Purity::Flawless));
+        assert!(insert_gem(&mut gear, "apotheosis:core/brawlers", Purity::Perfect));
         gear
     }
 
@@ -1842,7 +1969,7 @@ mod tests {
         host.slots.insert(0, sword.clone());
         host.slots.insert(OFFHAND, dust.clone());
         polish(&mut host, 0, &sword, &dust);
-        assert_eq!(custom(host.slots.get(&0).unwrap()).get(PURITY_KEY), None);
+        assert_eq!(custom(host.slots.get(&0).unwrap()).get(gems::PURITY_KEY), None);
         assert_eq!(host.slots.get(&OFFHAND).unwrap().count, POLISH_COST);
         assert!(!can_polish(&sword, &dust));
     }
