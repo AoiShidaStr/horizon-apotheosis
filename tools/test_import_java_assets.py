@@ -63,6 +63,30 @@ class ModelTests(unittest.TestCase):
         self.assertFalse(added)
         self.assertNotIn("facing=north", result["variants"])
 
+    def test_multipart_blockstate_falls_back_to_one_model(self):
+        state = {
+            "multipart": [
+                {
+                    "apply": {"model": "apothic_enchanting:block/filtering_shelf/base", "y": 90},
+                    "when": {"facing": "east"},
+                },
+                {
+                    "apply": {
+                        "model": "apothic_enchanting:block/filtering_shelf/occupied",
+                        "y": 0,
+                    },
+                    "when": {"AND": [{"facing": "north"}, {"slot_2_occupied": "true"}]},
+                },
+            ]
+        }
+        result, added = java.normalize_blockstate(state)
+        self.assertTrue(added)
+        self.assertNotIn("multipart", result)
+        self.assertEqual(
+            result["variants"][""]["model"],
+            "apothic_enchanting:block/filtering_shelf/occupied",
+        )
+
 
 class AliasTests(unittest.TestCase):
     def test_an_explicit_alias_wins_over_a_same_named_java_asset(self):

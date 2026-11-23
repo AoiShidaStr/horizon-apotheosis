@@ -2,6 +2,10 @@
   "values": [
     "apotheosis:gem_cutting_table",
     "apotheosis:salvaging_table",
-    "apotheosis:reforging_table"
+    "apotheosis:reforging_table",
+    "apotheosis:filtering_shelf",
+    "apotheosis:geode_shelf",
+    "apotheosis:treasure_shelf",
+    "apotheosis:apothic_enchanting_table"
   ]
 }

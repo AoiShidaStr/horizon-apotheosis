@@ -488,5 +488,15 @@
   "apotheosis.affix.effect.durable": "%s%% d'usure en moins",
   "apotheosis.affix.effect.enchantment": "+%s %s",
   "apotheosis.affix.effect.retreating": "Repousse les attaquants au blocage",
-  "apotheosis.affix.effect.telepathic": "Le butin va dans l'inventaire"
+  "apotheosis.affix.effect.telepathic": "Le butin va dans l'inventaire",
+  "block.apotheosis.filtering_shelf": "Bibliothèque filtrante",
+  "block.apotheosis.geode_shelf": "Bibliothèque de géode",
+  "block.apotheosis.treasure_shelf": "Bibliothèque au trésor",
+  "block.apotheosis.ender_library": "Bibliothèque de l'Ender",
+  "block.apotheosis.apothic_enchanting_table": "Table d'enchantement apothéotique",
+  "apotheosis.infusion.no_match": "Rien dans votre main ne peut être infusé ici.",
+  "apotheosis.infusion.single": "La table n'infuse qu'un objet à la fois.",
+  "apotheosis.infusion.requirements": "Requiert %s d'Eterna, %s de Quanta et %s d'Arcana ; les étagères fournissent %s, %s et %s.",
+  "apotheosis.infusion.levels": "Il vous faut %s niveaux d'expérience.",
+  "apotheosis.infusion.done": "%s infusé."
 }

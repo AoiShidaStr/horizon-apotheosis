@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "PSP",
+    "LLL",
+    "PSP"
+  ],
+  "key": {
+    "P": "minecraft:prismarine_bricks",
+    "S": "apotheosis:infused_seashelf",
+    "L": "minecraft:prismarine_brick_slab"
+  },
+  "result": {
+    "id": "apotheosis:filtering_shelf"
+  }
+}

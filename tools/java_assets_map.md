@@ -6,12 +6,12 @@ Source inspectée : `java-ref`
 
 ## Résumé
 
-- blocs avec blockstate Java : 27
-- objets avec modèle Java : 42
-- modèles copiés : 100
-- textures copiées : 107
-- clés lang en_us : 1725
-- clés lang fr_fr : 1601
+- blocs avec blockstate Java : 32
+- objets avec modèle Java : 47
+- modèles copiés : 113
+- textures copiées : 122
+- clés lang en_us : 1735
+- clés lang fr_fr : 1608
 
 Les ids sans équivalent Java gardent nos définitions et nos textures originales de `content/`. Les gemmes viennent de Java : une seule gemme (`apotheosis:gem`) dont le modèle choisit la texture du type qu'elle porte, ci-dessous en liste à part.
 
@@ -19,6 +19,7 @@ Les ids sans équivalent Java gardent nos définitions et nos textures originale
 
 | Id du port | Source Java | Fichiers importés |
 | --- | --- | --- |
+| `apothic_enchanting_table` | `apothic_enchanting:apothic_enchanting_table` | `blockstates/apothic_enchanting_table.json` → `apothic_enchanting:block/apothic_enchanting_table` |
 | `basic_bookshelf` | `apothic_enchanting:basic_bookshelf` | `blockstates/basic_bookshelf.json` → `apothic_enchanting:block/basic_bookshelf` |
 | `beeshelf` | `apothic_enchanting:beeshelf` | `blockstates/beeshelf.json` → `apothic_enchanting:block/beeshelf` |
 | `blazing_hellshelf` | `apothic_enchanting:blazing_hellshelf` | `blockstates/blazing_hellshelf.json` → `apothic_enchanting:block/blazing_hellshelf` |
@@ -29,8 +30,11 @@ Les ids sans équivalent Java gardent nos définitions et nos textures originale
 | `echoing_deepshelf` | `apothic_enchanting:echoing_deepshelf` | `blockstates/echoing_deepshelf.json` → `apothic_enchanting:block/echoing_deepshelf` |
 | `echoing_sculkshelf` | `apothic_enchanting:echoing_sculkshelf` | `blockstates/echoing_sculkshelf.json` → `apothic_enchanting:block/echoing_sculkshelf` |
 | `enchantment_library` | `apothic_enchanting:library` | `blockstates/enchantment_library.json` → `apothic_enchanting:block/library`, variant `""` ajouté (notre bloc n'a pas la propriété Java) |
+| `ender_library` | `apothic_enchanting:ender_library` | `blockstates/ender_library.json` → `apothic_enchanting:block/ender_library`, variant `""` ajouté (notre bloc n'a pas la propriété Java) |
 | `endshelf` | `apothic_enchanting:endshelf` | `blockstates/endshelf.json` → `apothic_enchanting:block/endshelf` |
+| `filtering_shelf` | `apothic_enchanting:filtering_shelf` | `blockstates/filtering_shelf.json` → `apothic_enchanting:block/filtering_shelf`, variant `""` ajouté (notre bloc n'a pas la propriété Java) |
 | `gem_cutting_table` | `apotheosis:gem_cutting_table` | `blockstates/gem_cutting_table.json` → `apotheosis:block/gem_cutting_table`, variant `""` ajouté (notre bloc n'a pas la propriété Java) |
+| `geode_shelf` | `apothic_enchanting:geode_shelf` | `blockstates/geode_shelf.json` → `apothic_enchanting:block/geode_shelf`, variant `""` ajouté (notre bloc n'a pas la propriété Java) |
 | `glowing_hellshelf` | `apothic_enchanting:glowing_hellshelf` | `blockstates/glowing_hellshelf.json` → `apothic_enchanting:block/glowing_hellshelf` |
 | `heart_seashelf` | `apothic_enchanting:heart_seashelf` | `blockstates/heart_seashelf.json` → `apothic_enchanting:block/heart_seashelf` |
 | `hellshelf` | `apothic_enchanting:hellshelf` | `blockstates/hellshelf.json` → `apothic_enchanting:block/hellshelf` |
@@ -46,11 +50,13 @@ Les ids sans équivalent Java gardent nos définitions et nos textures originale
 | `soul_touched_deepshelf` | `apothic_enchanting:soul_touched_deepshelf` | `blockstates/soul_touched_deepshelf.json` → `apothic_enchanting:block/soul_touched_deepshelf` |
 | `soul_touched_sculkshelf` | `apothic_enchanting:soul_touched_sculkshelf` | `blockstates/soul_touched_sculkshelf.json` → `apothic_enchanting:block/soul_touched_sculkshelf` |
 | `stoneshelf` | `apothic_enchanting:stoneshelf` | `blockstates/stoneshelf.json` → `apothic_enchanting:block/stoneshelf` |
+| `treasure_shelf` | `apothic_enchanting:treasure_shelf` | `blockstates/treasure_shelf.json` → `apothic_enchanting:block/treasure_shelf` |
 
 ## Objets
 
 | Id du port | Source Java | Fichiers importés |
 | --- | --- | --- |
+| `apothic_enchanting_table` | `apothic_enchanting:apothic_enchanting_table` | `items/apothic_enchanting_table.json` → `apothic_enchanting:item/apothic_enchanting_table` |
 | `arcane_sands` | `apotheosis:arcane_sands` | `items/arcane_sands.json` → `apotheosis:item/arcane_sands` |
 | `basic_bookshelf` | `apothic_enchanting:basic_bookshelf` | `items/basic_bookshelf.json` → `apothic_enchanting:item/basic_bookshelf` |
 | `beeshelf` | `apothic_enchanting:beeshelf` | `items/beeshelf.json` → `apothic_enchanting:item/beeshelf` |
@@ -62,11 +68,14 @@ Les ids sans équivalent Java gardent nos définitions et nos textures originale
 | `echoing_deepshelf` | `apothic_enchanting:echoing_deepshelf` | `items/echoing_deepshelf.json` → `apothic_enchanting:item/echoing_deepshelf` |
 | `echoing_sculkshelf` | `apothic_enchanting:echoing_sculkshelf` | `items/echoing_sculkshelf.json` → `apothic_enchanting:item/echoing_sculkshelf` |
 | `enchantment_library` | `apothic_enchanting:library` | `items/enchantment_library.json` → `apothic_enchanting:item/library` |
+| `ender_library` | `apothic_enchanting:ender_library` | `items/ender_library.json` → `apothic_enchanting:item/ender_library` |
 | `endshelf` | `apothic_enchanting:endshelf` | `items/endshelf.json` → `apothic_enchanting:item/endshelf` |
 | `extraction_tome` | `apothic_enchanting:extraction_tome` | `items/extraction_tome.json` → `apothic_enchanting:item/extraction_tome` |
+| `filtering_shelf` | `apothic_enchanting:filtering_shelf` | `items/filtering_shelf.json` → `apothic_enchanting:item/filtering_shelf` |
 | `gem` | `apotheosis:gem` | `items/gem.json` → `apotheosis:item/gem` |
 | `gem_cutting_table` | `apotheosis:gem_cutting_table` | `items/gem_cutting_table.json` → `apotheosis:item/gem_cutting_table` |
 | `gem_dust` | `apotheosis:gem_dust` | `items/gem_dust.json` → `apotheosis:item/gem_dust` |
+| `geode_shelf` | `apothic_enchanting:geode_shelf` | `items/geode_shelf.json` → `apothic_enchanting:item/geode_shelf` |
 | `glowing_hellshelf` | `apothic_enchanting:glowing_hellshelf` | `items/glowing_hellshelf.json` → `apothic_enchanting:item/glowing_hellshelf` |
 | `godforged_pearl` | `apotheosis:godforged_pearl` | `items/godforged_pearl.json` → `apotheosis:item/godforged_pearl` |
 | `heart_seashelf` | `apothic_enchanting:heart_seashelf` | `items/heart_seashelf.json` → `apothic_enchanting:item/heart_seashelf` |
@@ -93,6 +102,7 @@ Les ids sans équivalent Java gardent nos définitions et nos textures originale
 | `soul_touched_sculkshelf` | `apothic_enchanting:soul_touched_sculkshelf` | `items/soul_touched_sculkshelf.json` → `apothic_enchanting:item/soul_touched_sculkshelf` |
 | `stoneshelf` | `apothic_enchanting:stoneshelf` | `items/stoneshelf.json` → `apothic_enchanting:item/stoneshelf` |
 | `timeworn_fabric` | `apotheosis:timeworn_fabric` | `items/timeworn_fabric.json` → `apotheosis:item/timeworn_fabric` |
+| `treasure_shelf` | `apothic_enchanting:treasure_shelf` | `items/treasure_shelf.json` → `apothic_enchanting:item/treasure_shelf` |
 
 ## Textures des gemmes
 
@@ -102,7 +112,12 @@ Les ids sans équivalent Java gardent nos définitions et nos textures originale
 
 | Id du port | Id Java |
 | --- | --- |
+| `apothic_enchanting_table` | `apothic_enchanting:apothic_enchanting_table` |
 | `enchantment_library` | `apothic_enchanting:library` |
+| `ender_library` | `apothic_enchanting:ender_library` |
+| `filtering_shelf` | `apothic_enchanting:filtering_shelf` |
+| `geode_shelf` | `apothic_enchanting:geode_shelf` |
+| `treasure_shelf` | `apothic_enchanting:treasure_shelf` |
 
 ## Contrôles
 

@@ -1,0 +1,10 @@
+{
+  "template": "minecraft:bookshelf",
+  "item": true,
+  "properties": {
+    "hardness": 1.75,
+    "explosion_resistance": 1.75,
+    "sounds": "minecraft:stone",
+    "requires_tool": true
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "CCC",
+    "CBC",
+    "CUC"
+  ],
+  "key": {
+    "C": "minecraft:calcite",
+    "B": "minecraft:bookshelf",
+    "U": "minecraft:budding_amethyst"
+  },
+  "result": {
+    "id": "apotheosis:geode_shelf"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "SDS",
+    "GTG",
+    "SDS"
+  ],
+  "key": {
+    "S": "minecraft:gold_block",
+    "D": "apotheosis:deepshelf",
+    "G": "minecraft:diamond",
+    "T": "minecraft:emerald_block"
+  },
+  "result": {
+    "id": "apotheosis:treasure_shelf"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " T ",
+    "DOD",
+    "OOO"
+  ],
+  "key": {
+    "T": "apotheosis:scrap_tome",
+    "D": "minecraft:diamond",
+    "O": "minecraft:obsidian"
+  },
+  "result": {
+    "id": "apotheosis:apothic_enchanting_table"
+  }
+}

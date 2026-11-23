@@ -48,6 +48,13 @@ LOCALES = ("en_us", "fr_fr")
 # Our ids that map to a differently named Java id.
 JAVA_ALIASES: dict[str, tuple[str, str]] = {
     "enchantment_library": ("apothic_enchanting", "library"),
+    # Apothic Enchanting's other tables and shelves: same path, explicit so a
+    # future rename in the jars is a one-line change here.
+    "apothic_enchanting_table": ("apothic_enchanting", "apothic_enchanting_table"),
+    "ender_library": ("apothic_enchanting", "ender_library"),
+    "filtering_shelf": ("apothic_enchanting", "filtering_shelf"),
+    "geode_shelf": ("apothic_enchanting", "geode_shelf"),
+    "treasure_shelf": ("apothic_enchanting", "treasure_shelf"),
 }
 
 # The real Apotheosis gems: one item (`apotheosis:gem`) whose model selector
@@ -276,9 +283,31 @@ def add_default_variant(state: dict) -> bool:
     Our blocks are template blocks without a facing property, so a blockstate
     with only `facing=...` would bind no state and would silently leave the
     old texture in place.  The default model is the least-rotated Java variant.
+    A multipart state (a Java chiseled bookshelf, whose slot properties our
+    block does not declare) gets the same treatment: its parts are dropped and
+    the first unrotated model becomes the one state our block has.
     """
     variants = state.get("variants")
-    if not isinstance(variants, dict) or "" in variants:
+    if not isinstance(variants, dict):
+        multipart = state.get("multipart")
+        if not isinstance(multipart, list):
+            return False
+        entries: list[dict] = []
+        for part in multipart:
+            if not isinstance(part, dict):
+                continue
+            apply = part.get("apply")
+            for entry in apply if isinstance(apply, list) else [apply]:
+                if isinstance(entry, dict):
+                    entries.append(copy.deepcopy(entry))
+        chosen = _first_unrotated(entries)
+        if chosen is None:
+            return False
+        chosen.pop("weight", None)
+        state.pop("multipart", None)
+        state["variants"] = {"": chosen}
+        return True
+    if "" in variants:
         return False
     entries: list[dict] = []
     for value in variants.values():

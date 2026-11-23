@@ -488,5 +488,15 @@
   "apotheosis.affix.effect.durable": "%s%% less wear",
   "apotheosis.affix.effect.enchantment": "+%s %s",
   "apotheosis.affix.effect.retreating": "Knocks attackers back on block",
-  "apotheosis.affix.effect.telepathic": "Drops go to your inventory"
+  "apotheosis.affix.effect.telepathic": "Drops go to your inventory",
+  "block.apotheosis.filtering_shelf": "Filtering Shelf",
+  "block.apotheosis.geode_shelf": "Geode Shelf",
+  "block.apotheosis.treasure_shelf": "Treasure Shelf",
+  "block.apotheosis.ender_library": "Ender Library",
+  "block.apotheosis.apothic_enchanting_table": "Apothic Enchanting Table",
+  "apotheosis.infusion.no_match": "Nothing in your hand can be infused here.",
+  "apotheosis.infusion.single": "The table infuses one item at a time.",
+  "apotheosis.infusion.requirements": "Needs Eterna %s, Quanta %s and Arcana %s; the shelves give %s, %s and %s.",
+  "apotheosis.infusion.levels": "You need %s experience levels.",
+  "apotheosis.infusion.done": "Infused %s."
 }
