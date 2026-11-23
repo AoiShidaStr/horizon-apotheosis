@@ -79,6 +79,57 @@ ATTRIBUTES = {
     "apothic_attributes:overheal": "apothic_attributes:overheal",
 }
 
+# French names for the classes Java's own fr_fr file leaves out, plus the
+# generic words used to join several classes.  These are our own short
+# formulations, not copies of the Java assets.
+CLASS_NAMES_EN = {
+    "shears": "Shears",
+}
+
+CLASS_NAMES_FR = {
+    "bow": "Arcs",
+    "trident": "Tridents",
+    "shears": "Cisailles",
+    "anything": "Tout objet",
+}
+
+# English and French names for the vanilla and Apothic attributes the gem
+# catalogue uses.  The English side matches `attributes::Attr::name` and the
+# vanilla names `gems::attribute_name` prints today.
+ATTR_NAMES = {
+    "minecraft:attack_damage": ("Attack Damage", "Dégâts d'attaque"),
+    "minecraft:attack_speed": ("Attack Speed", "Vitesse d'attaque"),
+    "minecraft:max_health": ("Max Health", "Santé maximale"),
+    "minecraft:armor": ("Armor", "Armure"),
+    "minecraft:armor_toughness": ("Armor Toughness", "Solidité d'armure"),
+    "minecraft:knockback_resistance": ("Knockback Resistance", "Résistance au recul"),
+    "minecraft:luck": ("Luck", "Chance"),
+    "minecraft:attack_knockback": ("Attack Knockback", "Recul d'attaque"),
+    "minecraft:movement_speed": ("Movement Speed", "Vitesse de déplacement"),
+    "apothic_attributes:armor_pierce": ("Armor Pierce", "Perce-armure"),
+    "apothic_attributes:armor_shred": ("Armor Shred", "Brise-armure"),
+    "apothic_attributes:arrow_damage": ("Arrow Damage", "Dégâts des flèches"),
+    "apothic_attributes:arrow_velocity": ("Arrow Velocity", "Vitesse des flèches"),
+    "apothic_attributes:cold_damage": ("Cold Damage", "Dégâts de froid"),
+    "apothic_attributes:crit_chance": ("Crit Chance", "Chances de coup critique"),
+    "apothic_attributes:crit_damage": ("Crit Damage", "Dégâts critiques"),
+    "apothic_attributes:dodge_chance": ("Dodge Chance", "Chances d'esquive"),
+    "apothic_attributes:experience_gained": ("Experience Gained", "Expérience gagnée"),
+    "apothic_attributes:fire_damage": ("Fire Damage", "Dégâts de feu"),
+    "apothic_attributes:healing_received": ("Healing Received", "Soins reçus"),
+    "apothic_attributes:life_steal": ("Life Steal", "Vol de vie"),
+    "apothic_attributes:mining_speed": ("Mining Speed", "Vitesse de minage"),
+    "apothic_attributes:draw_speed": ("Draw Speed", "Vitesse de tension"),
+    "apothic_attributes:overheal": ("Overheal", "Soins excédentaires"),
+}
+
+ENCHANT_NAMES = {
+    "minecraft:sharpness": ("Sharpness", "Tranchant"),
+    "minecraft:protection": ("Protection", "Protection"),
+    "minecraft:fortune": ("Fortune", "Fortune"),
+    "minecraft:efficiency": ("Efficiency", "Efficacité"),
+}
+
 # Bonus types this port implements.  Every other type is listed in the gem's
 # `unsupported` field, and the README says what it would have done.
 SUPPORTED_TYPES = ("attribute", "multi_attribute", "enchantment")
@@ -129,7 +180,9 @@ def fmt_values(values: list[float | None]) -> str:
     return "[" + ", ".join(fmt_option(v) for v in values) + "]"
 
 
-def rust_gem(path: Path, lang: dict[str, str], gem_id: str) -> tuple[str, dict]:
+def rust_gem(
+    path: Path, lang: dict[str, str], fr_lang: dict[str, str], gem_id: str
+) -> tuple[str, dict]:
     data = json.loads(path.read_text(encoding="utf-8-sig"))
     weights = data.get("weights", {})
     if "weight" in weights:
@@ -140,16 +193,37 @@ def rust_gem(path: Path, lang: dict[str, str], gem_id: str) -> tuple[str, dict]:
     min_purity = data.get("min_purity", "cracked")
 
     bonuses: list[str] = []
+    bonus_lang: list[tuple[str, str, str]] = []
     unsupported: list[str] = []
     unsupported_attributes: list[str] = []
 
-    def add_bonus(kind: str, classes: list[str], body: str) -> None:
+    def add_bonus(kind: str, classes: list[str], body: str) -> int:
         class_list = ", ".join(f"GemClass::{CLASSES[c][0]}" for c in classes)
         bonuses.append(
             "        Bonus {\n"
             f"            classes: &[{class_list}],\n"
             f"            kind: {body},\n"
             "        },"
+        )
+        return len(bonuses) - 1
+
+    def class_text(classes: list[str], fr: bool) -> str:
+        names = []
+        for class_name in classes:
+            key = f"gem_class.{class_name}"
+            if fr:
+                names.append(fr_lang.get(key) or CLASS_NAMES_FR.get(class_name, class_name))
+            else:
+                names.append(lang.get(key) or CLASS_NAMES_EN.get(class_name, class_name))
+        return (" ou " if fr else " or ").join(names)
+
+    def translated_line(number: int, classes: list[str], en: str, fr: str) -> None:
+        bonus_lang.append(
+            (
+                f"apotheosis.gem.bonus.{gem_id}.{number}",
+                f"{class_text(classes, False)}: %s {en}",
+                f"{class_text(classes, True)} : %s {fr}",
+            )
         )
 
     for bonus in data.get("bonuses", []):
@@ -164,7 +238,7 @@ def rust_gem(path: Path, lang: dict[str, str], gem_id: str) -> tuple[str, dict]:
                 if attribute not in ATTRIBUTES:
                     unsupported_attributes.append(attribute)
                     continue
-                add_bonus(
+                number = add_bonus(
                     kind,
                     classes,
                     "Kind::Attribute {\n"
@@ -173,12 +247,14 @@ def rust_gem(path: Path, lang: dict[str, str], gem_id: str) -> tuple[str, dict]:
                     f"                values: {fmt_values(values_of(modifier.get('values')))},\n"
                     "            }",
                 )
+                en_name, fr_name = ATTR_NAMES[ATTRIBUTES[attribute]]
+                translated_line(number, classes, en_name, fr_name)
         elif kind == "attribute":
             attribute = bonus["attribute"]
             if attribute not in ATTRIBUTES:
                 unsupported_attributes.append(attribute)
                 continue
-            add_bonus(
+            number = add_bonus(
                 kind,
                 classes,
                 "Kind::Attribute {\n"
@@ -187,6 +263,8 @@ def rust_gem(path: Path, lang: dict[str, str], gem_id: str) -> tuple[str, dict]:
                 f"                values: {fmt_values(values_of(bonus.get('values')))},\n"
                 "            }",
             )
+            en_name, fr_name = ATTR_NAMES[ATTRIBUTES[attribute]]
+            translated_line(number, classes, en_name, fr_name)
         else:  # enchantment
             enchantment = bonus["enchantment"]
             if not enchantment.startswith("minecraft:"):
@@ -194,7 +272,7 @@ def rust_gem(path: Path, lang: dict[str, str], gem_id: str) -> tuple[str, dict]:
                 unsupported.append(f"enchantment:{enchantment}")
                 continue
             levels = [None if v is None else int(v) for v in values_of(bonus.get("values"))]
-            add_bonus(
+            number = add_bonus(
                 kind,
                 classes,
                 "Kind::Enchantment {\n"
@@ -203,6 +281,10 @@ def rust_gem(path: Path, lang: dict[str, str], gem_id: str) -> tuple[str, dict]:
                 f"                levels: [{', '.join('None' if v is None else f'Some({v})' for v in levels)}],\n"
                 "            }",
             )
+            en_name, fr_name = ENCHANT_NAMES.get(
+                enchantment, (enchantment.rsplit(':', 1)[-1].title(), enchantment.rsplit(':', 1)[-1])
+            )
+            translated_line(number, classes, en_name, fr_name)
 
     name = lang.get(f"item.apotheosis.gem.{gem_id}")
     if name is None:
@@ -225,7 +307,11 @@ def rust_gem(path: Path, lang: dict[str, str], gem_id: str) -> tuple[str, dict]:
         "    },",
     ]
     texture = path.stem
-    return "\n".join(rust), {"texture": texture, "gem_id": gem_id}
+    return "\n".join(rust), {
+        "texture": texture,
+        "gem_id": gem_id,
+        "bonus_lang": bonus_lang,
+    }
 
 
 def main() -> None:
@@ -236,13 +322,18 @@ def main() -> None:
             encoding="utf-8-sig"
         )
     )
+    fr_lang = json.loads(
+        (ref / "assets" / "apotheosis" / "lang" / "fr_fr.json").read_text(
+            encoding="utf-8-sig"
+        )
+    )
     entries: list[str] = []
     models: list[dict] = []
     for path in sorted(gems_dir.rglob("*.json")):
         if path.parent.name == "twilight":
             continue  # Twilight Forest is not part of this port
         gem_id = "apotheosis:" + path.relative_to(gems_dir).as_posix().removesuffix(".json")
-        rust, info = rust_gem(path, lang, gem_id)
+        rust, info = rust_gem(path, lang, fr_lang, gem_id)
         entries.append(rust)
         models.append(info)
 
@@ -317,6 +408,26 @@ pub const GEMS: [Gem; %d] = [
             encoding="utf-8",
             newline="\n",
         )
+    # Add every bonus line's translation key to our own lang files.  Existing
+    # keys are kept as they are, so a hand-written translation is never
+    # overwritten by a later run.
+    lang_dir = ROOT / "content" / "assets" / "apotheosis" / "lang"
+    for filename, column in (("en_us", 1), ("fr_fr", 2)):
+        path = lang_dir / f"{filename}.json"
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        added = 0
+        for info in models:
+            for entry in info["bonus_lang"]:
+                key, text = entry[0], entry[column]
+                if key not in data:
+                    data[key] = text
+                    added += 1
+        path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        print(f"added {added} gem bonus keys to {path.relative_to(ROOT)}")
     print(f"wrote {len(entries)} gems to {RUST.relative_to(ROOT)} and their models")
 
 
