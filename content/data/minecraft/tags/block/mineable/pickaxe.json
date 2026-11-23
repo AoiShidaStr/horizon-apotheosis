@@ -2,6 +2,7 @@
   "values": [
     "apotheosis:gem_cutting_table",
     "apotheosis:salvaging_table",
-    "apotheosis:reforging_table"
+    "apotheosis:reforging_table",
+    "apotheosis:simple_reforging_table"
   ]
 }

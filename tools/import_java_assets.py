@@ -86,9 +86,14 @@ APOTHEOSIS_ITEMS = {
     "luminous_crystal_shard",
     "mysterious_scrap_metal",
     "timeworn_fabric",
+    "gem_fused_slate",
+    "iron_upgrade_smithing_template",
+    "gold_upgrade_smithing_template",
+    "diamond_upgrade_smithing_template",
     "sigil_of_enhancement",
     "sigil_of_rebirth",
     "sigil_of_socketing",
+    "sigil_of_unnaming",
     "sigil_of_withdrawal",
 }
 # Block items whose Later versions live in Apotheosis rather than Apothic
@@ -97,6 +102,7 @@ APOTHEOSIS_BLOCKS = {
     "reforging_table",
     "salvaging_table",
     "gem_cutting_table",
+    "simple_reforging_table",
 }
 
 

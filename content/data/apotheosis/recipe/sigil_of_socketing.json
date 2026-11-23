@@ -1,16 +1,20 @@
 {
   "type": "minecraft:crafting_shaped",
   "category": "misc",
+  "group": "apotheosis",
   "pattern": [
-    " S ",
-    "SGS",
-    " S "
+    "GUG",
+    "EEE",
+    "GAG"
   ],
   "key": {
-    "S": "apotheosis:mysterious_scrap_metal",
-    "G": "minecraft:gold_ingot"
+    "G": "apotheosis:gem_dust",
+    "U": "minecraft:gunpowder",
+    "E": "apotheosis:gem_fused_slate",
+    "A": "minecraft:amethyst_shard"
   },
   "result": {
-    "id": "apotheosis:sigil_of_socketing"
+    "id": "apotheosis:sigil_of_socketing",
+    "count": 3
   }
 }

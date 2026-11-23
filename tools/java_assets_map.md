@@ -6,12 +6,12 @@ Source inspectée : `java-ref`
 
 ## Résumé
 
-- blocs avec blockstate Java : 27
-- objets avec modèle Java : 42
-- modèles copiés : 100
-- textures copiées : 107
-- clés lang en_us : 1725
-- clés lang fr_fr : 1601
+- blocs avec blockstate Java : 28
+- objets avec modèle Java : 48
+- modèles copiés : 107
+- textures copiées : 115
+- clés lang en_us : 1731
+- clés lang fr_fr : 1613
 
 Les ids sans équivalent Java gardent nos définitions et nos textures originales de `content/`. Les gemmes viennent de Java : une seule gemme (`apotheosis:gem`) dont le modèle choisit la texture du type qu'elle porte, ci-dessous en liste à part.
 
@@ -43,6 +43,7 @@ Les ids sans équivalent Java gardent nos définitions et nos textures originale
 | `seashelf` | `apothic_enchanting:seashelf` | `blockstates/seashelf.json` → `apothic_enchanting:block/seashelf` |
 | `sightshelf` | `apothic_enchanting:sightshelf` | `blockstates/sightshelf.json` → `apothic_enchanting:block/sightshelf` |
 | `sightshelf_t2` | `apothic_enchanting:sightshelf_t2` | `blockstates/sightshelf_t2.json` → `apothic_enchanting:block/sightshelf_t2` |
+| `simple_reforging_table` | `apotheosis:simple_reforging_table` | `blockstates/simple_reforging_table.json` → `apotheosis:block/simple_reforging_table` |
 | `soul_touched_deepshelf` | `apothic_enchanting:soul_touched_deepshelf` | `blockstates/soul_touched_deepshelf.json` → `apothic_enchanting:block/soul_touched_deepshelf` |
 | `soul_touched_sculkshelf` | `apothic_enchanting:soul_touched_sculkshelf` | `blockstates/soul_touched_sculkshelf.json` → `apothic_enchanting:block/soul_touched_sculkshelf` |
 | `stoneshelf` | `apothic_enchanting:stoneshelf` | `blockstates/stoneshelf.json` → `apothic_enchanting:block/stoneshelf` |
@@ -57,6 +58,7 @@ Les ids sans équivalent Java gardent nos définitions et nos textures originale
 | `blazing_hellshelf` | `apothic_enchanting:blazing_hellshelf` | `items/blazing_hellshelf.json` → `apothic_enchanting:item/blazing_hellshelf` |
 | `crystal_seashelf` | `apothic_enchanting:crystal_seashelf` | `items/crystal_seashelf.json` → `apothic_enchanting:item/crystal_seashelf` |
 | `deepshelf` | `apothic_enchanting:deepshelf` | `items/deepshelf.json` → `apothic_enchanting:item/deepshelf` |
+| `diamond_upgrade_smithing_template` | `apotheosis:diamond_upgrade_smithing_template` | `items/diamond_upgrade_smithing_template.json` → `apotheosis:item/diamond_upgrade_smithing_template` |
 | `dormant_deepshelf` | `apothic_enchanting:dormant_deepshelf` | `items/dormant_deepshelf.json` → `apothic_enchanting:item/dormant_deepshelf` |
 | `draconic_endshelf` | `apothic_enchanting:draconic_endshelf` | `items/draconic_endshelf.json` → `apothic_enchanting:item/draconic_endshelf` |
 | `echoing_deepshelf` | `apothic_enchanting:echoing_deepshelf` | `items/echoing_deepshelf.json` → `apothic_enchanting:item/echoing_deepshelf` |
@@ -67,13 +69,16 @@ Les ids sans équivalent Java gardent nos définitions et nos textures originale
 | `gem` | `apotheosis:gem` | `items/gem.json` → `apotheosis:item/gem` |
 | `gem_cutting_table` | `apotheosis:gem_cutting_table` | `items/gem_cutting_table.json` → `apotheosis:item/gem_cutting_table` |
 | `gem_dust` | `apotheosis:gem_dust` | `items/gem_dust.json` → `apotheosis:item/gem_dust` |
+| `gem_fused_slate` | `apotheosis:gem_fused_slate` | `items/gem_fused_slate.json` → `apotheosis:item/gem_fused_slate` |
 | `glowing_hellshelf` | `apothic_enchanting:glowing_hellshelf` | `items/glowing_hellshelf.json` → `apothic_enchanting:item/glowing_hellshelf` |
 | `godforged_pearl` | `apotheosis:godforged_pearl` | `items/godforged_pearl.json` → `apotheosis:item/godforged_pearl` |
+| `gold_upgrade_smithing_template` | `apotheosis:gold_upgrade_smithing_template` | `items/gold_upgrade_smithing_template.json` → `apotheosis:item/gold_upgrade_smithing_template` |
 | `heart_seashelf` | `apothic_enchanting:heart_seashelf` | `items/heart_seashelf.json` → `apothic_enchanting:item/heart_seashelf` |
 | `hellshelf` | `apothic_enchanting:hellshelf` | `items/hellshelf.json` → `apothic_enchanting:item/hellshelf` |
 | `improved_scrap_tome` | `apothic_enchanting:improved_scrap_tome` | `items/improved_scrap_tome.json` → `apothic_enchanting:item/improved_scrap_tome` |
 | `infused_hellshelf` | `apothic_enchanting:infused_hellshelf` | `items/infused_hellshelf.json` → `apothic_enchanting:item/infused_hellshelf` |
 | `infused_seashelf` | `apothic_enchanting:infused_seashelf` | `items/infused_seashelf.json` → `apothic_enchanting:item/infused_seashelf` |
+| `iron_upgrade_smithing_template` | `apotheosis:iron_upgrade_smithing_template` | `items/iron_upgrade_smithing_template.json` → `apotheosis:item/iron_upgrade_smithing_template` |
 | `luminous_crystal_shard` | `apotheosis:luminous_crystal_shard` | `items/luminous_crystal_shard.json` → `apotheosis:item/luminous_crystal_shard` |
 | `melonshelf` | `apothic_enchanting:melonshelf` | `items/melonshelf.json` → `apothic_enchanting:item/melonshelf` |
 | `mysterious_scrap_metal` | `apotheosis:mysterious_scrap_metal` | `items/mysterious_scrap_metal.json` → `apotheosis:item/mysterious_scrap_metal` |
@@ -88,7 +93,9 @@ Les ids sans équivalent Java gardent nos définitions et nos textures originale
 | `sigil_of_enhancement` | `apotheosis:sigil_of_enhancement` | `items/sigil_of_enhancement.json` → `apotheosis:item/sigil_of_enhancement` |
 | `sigil_of_rebirth` | `apotheosis:sigil_of_rebirth` | `items/sigil_of_rebirth.json` → `apotheosis:item/sigil_of_rebirth` |
 | `sigil_of_socketing` | `apotheosis:sigil_of_socketing` | `items/sigil_of_socketing.json` → `apotheosis:item/sigil_of_socketing` |
+| `sigil_of_unnaming` | `apotheosis:sigil_of_unnaming` | `items/sigil_of_unnaming.json` → `apotheosis:item/sigil_of_unnaming` |
 | `sigil_of_withdrawal` | `apotheosis:sigil_of_withdrawal` | `items/sigil_of_withdrawal.json` → `apotheosis:item/sigil_of_withdrawal` |
+| `simple_reforging_table` | `apotheosis:simple_reforging_table` | `items/simple_reforging_table.json` → `apotheosis:item/simple_reforging_table` |
 | `soul_touched_deepshelf` | `apothic_enchanting:soul_touched_deepshelf` | `items/soul_touched_deepshelf.json` → `apothic_enchanting:item/soul_touched_deepshelf` |
 | `soul_touched_sculkshelf` | `apothic_enchanting:soul_touched_sculkshelf` | `items/soul_touched_sculkshelf.json` → `apothic_enchanting:item/soul_touched_sculkshelf` |
 | `stoneshelf` | `apothic_enchanting:stoneshelf` | `items/stoneshelf.json` → `apothic_enchanting:item/stoneshelf` |

@@ -9,13 +9,13 @@ ignoré par git.
 
 ## Ce qui est porté
 
-39 blocs et 26 objets sont déclarés sous
-`content/data/apotheosis/horizon/`, avec 83 recettes sous
+28 blocs et 20 objets sont déclarés sous
+`content/data/apotheosis/horizon/`, avec 53 recettes sous
 `content/data/apotheosis/recipe/`.
 
-Blocs : `basic_bookshelf`, `beeshelf`, `blazing_hellshelf`, `crystal_seashelf`, `deepshelf`, `dormant_deepshelf`, `draconic_endshelf`, `echoing_deepshelf`, `echoing_sculkshelf`, `enchantment_library`, `endshelf`, `gem_block_amber`, `gem_block_amethyst`, `gem_block_bloodstone`, `gem_block_citrine`, `gem_block_jade`, `gem_block_moonstone`, `gem_block_onyx`, `gem_block_opal`, `gem_block_peridot`, `gem_block_ruby`, `gem_block_sapphire`, `gem_block_topaz`, `gem_cutting_table`, `glowing_hellshelf`, `heart_seashelf`, `hellshelf`, `infused_hellshelf`, `infused_seashelf`, `melonshelf`, `pearl_endshelf`, `reforging_table`, `salvaging_table`, `seashelf`, `sightshelf`, `sightshelf_t2`, `soul_touched_deepshelf`, `soul_touched_sculkshelf`, `stoneshelf`.
+Blocs : `basic_bookshelf`, `beeshelf`, `blazing_hellshelf`, `crystal_seashelf`, `deepshelf`, `dormant_deepshelf`, `draconic_endshelf`, `echoing_deepshelf`, `echoing_sculkshelf`, `enchantment_library`, `endshelf`, `gem_cutting_table`, `glowing_hellshelf`, `heart_seashelf`, `hellshelf`, `infused_hellshelf`, `infused_seashelf`, `melonshelf`, `pearl_endshelf`, `reforging_table`, `salvaging_table`, `seashelf`, `sightshelf`, `sightshelf_t2`, `simple_reforging_table`, `soul_touched_deepshelf`, `soul_touched_sculkshelf`, `stoneshelf`.
 
-Objets : `arcane_sands`, `extraction_tome`, `gem_amber`, `gem_amethyst`, `gem_bloodstone`, `gem_citrine`, `gem_dust`, `gem_jade`, `gem_moonstone`, `gem_onyx`, `gem_opal`, `gem_peridot`, `gem_ruby`, `gem_sapphire`, `gem_topaz`, `godforged_pearl`, `improved_scrap_tome`, `luminous_crystal_shard`, `mysterious_scrap_metal`, `prismatic_web`, `scrap_tome`, `sigil_of_enhancement`, `sigil_of_rebirth`, `sigil_of_socketing`, `sigil_of_withdrawal`, `timeworn_fabric`.
+Objets : `arcane_sands`, `diamond_upgrade_smithing_template`, `extraction_tome`, `gem`, `gem_dust`, `gem_fused_slate`, `godforged_pearl`, `gold_upgrade_smithing_template`, `improved_scrap_tome`, `iron_upgrade_smithing_template`, `luminous_crystal_shard`, `mysterious_scrap_metal`, `prismatic_web`, `scrap_tome`, `sigil_of_enhancement`, `sigil_of_rebirth`, `sigil_of_socketing`, `sigil_of_unnaming`, `sigil_of_withdrawal`, `timeworn_fabric`.
 
 ## Blocs Java absents
 
@@ -25,7 +25,6 @@ Objets : `arcane_sands`, `extraction_tome`, `gem_amber`, `gem_amethyst`, `gem_bl
 | apotheosis:boss_spawner | absent | invocateur de boss : la passerelle de boss (dimension, vagues, table de butin) n'est pas portée |
 | apotheosis:ender_gem_case | absent | non porté dans ce lot |
 | apotheosis:gem_case | hors périmètre | hors périmètre : les gemmes sont un autre chantier |
-| apotheosis:simple_reforging_table | absent | bloc de table : la recette est portable, le comportement de la table ne l'est pas sans toucher au sertissage |
 | apothic_enchanting:apothic_enchanting_table | absent | non porté dans ce lot |
 | apothic_enchanting:ender_library | absent | non porté dans ce lot |
 | apothic_enchanting:filtering_shelf | absent | non porté dans ce lot |
@@ -44,24 +43,19 @@ Objets : `arcane_sands`, `extraction_tome`, `gem_amber`, `gem_amethyst`, `gem_bl
 | apotheosis:book | absent | objet utilitaire ou décoratif : recette et comportement non portés |
 | apotheosis:boss_summoner | absent | invocateur de boss : la passerelle de boss (dimension, vagues, table de butin) n'est pas portée |
 | apotheosis:burning_spawner_rune | absent | rune de statistique : la statistique correspondante est déjà appliquée par le catalyseur vanilla (voir `native/apotheosis/api/src/spawners.rs`) |
-| apotheosis:diamond_upgrade_smithing_template | absent | non porté dans ce lot |
 | apotheosis:echoing_spawner_rune | absent | rune de statistique : la statistique correspondante est déjà appliquée par le catalyseur vanilla (voir `native/apotheosis/api/src/spawners.rs`) |
 | apotheosis:ender_gem_case | absent | non porté dans ce lot |
 | apotheosis:ender_lead | absent | objet utilitaire ou décoratif : recette et comportement non portés |
 | apotheosis:frontier_spawner_upgrade_rune | absent | rune de palier : recette portable, objet non déclaré dans ce lot |
-| apotheosis:gem | absent | non porté dans ce lot |
 | apotheosis:gem_case | hors périmètre | hors périmètre : les gemmes sont un autre chantier |
 | apotheosis:gem_cutting_table | hors périmètre | hors périmètre : les gemmes sont un autre chantier |
-| apotheosis:gem_fused_slate | absent | objet produit par infusion : `recipe/infusion` n'est pas data-driven sous Horizon |
 | apotheosis:god_fused_pearl | absent | objet produit par infusion : `recipe/infusion` n'est pas data-driven sous Horizon |
-| apotheosis:gold_upgrade_smithing_template | absent | non porté dans ce lot |
 | apotheosis:hammer | absent | objet utilitaire ou décoratif : recette et comportement non portés |
 | apotheosis:ignore_conditions_spawner_rune | absent | rune de statistique : la statistique correspondante est déjà appliquée par le catalyseur vanilla (voir `native/apotheosis/api/src/spawners.rs`) |
 | apotheosis:ignore_light_spawner_rune | absent | rune de statistique : la statistique correspondante est déjà appliquée par le catalyseur vanilla (voir `native/apotheosis/api/src/spawners.rs`) |
 | apotheosis:ignore_players_spawner_rune | absent | rune de statistique : la statistique correspondante est déjà appliquée par le catalyseur vanilla (voir `native/apotheosis/api/src/spawners.rs`) |
 | apotheosis:infused_spawner_rune | absent | objet de rune : dépend de spawner_chain, qui n'est obtenu que par la table de butin `unstable_spawner` (non portée) |
 | apotheosis:initial_health_spawner_rune | absent | rune de statistique : la statistique correspondante est déjà appliquée par le catalyseur vanilla (voir `native/apotheosis/api/src/spawners.rs`) |
-| apotheosis:iron_upgrade_smithing_template | absent | non porté dans ce lot |
 | apotheosis:lucky_foot | absent | objet utilitaire ou décoratif : recette et comportement non portés |
 | apotheosis:music_disc_flash | absent | objet utilitaire ou décoratif : recette et comportement non portés |
 | apotheosis:music_disc_glimmer | absent | objet utilitaire ou décoratif : recette et comportement non portés |
@@ -71,13 +65,12 @@ Objets : `arcane_sands`, `extraction_tome`, `gem_amber`, `gem_amethyst`, `gem_bl
 | apotheosis:potion_charm | absent | charme de potion : le type `apotheosis:potion_charm_crafting` et son infusion ne sont pas data-driven sous Horizon |
 | apotheosis:potion_charm_glow | absent | charme de potion : le type `apotheosis:potion_charm_crafting` et son infusion ne sont pas data-driven sous Horizon |
 | apotheosis:redstone_control_spawner_rune | absent | rune de statistique : la statistique correspondante est déjà appliquée par le catalyseur vanilla (voir `native/apotheosis/api/src/spawners.rs`) |
-| apotheosis:reforging_table | absent | bloc de table : la recette est portable, le comportement de la table ne l'est pas sans toucher au sertissage |
-| apotheosis:salvaging_table | absent | bloc de table : la recette est portable, le comportement de la table ne l'est pas sans toucher au sertissage |
+| apotheosis:reforging_table | absent | non porté dans ce lot |
+| apotheosis:salvaging_table | absent | non porté dans ce lot |
 | apotheosis:sigil_of_malice | absent | sceau : la recette Java est un type custom (`apotheosis:malice\|supremacy\|unnaming`), non data-driven |
 | apotheosis:sigil_of_supremacy | absent | sceau : la recette Java est un type custom (`apotheosis:malice\|supremacy\|unnaming`), non data-driven |
-| apotheosis:sigil_of_unnaming | absent | sceau : la recette Java est un type custom (`apotheosis:malice\|supremacy\|unnaming`), non data-driven |
 | apotheosis:silent_spawner_rune | absent | rune de statistique : la statistique correspondante est déjà appliquée par le catalyseur vanilla (voir `native/apotheosis/api/src/spawners.rs`) |
-| apotheosis:simple_reforging_table | absent | bloc de table : la recette est portable, le comportement de la table ne l'est pas sans toucher au sertissage |
+| apotheosis:simple_reforging_table | absent | non porté dans ce lot |
 | apotheosis:spawn_range_spawner_rune | absent | rune de statistique : la statistique correspondante est déjà appliquée par le catalyseur vanilla (voir `native/apotheosis/api/src/spawners.rs`) |
 | apotheosis:spawner_chain | absent | aucune recette en Java : butin de l'explosion d'un spawner (`unstable_spawner`), table de butin non portée |
 | apotheosis:spawner_rune | absent | objet de rune : dépend de spawner_chain, qui n'est obtenu que par la table de butin `unstable_spawner` (non portée) |
@@ -153,7 +146,6 @@ Objets : `arcane_sands`, `extraction_tome`, `gem_amber`, `gem_amethyst`, `gem_bl
 | diamond_armor | absent | recyclage par groupe d'objets : logique native, pas de type data-driven |
 | diamond_horse_armor | absent | recyclage par groupe d'objets : logique native, pas de type data-driven |
 | diamond_tools | absent | recyclage par groupe d'objets : logique native, pas de type data-driven |
-| diamond_upgrade_smithing_template | absent | recette vanilla portable : résultat ou ingrédient absent |
 | echoing | absent | type non porté : apothic_spawners:spawner_modifier |
 | echoing_spawner_rune | absent | recette vanilla portable : résultat ou ingrédient absent |
 | ender_gem_case | absent | type non porté : apothic_enchanting:keep_nbt_infusion |
@@ -163,11 +155,9 @@ Objets : `arcane_sands`, `extraction_tome`, `gem_amber`, `gem_amethyst`, `gem_bl
 | frontier | absent | recette vanilla portable : résultat ou ingrédient absent |
 | frontier_spawner_upgrade_rune | absent | recette vanilla portable : résultat ou ingrédient absent |
 | gem_case | absent | recette vanilla portable : résultat ou ingrédient absent |
-| gem_fused_slate | absent | recette vanilla portable : résultat ou ingrédient absent |
 | god_fused_pearl | absent | infusion d'enchantement : requires Eterna/Quanta/Arcana, pas de type data-driven |
 | gold_armor | absent | recyclage par groupe d'objets : logique native, pas de type data-driven |
 | gold_tools | absent | recyclage par groupe d'objets : logique native, pas de type data-driven |
-| gold_upgrade_smithing_template | absent | recette vanilla portable : résultat ou ingrédient absent |
 | golden_horse_armor | absent | recyclage par groupe d'objets : logique native, pas de type data-driven |
 | ignore_conditions | absent | type non porté : apothic_spawners:spawner_modifier |
 | ignore_conditions_spawner_rune | absent | recette vanilla portable : résultat ou ingrédient absent |
@@ -181,7 +171,6 @@ Objets : `arcane_sands`, `extraction_tome`, `gem_amber`, `gem_amethyst`, `gem_bl
 | iron_armor | absent | recyclage par groupe d'objets : logique native, pas de type data-driven |
 | iron_horse_armor | absent | recyclage par groupe d'objets : logique native, pas de type data-driven |
 | iron_tools | absent | recyclage par groupe d'objets : logique native, pas de type data-driven |
-| iron_upgrade_smithing_template | absent | recette vanilla portable : résultat ou ingrédient absent |
 | leather_armor | absent | recyclage par groupe d'objets : logique native, pas de type data-driven |
 | leather_horse_armor | absent | recyclage par groupe d'objets : logique native, pas de type data-driven |
 | malice | absent | sceau de malveillance : type custom |
@@ -200,10 +189,8 @@ Objets : `arcane_sands`, `extraction_tome`, `gem_amber`, `gem_amethyst`, `gem_bl
 | redstone_control | absent | type non porté : apothic_spawners:spawner_modifier |
 | redstone_control_spawner_rune | absent | recette vanilla portable : résultat ou ingrédient absent |
 | sigil_add_sockets | absent | ajout de châsses : autre chantier |
-| sigil_of_unnaming | absent | recette vanilla portable : résultat ou ingrédient absent |
 | silent | absent | type non porté : apothic_spawners:spawner_modifier |
 | silent_spawner_rune | absent | recette vanilla portable : résultat ou ingrédient absent |
-| simple_reforging_table | absent | recette vanilla portable : résultat ou ingrédient absent |
 | socketing | absent | sertissage : autre chantier |
 | spawn_range | absent | type non porté : apothic_spawners:spawner_modifier |
 | spawn_range_spawner_rune | absent | recette vanilla portable : résultat ou ingrédient absent |

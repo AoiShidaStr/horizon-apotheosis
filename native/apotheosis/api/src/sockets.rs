@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
+use crate::affixes;
 use crate::attributes::{self, Attr};
 use crate::gems::{self, Resolved};
 use crate::{apply_affixes, is_equipment, Rng, Tier};
@@ -87,6 +88,53 @@ pub fn upgrade_cost(target: Purity) -> Option<(u32, &'static [(&'static str, u32
         .find(|(purity, _, _)| *purity == target)
         .map(|(_, dust, materials)| (*dust, *materials))
 }
+
+/// Java's `data/apotheosis/recipe/reforging/*.json`, by the rarity reforged:
+/// experience levels, rarity material and sigils of rebirth. Ancient is this
+/// port's extension and reuses the mythic row, as it does for affix ranges.
+pub const REFORGE_COSTS: &[(Tier, i32, u32, u32)] = &[
+    (Tier::Common, 2, 1, 0),
+    (Tier::Uncommon, 5, 2, 1),
+    (Tier::Rare, 15, 2, 2),
+    (Tier::Epic, 30, 2, 4),
+    (Tier::Mythic, 50, 3, 5),
+];
+
+/// What reforging a piece of `tier` at `table` costs, or none where Java's
+/// recipe does not name that table. The simple table serves common, uncommon
+/// and rare only; the reforging table serves every rarity.
+pub fn reforge_cost(tier: Tier, table: Table) -> Option<(i32, u32, u32)> {
+    let row = REFORGE_COSTS
+        .iter()
+        .find(|(rarity, ..)| *rarity == tier || (tier == Tier::Ancient && *rarity == Tier::Mythic))?;
+    let (_, levels, material, sigils) = *row;
+    if table == Table::SimpleReforging && tier > Tier::Rare {
+        return None;
+    }
+    Some((levels, material, sigils))
+}
+
+/// Java's `recipe/salvaging/gem/*.json`: the gem dust a gem of each purity
+/// yields, inclusive at both ends.
+pub const GEM_SALVAGE: &[(Purity, u32, u32)] = &[
+    (Purity::Cracked, 1, 2),
+    (Purity::Chipped, 1, 3),
+    (Purity::Flawed, 2, 4),
+    (Purity::Normal, 3, 5),
+    (Purity::Flawless, 4, 7),
+    (Purity::Perfect, 5, 10),
+];
+
+/// How much gem dust salvaging a gem of `purity` gives.
+pub fn gem_salvage_yield(purity: Purity, rng: &mut Rng) -> u32 {
+    let (_, low, high) = GEM_SALVAGE
+        .iter()
+        .find(|(step, ..)| *step == purity)
+        .copied()
+        .unwrap_or((Purity::Normal, 3, 5));
+    low + rng.below(u64::from(high - low) + 1) as u32
+}
+
 /// The most sockets any piece can have.
 pub const MAX_SOCKETS: u8 = 3;
 
@@ -360,23 +408,19 @@ pub fn salvage_material(tier: Tier) -> (&'static str, u64) {
         Tier::Rare => ("apotheosis:luminous_crystal_shard", 4),
         Tier::Epic => ("apotheosis:arcane_sands", 4),
         Tier::Mythic => ("apotheosis:godforged_pearl", 4),
-        Tier::Ancient => ("apotheosis:godforged_pearl", 6),
+        // Ancient is this port's top step; Java's mythic salvaging recipe is
+        // the closest one, so it gives the same 1..=4 pearls.
+        Tier::Ancient => ("apotheosis:godforged_pearl", 4),
     }
 }
 
 /// What a salvage gives: 1..=max of the tier's material, by the same roll
-/// Apotheosis' salvaging recipes use, plus gem dust from the piece's tier.
-pub fn salvage_yield(tier: Tier, rng: &mut Rng) -> (String, u32, u32) {
+/// Apotheosis' `recipe/salvaging/*.json` use. Those recipes name the rarity
+/// material alone, so no gem dust is added here.
+pub fn salvage_yield(tier: Tier, rng: &mut Rng) -> (String, u32) {
     let (material, max) = salvage_material(tier);
     let count = 1 + rng.below(max) as u32;
-    let dust = match tier {
-        Tier::Common | Tier::Uncommon => 0,
-        Tier::Rare => 1,
-        Tier::Epic => 2,
-        Tier::Mythic => 3,
-        Tier::Ancient => 4,
-    };
-    (material.to_owned(), count, dust)
+    (material.to_owned(), count)
 }
 
 /// The rarity component's name, for the tooltip line of a socketed gem.
@@ -823,6 +867,8 @@ pub enum Seal {
     Rebirth,
     /// Raises the piece's rarity by one step, rerolling at the new one.
     Enhancement,
+    /// Removes the affix name this port wrote, never a player's own name.
+    Unnaming,
 }
 
 impl Seal {
@@ -832,6 +878,7 @@ impl Seal {
             Seal::Withdrawal => "item.apotheosis.sigil_of_withdrawal.desc",
             Seal::Rebirth => "item.apotheosis.sigil_of_rebirth.desc",
             Seal::Enhancement => "item.apotheosis.sigil_of_enhancement.desc",
+            Seal::Unnaming => "item.apotheosis.sigil_of_unnaming.desc",
         }
     }
 
@@ -841,6 +888,7 @@ impl Seal {
             Seal::Withdrawal => "Removes all socketed gems from an item",
             Seal::Rebirth => "Rerolls an affixed item's rarity and affixes",
             Seal::Enhancement => "Raises an affixed item's rarity by one step",
+            Seal::Unnaming => "Removes the affix name from an item",
         }
     }
 }
@@ -852,6 +900,7 @@ pub fn seal(item: &str) -> Option<Seal> {
         "apotheosis:sigil_of_withdrawal" => Some(Seal::Withdrawal),
         "apotheosis:sigil_of_rebirth" => Some(Seal::Rebirth),
         "apotheosis:sigil_of_enhancement" => Some(Seal::Enhancement),
+        "apotheosis:sigil_of_unnaming" => Some(Seal::Unnaming),
         _ => None,
     }
 }
@@ -860,6 +909,7 @@ pub fn seal(item: &str) -> Option<Seal> {
 /// what its command does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Table {
+    SimpleReforging,
     Reforging,
     Salvaging,
     Cutting,
@@ -867,6 +917,7 @@ pub enum Table {
 
 pub fn table(block: &str) -> Option<Table> {
     match block {
+        "apotheosis:simple_reforging_table" => Some(Table::SimpleReforging),
         "apotheosis:reforging_table" => Some(Table::Reforging),
         "apotheosis:salvaging_table" => Some(Table::Salvaging),
         "apotheosis:gem_cutting_table" => Some(Table::Cutting),
@@ -887,6 +938,8 @@ pub enum Action {
     Withdraw,
     Rebirth,
     Enhance,
+    Unnaming,
+    SalvageGem,
 }
 
 /// What a delayed action was validated on: the stacks' item ids and counts,
@@ -930,6 +983,29 @@ fn fingerprint(stack: &ItemStack) -> Fingerprint {
     }
 }
 
+/// What a delayed reforge already took, so a hand that changed can be paid
+/// back in full: the levels, the rarity material and the sigils.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Charge {
+    levels: i32,
+    material: Option<(&'static str, u32)>,
+    sigils: u32,
+}
+
+fn refund(host: &mut dyn Host, player: u128, charge: &Charge) {
+    if charge.levels != 0 {
+        let _ = host.give_levels(player, charge.levels);
+    }
+    if let Some((item, count)) = charge.material {
+        if count > 0 {
+            let _ = host.give_items(item, count);
+        }
+    }
+    if charge.sigils > 0 {
+        let _ = host.give_items("apotheosis:sigil_of_rebirth", charge.sigils);
+    }
+}
+
 /// An action waiting for the next tick, with the slot it came from and the
 /// stacks it was validated on.
 #[derive(Clone, Debug, PartialEq)]
@@ -941,6 +1017,8 @@ struct Pending {
     main: Fingerprint,
     /// The off-hand piece the click saw, for the actions that work on one.
     target: Option<Fingerprint>,
+    /// What a reforge was charged, given back if the hand changed.
+    charge: Charge,
 }
 
 impl Pending {
@@ -950,7 +1028,13 @@ impl Pending {
             slot,
             main: fingerprint(main),
             target: target.map(fingerprint),
+            charge: Charge::default(),
         }
+    }
+
+    fn with_charge(mut self, charge: Charge) -> Self {
+        self.charge = charge;
+        self
     }
 
     /// Whether the tick on `slot`, holding `main` and `target`, is still the
@@ -1057,11 +1141,94 @@ pub fn begin_salvage(host: &mut dyn Host, player: u128, slot: i32) {
 /// charged for it. The piece is remembered so the tick rerolls that one, or
 /// gives the levels back.
 pub fn begin_reforge(host: &mut dyn Host, player: u128, slot: i32) {
+    let charge = Charge {
+        levels: crate::REFORGE_COST,
+        ..Charge::default()
+    };
     let Some(stack) = host.held_stack(player) else {
-        let _ = host.give_levels(player, crate::REFORGE_COST);
+        refund(host, player, &charge);
         return;
     };
-    set_pending(player, Pending::new(Action::Reforge, slot, &stack, None));
+    set_pending(
+        player,
+        Pending::new(Action::Reforge, slot, &stack, None).with_charge(charge),
+    );
+}
+
+/// Reforging at a table with Java's recipe costs: experience levels, the
+/// rarity's material and sigils of rebirth. Everything is taken before the
+/// action is queued and given back in full if any part is missing.
+fn begin_table_reforge(
+    host: &mut dyn Host,
+    player: u128,
+    xp_level: i32,
+    slot: i32,
+    table: Table,
+    stack: &ItemStack,
+) {
+    let tier = tier_of(stack).unwrap_or(Tier::Common);
+    let Some((levels, material_count, sigils)) = reforge_cost(tier, table) else {
+        host.feedback(Text::translate_with_fallback(
+            "apotheosis.table.reforge.rarity",
+            "This table cannot reforge that rarity; use the reforging table.",
+            &[],
+        ));
+        return;
+    };
+    if xp_level < levels {
+        host.feedback(Text::translate_with_fallback(
+            "apotheosis.reforge.levels",
+            "Reforging costs %s experience levels.",
+            &[Text::literal(levels.to_string())],
+        ));
+        return;
+    }
+    let (material, _) = salvage_material(tier);
+    let got_material = host.take_items(material, material_count);
+    if got_material < material_count {
+        if got_material > 0 {
+            let _ = host.give_items(material, got_material);
+        }
+        host.feedback(Text::translate_with_fallback(
+            "apotheosis.reforge.missing",
+            "You do not have the materials this reforge needs.",
+            &[],
+        ));
+        return;
+    }
+    let got_sigils = if sigils > 0 {
+        host.take_items("apotheosis:sigil_of_rebirth", sigils)
+    } else {
+        0
+    };
+    if got_sigils < sigils {
+        let _ = host.give_items(material, material_count);
+        if got_sigils > 0 {
+            let _ = host.give_items("apotheosis:sigil_of_rebirth", got_sigils);
+        }
+        host.feedback(Text::translate_with_fallback(
+            "apotheosis.reforge.missing",
+            "You do not have the materials this reforge needs.",
+            &[],
+        ));
+        return;
+    }
+    if !host.give_levels(player, -levels) {
+        let _ = host.give_items(material, material_count);
+        if sigils > 0 {
+            let _ = host.give_items("apotheosis:sigil_of_rebirth", sigils);
+        }
+        return;
+    }
+    let charge = Charge {
+        levels,
+        material: Some((material, material_count)),
+        sigils,
+    };
+    set_pending(
+        player,
+        Pending::new(Action::Reforge, slot, stack, None).with_charge(charge),
+    );
 }
 
 /// The counter this module's rolls draw from, mixed with the tick they run on:
@@ -1094,9 +1261,9 @@ pub fn inventory_tick(host: &mut dyn Host, event: &mut InventoryTickEvent) {
     // The clicked slot, never whichever slot is selected now.
     let Some(main) = host.carried_stack(pending.slot).cloned() else {
         // The piece left the slot before the tick: a reforge paid for it, so
-        // give the levels back like any other hand change.
+        // give everything back like any other hand change.
         if pending.action == Action::Reforge {
-            let _ = host.give_levels(player.uuid, crate::REFORGE_COST);
+            refund(host, player.uuid, &pending.charge);
         }
         return;
     };
@@ -1108,7 +1275,7 @@ pub fn inventory_tick(host: &mut dyn Host, event: &mut InventoryTickEvent) {
         // The hand changed since the click: nothing is spent and nothing is
         // destroyed. A reforge was paid for before the tick, so refund it.
         if pending.action == Action::Reforge {
-            let _ = host.give_levels(player.uuid, crate::REFORGE_COST);
+            refund(host, player.uuid, &pending.charge);
         }
         return;
     }
@@ -1117,6 +1284,7 @@ pub fn inventory_tick(host: &mut dyn Host, event: &mut InventoryTickEvent) {
         Action::Reforge => reforge(host, pending.slot, &main, player.uuid, &pending.main),
         Action::Salvage => salvage(host, pending.slot, &main, player.uuid, &pending.main),
         Action::Cut => cut(host, pending.slot, &main),
+        Action::SalvageGem => salvage_gem(host, pending.slot, &main),
         other => {
             let Some(off) = target else {
                 return;
@@ -1128,6 +1296,7 @@ pub fn inventory_tick(host: &mut dyn Host, event: &mut InventoryTickEvent) {
                 Action::Withdraw => withdraw(host, pending.slot, &main, &off, player.uuid),
                 Action::Rebirth => rebirth(host, pending.slot, &main, &off),
                 Action::Enhance => enhance(host, pending.slot, &main, &off),
+                Action::Unnaming => unname(host, pending.slot, &main, &off),
                 _ => {}
             }
         }
@@ -1165,6 +1334,7 @@ pub fn use_seal(host: &mut dyn Host, event: &UseItemEvent<'_>, kind: Seal) -> Fl
                 Seal::Withdrawal => Action::Withdraw,
                 Seal::Rebirth => Action::Rebirth,
                 Seal::Enhancement => Action::Enhance,
+                Seal::Unnaming => Action::Unnaming,
             },
             i32::from(player.selected_slot),
             &main,
@@ -1186,10 +1356,12 @@ pub fn use_item_on(host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow 
     // The click belongs to the table, never to the block under it: a table
     // that opened a crafting grid on a misclick would hide its own use.
     match table {
-        Table::Reforging => {
-            // Plain gear too: the command rolls affixes onto it, and so does
-            // the table; `reforge` itself says what it cannot work on.
-            if !is_equipment(&event.stack.item) {
+        Table::SimpleReforging | Table::Reforging => {
+            // Java's tables take the target rarity from a rarity material in
+            // their own grid; a click can only reforge a piece that already
+            // has a rarity, which is the piece in hand. Plain gear stays on
+            // the `reforge` command, a port extension.
+            if !is_equipment(&event.stack.item) || tier_of(&event.stack).is_none() {
                 host.feedback(Text::translate_with_fallback(
                     "apotheosis.table.reforge.hint",
                     "The reforging table works on the affixed piece in your hand.",
@@ -1197,15 +1369,29 @@ pub fn use_item_on(host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow 
                 ));
                 return Flow::Cancel;
             }
-            crate::reforge(
+            begin_table_reforge(
                 host,
                 player.uuid,
                 player.xp_level,
                 i32::from(player.selected_slot),
+                table,
+                &event.stack,
             );
             Flow::Cancel
         }
         Table::Salvaging => {
+            if gems::of_stack(&event.stack).is_some() {
+                set_pending(
+                    player.uuid,
+                    Pending::new(
+                        Action::SalvageGem,
+                        i32::from(player.selected_slot),
+                        &event.stack,
+                        None,
+                    ),
+                );
+                return Flow::Cancel;
+            }
             if !has_affixes(&event.stack) {
                 host.feedback(Text::translate_with_fallback(
                     "apotheosis.table.salvage.hint",
@@ -1383,6 +1569,74 @@ fn enhance(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemSt
             next.name(),
             &[],
         )],
+    ));
+}
+
+/// Removes only the name this port generated from a piece's affixes. A name a
+/// player set themselves is left alone and the sigil is not spent.
+fn unname(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemStack) {
+    const CUSTOM_NAME: &str = "minecraft:custom_name";
+    let name = gear
+        .data()
+        .and_then(|data| data.other(CUSTOM_NAME))
+        .cloned();
+    let Some(name) = name else {
+        host.feedback(Text::translate_with_fallback(
+            "apotheosis.unnaming.none",
+            "That piece has no name to remove.",
+            &[],
+        ));
+        return;
+    };
+    if !affixes::is_generated_name(&name) {
+        host.feedback(Text::translate_with_fallback(
+            "apotheosis.unnaming.custom",
+            "That name was not written by affixes; it is left alone.",
+            &[],
+        ));
+        return;
+    }
+    let mut piece = gear.clone();
+    piece
+        .data_mut()
+        .set_other(CUSTOM_NAME, Option::<Tag>::None);
+    write_slot(host, OFFHAND, piece);
+    consume_seal(host, slot, seal_stack);
+    host.feedback(Text::translate_with_fallback(
+        "apotheosis.unnaming.done",
+        "The affix name was removed.",
+        &[],
+    ));
+}
+
+/// Java's gem salvaging recipes: a gem breaks into gem dust and is consumed.
+/// If the dust cannot fit, the gem is kept.
+fn salvage_gem(host: &mut dyn Host, slot: i32, gem_stack: &ItemStack) {
+    if gems::of_stack(gem_stack).is_none() {
+        return;
+    }
+    let purity = purity_of(gem_stack);
+    let mut rng = Rng::new(next_roll());
+    let dust = gem_salvage_yield(purity, &mut rng);
+    let given = host.give_items("apotheosis:gem_dust", dust);
+    if given < dust {
+        if given > 0 {
+            let _ = host.take_items("apotheosis:gem_dust", given);
+        }
+        host.feedback(Text::translate_with_fallback(
+            "apotheosis.salvage.no_room",
+            "Some of it did not fit in your inventory.",
+            &[],
+        ));
+        return;
+    }
+    let mut left = gem_stack.clone();
+    left.count = left.count.saturating_sub(1);
+    write_slot(host, slot, left);
+    host.feedback(Text::translate_with_fallback(
+        "apotheosis.salvage.gem",
+        "Salvaged into %s gem dust.",
+        &[Text::literal(dust.to_string())],
     ));
 }
 
@@ -1652,7 +1906,7 @@ fn salvage(
     }
     let tier = tier_of(main).unwrap_or(Tier::Common);
     let mut rng = Rng::new(next_roll());
-    let (material, count, dust) = salvage_yield(tier, &mut rng);
+    let (material, count) = salvage_yield(tier, &mut rng);
     // The gems come back at the purity they were socketed with, before the
     // piece is destroyed: if one of them cannot fit, nothing is salvaged. The
     // ones already handed out are taken back so the player gains nothing.
@@ -1675,9 +1929,6 @@ fn salvage(
     }
     write_slot(host, slot, emptied(main));
     let given = host.give_items(&material, count);
-    if dust > 0 {
-        let _ = host.give_items("apotheosis:gem_dust", dust);
-    }
     host.feedback(Text::translate_with_fallback(
         "apotheosis.salvage.done",
         "Salvaged into %s.",
@@ -1870,10 +2121,98 @@ mod tests {
         assert_eq!(salvage_material(Tier::Epic).0, "apotheosis:arcane_sands");
         assert_eq!(salvage_material(Tier::Mythic).0, "apotheosis:godforged_pearl");
         for tier in [Tier::Common, Tier::Rare, Tier::Ancient] {
-            let (material, count, _) = salvage_yield(tier, &mut rng);
+            let (material, count) = salvage_yield(tier, &mut rng);
             assert_eq!(material, salvage_material(tier).0);
             assert!((1..=salvage_material(tier).1).contains(&u64::from(count)));
         }
+    }
+
+    #[test]
+    fn reforge_costs_are_the_five_java_recipes_and_the_simple_table_stops_at_rare() {
+        for (index, tier) in [
+            Tier::Common,
+            Tier::Uncommon,
+            Tier::Rare,
+            Tier::Epic,
+            Tier::Mythic,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let expected = [(2, 1, 0), (5, 2, 1), (15, 2, 2), (30, 2, 4), (50, 3, 5)][index];
+            assert_eq!(reforge_cost(tier, Table::Reforging), Some(expected));
+            if tier <= Tier::Rare {
+                assert_eq!(reforge_cost(tier, Table::SimpleReforging), Some(expected));
+            } else {
+                assert_eq!(reforge_cost(tier, Table::SimpleReforging), None);
+            }
+        }
+        // Ancient reuses the mythic row, and only the full table serves it.
+        assert_eq!(reforge_cost(Tier::Ancient, Table::Reforging), Some((50, 3, 5)));
+        assert_eq!(reforge_cost(Tier::Ancient, Table::SimpleReforging), None);
+    }
+
+    #[test]
+    fn gem_salvaging_matches_the_six_java_ranges() {
+        for (purity, low, high) in [
+            (Purity::Cracked, 1, 2),
+            (Purity::Chipped, 1, 3),
+            (Purity::Flawed, 2, 4),
+            (Purity::Normal, 3, 5),
+            (Purity::Flawless, 4, 7),
+            (Purity::Perfect, 5, 10),
+        ] {
+            let mut seen = Vec::new();
+            for seed in 0..256 {
+                let mut rng = Rng::new(seed);
+                let dust = gem_salvage_yield(purity, &mut rng);
+                assert!((low..=high).contains(&dust), "{purity:?} gave {dust}");
+                if !seen.contains(&dust) {
+                    seen.push(dust);
+                }
+            }
+            assert_eq!(seen.len() as u32, high - low + 1, "{purity:?} is too narrow");
+        }
+    }
+
+    #[test]
+    fn the_unnaming_sigil_removes_generated_names_only() {
+        let gear = affixed("minecraft:diamond_sword", Tier::Rare, 71);
+        assert!(gear
+            .data()
+            .and_then(|data| data.other("minecraft:custom_name"))
+            .is_some());
+        let sigil = ItemStack::new("apotheosis:sigil_of_unnaming", 2);
+        let mut host = Fake::default();
+        host.slots.insert(1, sigil.clone());
+        host.slots.insert(OFFHAND, gear.clone());
+        unname(&mut host, 1, &sigil, &gear);
+
+        let named = host.slots.get(&OFFHAND).unwrap();
+        assert_eq!(named.data().and_then(|data| data.other("minecraft:custom_name")), None);
+        assert_eq!(host.slots.get(&1).unwrap().count, 1, "the sigil was not spent");
+
+        // A name the player typed is not an affix name: it stays and so does
+        // the sigil.
+        let mut mine = affixed("minecraft:diamond_sword", Tier::Rare, 72);
+        mine.data_mut()
+            .set_other("minecraft:custom_name", Some(Tag::String("Excalibur".into())));
+        let sigil = ItemStack::new("apotheosis:sigil_of_unnaming", 2);
+        let mut host = Fake::default();
+        host.slots.insert(1, sigil.clone());
+        host.slots.insert(OFFHAND, mine.clone());
+        unname(&mut host, 1, &sigil, &mine);
+
+        assert_eq!(
+            host.slots
+                .get(&OFFHAND)
+                .unwrap()
+                .data()
+                .and_then(|data| data.other("minecraft:custom_name"))
+                .cloned(),
+            Some(Tag::String("Excalibur".into()))
+        );
+        assert_eq!(host.slots.get(&1).unwrap().count, 2);
     }
 
     #[test]
@@ -1920,6 +2259,10 @@ mod tests {
         assert_eq!(seal("apotheosis:gem_opal"), None);
 
         assert_eq!(table("apotheosis:reforging_table"), Some(Table::Reforging));
+        assert_eq!(
+            table("apotheosis:simple_reforging_table"),
+            Some(Table::SimpleReforging)
+        );
         assert_eq!(table("apotheosis:salvaging_table"), Some(Table::Salvaging));
         assert_eq!(table("apotheosis:gem_cutting_table"), Some(Table::Cutting));
         assert_eq!(table("minecraft:crafting_table"), None);

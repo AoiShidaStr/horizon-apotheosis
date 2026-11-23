@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "group": "apotheosis",
+  "pattern": [
+    "GGG",
+    "FFF",
+    "GGG"
+  ],
+  "key": {
+    "G": "apotheosis:gem_fused_slate",
+    "F": "minecraft:flint"
+  },
+  "result": {
+    "id": "apotheosis:sigil_of_unnaming",
+    "count": 6
+  }
+}

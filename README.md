@@ -119,36 +119,54 @@ a85af177 and covered by unit tests only.
   scrap/fabric/crystal to chip it, up to 9 dust and crystal/sands/pearl for
   Flawless. Java has no perfect recipe, so a gem stops at Flawless.
 - **Reforging an affixed piece**: `/apoth reforge` on an affixed piece held in
-  the main hand rerolls its rarity and affixes for 3 levels, keeping the piece
-  and the gems in its sockets; the work is done on the next inventory tick, so
-  the stack the command saw is the stack that is rewritten.
+  the main hand rerolls its rarity and affixes for 3 levels (a command-only
+  port cost), keeping the piece and the gems in its sockets; the work is done
+  on the next inventory tick, so the stack the command saw is the stack that is
+  rewritten. The tables charge the five Java `recipe/reforging` rows instead:
+  levels 2/5/15/30/50, rarity material 1/2/2/2/3 and sigils of rebirth
+  0/1/2/4/5 for Common→Mythic, all taken from the inventory before the reroll
+  and given back in full if any part is short or the hand changes. Ancient is
+  this port's extension and uses the mythic row.
 - **Salvaging**: `/apoth salvage` on an affixed piece breaks it into 1–4 of its
-  rarity's material, gem dust (1–4 by rarity) and gives back every socketed
-  gem at the purity it had.
-- **Four sigils** (`sigil_of_socketing`, `sigil_of_withdrawal`,
-  `sigil_of_rebirth`, `sigil_of_enhancement`), each a stackable item with its
-  own 16×16 wax-seal texture, en_us/fr_fr name and description line, a shaped
-  recipe from the rarity materials (iron and gold, fabric and iron, crystal and
-  blaze powder, arcane sands and an emerald), and a place in the creative tab.
-  A sigil is used with the affixed piece in the **off hand** and the sigil in
-  the **main hand**, right click: socketing adds one socket up to the maximum,
-  withdrawal takes every socketed gem back out at the purity it had, rebirth
-  rerolls the piece's rarity and affixes (gems kept), enhancement moves the
-  rarity one step up (Common→…→Ancient) and rerolls at the new tier. The sigil
-  is used up on the next inventory tick, so a hand that changed costs nothing.
-- **Three working tables as blocks**, with Apotheosis' ids
-  (`gem_cutting_table`, `salvaging_table`, `reforging_table`): a real block
-  declaration (oak planks template, own top and side textures, `cube_bottom_top`
-  model), item, blockstate, block loot table, pickaxe tag, shaped recipe (iron
-  and amethyst around gem dust, iron and planks, gold and scrap metal), and the
-  creative tab. Right click with the piece in hand (`use_item_on`, API 13): the
-  reforging table does what `/apoth reforge` does (3 levels), the salvaging
-  table what `/apoth salvage` does, and the gem cutting table spends the Java
-  purity-upgrade cost (gem dust and rarity materials) from the inventory to
-  raise the held gem's purity one step (`Host::take_items`, everything refunded
-  if any ingredient is short). The click is
-  always claimed, so a misclick shows the table's hint instead of opening
-  something else.
+  rarity's material (no gem dust: the Java salvaging recipes name the material
+  alone) and gives back every socketed gem at the purity it had. The salvaging
+  table also breaks a gem into the Java gem-dust range for its purity
+  (1–2 cracked, 1–3 chipped, 2–4 flawed, 3–5 normal, 4–7 flawless, 5–10
+  perfect).
+- **Five sigils** (`sigil_of_socketing`, `sigil_of_withdrawal`,
+  `sigil_of_rebirth`, `sigil_of_enhancement`, `sigil_of_unnaming`), each a
+  stackable item with its own 16×16 wax-seal texture, en_us/fr_fr name and
+  description line, and the Java shaped recipe in gem dust and gem-fused slate
+  (with amethyst and gunpowder, ender pearls and a lava bucket, flint,
+  godforged pearl), and a place in the creative tab. A sigil is used with the
+  affixed piece in the **off hand** and the sigil in the **main hand**, right
+  click: socketing adds one socket up to the maximum, withdrawal takes every
+  socketed gem back out at the purity it had, rebirth rerolls the piece's
+  rarity and affixes (gems kept), enhancement moves the rarity one step up
+  (Common→…→Ancient) and rerolls at the new tier, and unnaming removes the
+  name the affix roll wrote — never a name the player typed, which leaves the
+  sigil unspent. The sigil is used up on the next inventory tick, so a hand
+  that changed costs nothing.
+- **Four working tables as blocks**, with Apotheosis' ids
+  (`gem_cutting_table`, `salvaging_table`, `reforging_table`,
+  `simple_reforging_table`): a real block declaration (oak planks template for
+  the three old ones, smooth stone for the simple table, own top and side
+  textures, `cube_bottom_top` model), item, blockstate, block loot table,
+  pickaxe tag, the Java shaped recipe, and the creative tab. Right click with
+  the piece in hand (`use_item_on`, API 13): the reforging table charges the
+  Java row for every rarity, the simple table only Common/Uncommon/Rare, the
+  salvaging table what `/apoth salvage` does (or gem dust for a held gem), and
+  the gem cutting table spends the Java purity-upgrade cost (gem dust and
+  rarity materials) from the inventory to raise the held gem's purity one step
+  (`Host::take_items`, everything refunded if any ingredient is short). The
+  click is always claimed, so a misclick shows the table's hint instead of
+  opening something else.
+- **The four new Java items**: `gem_fused_slate` (8 from deepslate and gem
+  dust), the iron, gold and diamond smithing templates (7 diamonds around a
+  template, 7 gold, 7 iron), `sigil_of_unnaming` and
+  `simple_reforging_table` are declared, craftable and in the creative tab.
+  Their Java textures and models come in through the git-ignored
+  `content-java/` layer; without it a vanilla placeholder texture is used.
 - **Chest gems roll their purity** (`loot_function`, API 133): the gem pool
   `loot_table_load` adds to vanilla chests carries the mod's own
   `apotheosis:gem_purity` function, which draws from the loot roll's seed with
@@ -169,10 +187,20 @@ a85af177 and covered by unit tests only.
   a gem in, no preview of the result, and no slot-level picking of which gem to
   pull out. A chest-style server menu (API 10) could show one, at the cost of
   modelling every click by hand.
-- **The other 1.21 sigils are not ported**: `sigil_of_unnaming` (this port never
-  writes a custom name onto an affixed piece), `sigil_of_malice` and
-  `sigil_of_supremacy` (no overcharged-affix state), and the augmenting table
-  they feed (no per-affix level).
+- **`sigil_of_malice` and `sigil_of_supremacy` are not ported**: both need an
+  overcharged-affix state this port does not have, and the augmenting table
+  they feed has no per-affix level.
+- **Reforging has no result-slot choice**: Java's reforging menu shows three
+  results priced at 1×, 2× and 3× the recipe row; a right click on the table
+  charges the 1× row only, since there is no grid to pick a slot in.
+- **Plain vanilla gear is not salvaged**: Java also has `recipe/salvaging/other`
+  rows for ordinary tools and armour; this port only salvages affixed pieces
+  and gems.
+- **The 28 sized smithing upgrades are not recipes here**: Java's
+  `apotheosis:sized_upgrade_recipe` consumes four ingots or gems per template,
+  and the vanilla smithing format cannot express that; shipping it as a
+  one-ingot recipe would change what the Java pack costs. The three templates
+  are craftable, but not applied through a smithing table in this port.
 - **A socket, once added, is permanent**: no sigil takes one away, only the
   gems can be withdrawn.
 - **Gear affixed before this slice** carries no `apotheosis:tier`, so it can be
@@ -604,35 +632,27 @@ Both halves use the id `apotheosis`.
   `tools/vps/verify.sh`); it builds as a trait mod with
   `horizon-launcher native-build`.
 
-### Build state (2026-11-22)
+### Build state (2026-11-23)
 
-- v0.4.0 compiles against the pinned commit `a85af177` (`cargo check -p
-  mod-apotheosis`, one warning: private `Rng` behind the public test helper).
-  **All unit tests pass** (see each section), and `cargo check -p horizon-native-game
-
-  mod-apotheosis`, no warnings).
-  **34 unit tests pass**, and `cargo check -p horizon-native-game
-
-  **27 unit tests pass** (twelve of them in the `sockets` module: purity steps,
-  socket counts, socketing, reforge and salvage yields, the sigil and table
-  ids, the rarity ladder, and the chest gem purity draw), and
-  `cargo check -p horizon-native-game
-  --no-default-features` (dedicated-server engine with this mod staged)
-  passes, as does the client flavour (`cargo check -p horizon-native-game`,
-  default features).
-- `cargo horizon-mod check` passes on both packed files
-  (`apotheosis.hmod`: kind `mod`, `side both`; `apotheosis.hnmod`: kind
-  `native-mod`, api `native-1/a85af177…/5a64af93…`).
+- v0.5.0 compiles against the pinned commit `a85af177`:
+  `bash horizon-work/check.sh apoitems … test` ends with
+  `RESULT check=0 test=0`, and **126 unit tests pass**, including the new ones
+  for the five Java reforge costs, the simple table's rarity limit, the six gem
+  salvage ranges, and the unnaming sigil keeping a player's name. The remaining
+  warnings are pre-existing unused helpers (`gem_name_key`, `amount_text`,
+  `Purity::multiplier`, a few spawner and affix helpers).
 - The content mod has one gem item with 21 Java types and a `minecraft:select`
-  model, gem dust, five rarity salvage materials, four sigils and the three
-  working tables. Mob drops and all vanilla chest loot tables provide survival
-  gem routes: type by Java weight and dimension, purity above the gem's floor,
-  Flawless and Perfect boss-only. All content JSON files parse, and
-  `python tools/pack.py` rebuilds `target/apotheosis.hmod` and
-  `target/apotheosis.hnmod`.
-- The registry check caught `horizon-mixin.toml` still naming version `0.2.0`
-  after the bump ("native manifest and mixin identity/revision differ"); the
-  three version fields now move together, and both packed files check clean.
+  model, gem dust, five rarity salvage materials, five sigils, and four
+  working tables. It also declares `gem_fused_slate`, the iron, gold and
+  diamond smithing templates and `simple_reforging_table`. Mob drops and all
+  vanilla chest loot tables provide survival gem routes: type by Java weight
+  and dimension, purity above the gem's floor, Flawless and Perfect
+  boss-only. All 281 content JSON files parse, and `python tools/pack.py`
+  rebuilds `target/apotheosis.hmod` (535 entries, including the new recipes
+  and item/block assets) and `target/apotheosis.hnmod`.
+- The Java assets were imported locally into the git-ignored `content-java/`
+  layer: 28 blockstates, 48 items, 107 models, 115 textures; the new ids have
+  Java models (`tools/java_assets_map.md`).
 
 ## Licence
 

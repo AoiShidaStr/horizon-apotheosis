@@ -42,6 +42,13 @@
     "apotheosis:sigil_of_enhancement",
     "apotheosis:salvaging_table",
     "apotheosis:reforging_table",
-    "apotheosis:enchantment_library"
+    "apotheosis:enchantment_library",
+    "apotheosis:sigil_of_unnaming",
+    "apotheosis:simple_reforging_table",
+    "apotheosis:gem_cutting_table",
+    "apotheosis:gem_fused_slate",
+    "apotheosis:iron_upgrade_smithing_template",
+    "apotheosis:gold_upgrade_smithing_template",
+    "apotheosis:diamond_upgrade_smithing_template"
   ]
 }

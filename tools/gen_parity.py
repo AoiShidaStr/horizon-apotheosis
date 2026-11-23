@@ -108,7 +108,7 @@ ABSENT_REASONS = [
         "aucune recette en Java : butin de boss (`entity/boss_drops`), non porté",
     ),
     (
-        ("augmenting_table", "simple_reforging_table", "reforging_table", "salvaging_table"),
+        ("augmenting_table",),
         "bloc de table : la recette est portable, le comportement de la table ne l'est pas sans toucher au sertissage",
     ),
     (
@@ -120,12 +120,8 @@ ABSENT_REASONS = [
         "charme de potion : le type `apotheosis:potion_charm_crafting` et son infusion ne sont pas data-driven sous Horizon",
     ),
     (
-        ("sigil_of_malice", "sigil_of_supremacy", "sigil_of_unnaming"),
+        ("sigil_of_malice", "sigil_of_supremacy"),
         "sceau : la recette Java est un type custom (`apotheosis:malice|supremacy|unnaming`), non data-driven",
-    ),
-    (
-        ("_upgrade_smithing_template",),
-        "modèle de forge : recette portable, objet non déclaré dans ce lot",
     ),
     (
         ("hammer", "book", "lucky_foot", "music_disc_", "ender_lead", "infused_breath", "warden_tendril"),
@@ -133,7 +129,7 @@ ABSENT_REASONS = [
     ),
     (("tome",), "tome par type d'objet : comportement de l'établi d'extraction uniquement"),
     (
-        ("god_fused_pearl", "gem_fused_slate", "infused_breath"),
+        ("god_fused_pearl", "infused_breath"),
         "objet produit par infusion : `recipe/infusion` n'est pas data-driven sous Horizon",
     ),
 ]

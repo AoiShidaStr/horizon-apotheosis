@@ -1,16 +1,19 @@
 {
   "type": "minecraft:crafting_shaped",
   "category": "misc",
+  "group": "apotheosis",
   "pattern": [
-    " A ",
-    "AEA",
-    " A "
+    "GEG",
+    "EOE",
+    "GEG"
   ],
   "key": {
-    "A": "apotheosis:arcane_sands",
-    "E": "minecraft:emerald"
+    "G": "apotheosis:gem_dust",
+    "E": "apotheosis:gem_fused_slate",
+    "O": "apotheosis:godforged_pearl"
   },
   "result": {
-    "id": "apotheosis:sigil_of_enhancement"
+    "id": "apotheosis:sigil_of_enhancement",
+    "count": 4
   }
 }

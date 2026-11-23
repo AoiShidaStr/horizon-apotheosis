@@ -1,16 +1,18 @@
 {
   "type": "minecraft:crafting_shaped",
   "category": "misc",
+  "group": "apotheosis",
   "pattern": [
-    " L ",
-    "LBL",
-    " L "
+    "GGG",
+    "EEE",
+    "GGG"
   ],
   "key": {
-    "L": "apotheosis:luminous_crystal_shard",
-    "B": "minecraft:blaze_powder"
+    "G": "apotheosis:gem_fused_slate",
+    "E": "apotheosis:gem_dust"
   },
   "result": {
-    "id": "apotheosis:sigil_of_rebirth"
+    "id": "apotheosis:sigil_of_rebirth",
+    "count": 6
   }
 }
