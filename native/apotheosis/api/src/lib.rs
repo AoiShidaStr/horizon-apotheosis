@@ -37,6 +37,7 @@ mod enchanting;
 mod gems;
 mod java_affixes;
 mod java_gems;
+mod monsters;
 
 use horizon_client::mod_api::{
     ArrowLooseEvent, BreakSpeedEvent, EntityJoinLevelEvent, ExperienceOrbPickupEvent, Flow, Hooks,
@@ -191,6 +192,16 @@ const BOSSES: [&str; 4] = [
     "minecraft:elder_guardian",
 ];
 
+/// The gem chance for a kill, in 1000: Java's 4% for a real player kill and
+/// 0.5% otherwise, but never for a passive entity.  Horizon API 415 has no
+/// fake-player distinction, so every player kill is the 4% branch.
+fn gem_kill_chance(kind: &str, boss: bool, killed_by_player: bool) -> Option<u64> {
+    if !boss && !monsters::is_monster(kind) {
+        return None;
+    }
+    Some(if killed_by_player { 40 } else { 5 })
+}
+
 /// Whether a dropped item can carry affixes: a weapon, a tool or a piece of
 /// armour. Recognised from the item id, which is all a `loot_drops` hook is
 /// given about an item.
@@ -284,12 +295,29 @@ const CHEST_GEM_POOL: &str = "apotheosis:chest_gems";
 /// A counter that makes every loot roll's seed its own.
 static DROPS: AtomicU64 = AtomicU64::new(0);
 
-/// Adds a modest, weighted gem roll to vanilla chest tables. The name guard
-/// makes the edit safe if a table is passed through the hook more than once.
-fn add_chest_gem_pool(id: &str, table: &mut serde_json::Value) {
-    if !id.starts_with("minecraft:chests/") {
-        return;
+/// The chance Java's `gem_loot_injection.json` gives a chest table, by the
+/// table's domain and path: minecraft chests 25%, every other domain's chests
+/// 20%, and Twilight Forest structures 20%.  A table no entry matches gets no
+/// pool at all.
+fn chest_gem_chance(id: &str) -> Option<f64> {
+    let (domain, path) = id.split_once(':')?;
+    if path.starts_with("chests") {
+        return Some(if domain == "minecraft" { 0.25 } else { 0.2 });
     }
+    if domain == "twilightforest" && path.starts_with("structures") {
+        return Some(0.2);
+    }
+    None
+}
+
+/// Adds Java's gem injection to a chest table: one generic `apotheosis:gem`
+/// entry whose function draws the type by Java weight and the purity.  The
+/// name guard makes the edit safe if a table is passed through the hook more
+/// than once.
+fn add_chest_gem_pool(id: &str, table: &mut serde_json::Value) {
+    let Some(chance) = chest_gem_chance(id) else {
+        return;
+    };
     let Some(pools) = table
         .get_mut("pools")
         .and_then(serde_json::Value::as_array_mut)
@@ -303,27 +331,23 @@ fn add_chest_gem_pool(id: &str, table: &mut serde_json::Value) {
         return;
     }
 
-    // One entry per Java gem, at its Java weight: the loot function picks the
-    // gem's type and purity, so a chest gem is a real gem of the level's table.
-    let entries: Vec<_> = java_gems::GEMS
-        .iter()
-        .map(|gem| {
-            serde_json::json!({
-                "type": "minecraft:item",
-                "name": gems::ITEM,
-                "weight": gem.weight,
-                "functions": [{ "function": "apotheosis:gem_purity" }],
-            })
-        })
-        .collect();
+    // One entry, as Java's `apotheosis:gems` GLM adds one: its function draws
+    // the gem type by Java weight and dimensions, then clamps the purity to the
+    // type's floor.  Twenty-one identical weighted entries would only be dead
+    // weight, because the function would draw the type again.
     pools.push(serde_json::json!({
         "name": CHEST_GEM_POOL,
         "rolls": 1,
         "condition": {
             "type": "minecraft:random_chance",
-            "chance": 0.08,
+            "chance": chance,
         },
-        "entries": entries,
+        "entries": [{
+            "type": "minecraft:item",
+            "name": gems::ITEM,
+            "weight": 1,
+            "functions": [{ "function": "apotheosis:gem_purity" }],
+        }],
     }));
 }
 
@@ -544,10 +568,15 @@ impl Hooks for Apotheosis {
         attributes::tooltip(event);
         spawners::on_tooltip(event);
         if let Some((gem, purity)) = gems::of_stack(event.stack) {
-            for (line, colour) in gems::description(gem, purity) {
+            for line in gems::description(gem, purity) {
+                let colour = line.colour;
                 event.lines.push((
-                    Text::translate_with_fallback("apotheosis.gem.bonus", "%s", &[Text::literal(line)])
-                        .with_color(colour),
+                    Text::translate_with_fallback(
+                        &line.key,
+                        &line.fallback,
+                        &[Text::literal(line.value)],
+                    )
+                    .with_color(colour),
                     colour,
                 ));
             }
@@ -591,9 +620,9 @@ impl Hooks for Apotheosis {
         }
         let boss = BOSSES.contains(&kind) || affix_effects::is_boss(host, id);
         let killed_by_player = event.context.player.is_some();
-        if !boss && !killed_by_player {
+        let Some(gem_rate) = gem_kill_chance(kind, boss, killed_by_player) else {
             return;
-        }
+        };
         let n = DROPS.fetch_add(1, Ordering::Relaxed);
         let mut rng = Rng::new(seed_of(&event.context, n));
 
@@ -613,18 +642,20 @@ impl Hooks for Apotheosis {
                 let tier = rng.tier(&BOSS_TIERS);
                 apply_affixes(stack, tier, &mut rng);
                 sockets::after_affixes(stack, tier, &mut rng);
-            } else if rng.chance(35) {
+            } else if killed_by_player && rng.chance(35) {
                 let tier = rng.tier(&ORDINARY_TIERS);
                 apply_affixes(stack, tier, &mut rng);
                 sockets::after_affixes(stack, tier, &mut rng);
             }
         }
-        // A low gem from an ordinary mob, often enough to matter.
-        if !boss && rng.chance(12) {
+        // A low gem from an ordinary monster: 4% for a player kill, 0.5%
+        // otherwise, as the two Java GLMs do.
+        if !boss && rng.below(1000) < gem_rate {
             let (gem, purity) = gems::roll(event.context.dimension, false, &mut rng);
             event.drops.push(gems::stack(gem, purity));
         }
-        // And one of its own: a boss always, an ordinary mob rarely.
+        // And one of its own: a boss always, an ordinary mob killed by a player
+        // rarely.
         let gear = |rng: &mut Rng| -> &'static str {
             if boss {
                 BOSS_GEAR[rng.below(BOSS_GEAR.len() as u64) as usize]
@@ -632,7 +663,7 @@ impl Hooks for Apotheosis {
                 ORDINARY_GEAR[rng.below(ORDINARY_GEAR.len() as u64) as usize]
             }
         };
-        let drop = if boss { true } else { rng.chance(4) };
+        let drop = boss || (killed_by_player && rng.chance(4));
         if drop {
             let tier = if boss {
                 rng.tier(&BOSS_TIERS)
@@ -1221,20 +1252,29 @@ mod tests {
     }
 
     #[test]
-    fn vanilla_chests_get_a_weighted_low_gem_pool() {
-        let mut table = serde_json::json!({"pools": []});
-        add_chest_gem_pool("minecraft:chests/simple_dungeon", &mut table);
-        let pools = table["pools"].as_array().unwrap();
-        assert_eq!(pools.len(), 1);
-        assert_eq!(pools[0]["name"], CHEST_GEM_POOL);
-        assert_eq!(pools[0]["condition"]["type"], "minecraft:random_chance");
-        assert_eq!(pools[0]["condition"]["chance"], 0.08);
-        let entries = pools[0]["entries"].as_array().unwrap();
-        assert_eq!(entries.len(), java_gems::GEMS.len());
-        assert!(entries
-            .iter()
-            .all(|entry| entry["name"].as_str() == Some(gems::ITEM)));
-        assert!(entries.iter().all(|entry| entry["weight"].as_u64().is_some()));
+    fn chests_get_java_rates_and_one_generic_gem_entry() {
+        for (id, chance) in [
+            ("minecraft:chests/simple_dungeon", 0.25),
+            ("minecraft:chests/end_city_treasure", 0.25),
+            ("twilightforest:structures/labyrinth", 0.2),
+            ("othermod:chests/reward", 0.2),
+        ] {
+            let mut table = serde_json::json!({"pools": []});
+            add_chest_gem_pool(id, &mut table);
+            let pools = table["pools"].as_array().unwrap();
+            assert_eq!(pools.len(), 1, "{id}");
+            assert_eq!(pools[0]["name"], CHEST_GEM_POOL);
+            assert_eq!(pools[0]["condition"]["type"], "minecraft:random_chance");
+            assert_eq!(pools[0]["condition"]["chance"], chance, "{id}");
+            let entries = pools[0]["entries"].as_array().unwrap();
+            assert_eq!(entries.len(), 1, "{id}: one entry, not one per gem");
+            assert_eq!(entries[0]["name"], gems::ITEM);
+            assert_eq!(entries[0]["functions"][0]["function"], "apotheosis:gem_purity");
+        }
+        assert_eq!(chest_gem_chance("minecraft:entities/zombie"), None);
+        assert_eq!(chest_gem_chance("twilightforest:chests/foo"), Some(0.2));
+        assert_eq!(chest_gem_chance("twilightforest:structures/foo"), Some(0.2));
+        assert_eq!(chest_gem_chance("minecraft:gameplay/fishing"), None);
     }
 
     #[test]
@@ -1247,6 +1287,18 @@ mod tests {
         let mut other = serde_json::json!({"pools": []});
         add_chest_gem_pool("minecraft:entities/zombie", &mut other);
         assert!(other["pools"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn only_a_monster_can_drop_a_gem_and_a_player_doubles_the_odds() {
+        assert_eq!(gem_kill_chance("minecraft:cow", false, true), None);
+        assert_eq!(gem_kill_chance("minecraft:pig", false, false), None);
+        assert_eq!(gem_kill_chance("minecraft:zombie", false, true), Some(40));
+        assert_eq!(gem_kill_chance("minecraft:zombie", false, false), Some(5));
+        assert_eq!(gem_kill_chance("minecraft:wither", true, false), Some(5));
+        // A boss tagged by the other module still counts even if its id is
+        // outside the vanilla monster list.
+        assert_eq!(gem_kill_chance("mymod:boss", true, true), Some(40));
     }
 
     /// `seed_of` over a bare context, for the test above.

@@ -281,20 +281,33 @@ pub fn apothic(attributes: &[Resolved]) -> Vec<(Attr, f64)> {
         .collect()
 }
 
+/// One translated bonus line: its key, the English fallback the generator
+/// writes for a client without the key, the value substituted into the key's
+/// `%s`, and the purity's colour.
+pub struct DescriptionLine {
+    pub key: String,
+    pub fallback: String,
+    pub value: String,
+    pub colour: u32,
+}
+
 /// What a gem's bonus lines say, for a tooltip: the classes it applies to and
-/// the value at this purity.  Bonuses this port cannot pay out are not shown
-/// here; the README lists them.
-pub fn description(gem: &Gem, purity: Purity) -> Vec<(String, u32)> {
+/// the value at this purity.  Each line has its own translation key
+/// (`apotheosis.gem.bonus.<gem>.<n>`), generated into both lang files; the
+/// English text stays the fallback.  Bonuses this port cannot pay out are not
+/// shown here; the README lists them.
+pub fn description(gem: &Gem, purity: Purity) -> Vec<DescriptionLine> {
     let colour = purity.colour();
     let mut lines = Vec::new();
     let index = purity.index() as usize;
-    for bonus in gem.bonuses {
+    for (number, bonus) in gem.bonuses.iter().enumerate() {
         let classes = bonus
             .classes
             .iter()
             .map(|class| class.name())
             .collect::<Vec<_>>()
             .join(" or ");
+        let key = format!("apotheosis.gem.bonus.{}.{number}", gem.id);
         match &bonus.kind {
             Kind::Attribute {
                 attribute,
@@ -304,23 +317,25 @@ pub fn description(gem: &Gem, purity: Purity) -> Vec<(String, u32)> {
                 let Some(amount) = values[index] else {
                     continue;
                 };
-                lines.push((
-                    format!(
-                        "{classes}: {} {}",
-                        attribute::format(attribute, amount),
-                        attribute_name(attribute)
-                    ),
+                let value = attribute::format(attribute, amount);
+                lines.push(DescriptionLine {
+                    key,
+                    fallback: format!("{classes}: {value} {}", attribute_name(attribute)),
+                    value,
                     colour,
-                ));
+                });
             }
             Kind::Enchantment { id, levels, .. } => {
                 let Some(level) = levels[index] else {
                     continue;
                 };
-                lines.push((
-                    format!("{classes}: {} {level}", enchantment_name(id)),
+                let value = level.to_string();
+                lines.push(DescriptionLine {
+                    key,
+                    fallback: format!("{classes}: {value} {}", enchantment_name(id)),
+                    value,
                     colour,
-                ));
+                });
             }
         }
     }
@@ -395,13 +410,13 @@ fn enchantment_name(id: &str) -> &str {
 }
 
 /// What an ordinary mob or a boss rolls: a gem of the level's dimension, at a
-/// purity at or above its floor.  Ordinary mobs keep to the low purities, so
-/// the top steps stay a boss's prize.
+/// purity at or above its floor.  Every type in the dimension is eligible;
+/// the floor clamps the purity afterwards, as Java's `Gem.toStack` does, so a
+/// Flawless-only End gem can still drop in the End.
 pub fn roll(dimension: &str, boss: bool, rng: &mut crate::Rng) -> (&'static Gem, Purity) {
     let mut candidates: Vec<&'static Gem> = GEMS
         .iter()
         .filter(|gem| gem.dimensions.is_empty() || gem.dimensions.contains(&dimension))
-        .filter(|gem| boss || gem.min_purity <= Purity::Normal)
         .collect();
     if candidates.is_empty() {
         candidates = GEMS
@@ -601,9 +616,48 @@ mod tests {
         let gem = get("apotheosis:core/ballast").unwrap();
         let lines = description(gem, Purity::Normal);
         assert_eq!(lines.len(), 2);
-        assert!(lines[0].0.contains("Melee Weapon"));
-        assert!(lines[0].0.contains("+5"));
-        assert!(lines[1].0.contains("Chestplate or Leggings"));
-        assert!(lines[1].0.contains("+0.4"));
+        assert!(lines[0].fallback.contains("Melee Weapon or Trident"));
+        assert!(lines[0].fallback.contains("+5"));
+        assert_eq!(lines[0].value, "+5");
+        assert!(lines[1].fallback.contains("Chestplate or Leggings"));
+        assert!(lines[1].fallback.contains("+0.4"));
+    }
+
+    #[test]
+    fn an_ordinary_end_roll_can_pick_a_flawless_only_gem() {
+        let mut found = false;
+        for seed in 0..512 {
+            let (gem, purity) = roll("minecraft:the_end", false, &mut crate::Rng::new(seed));
+            if gem.id == "apotheosis:the_end/endersurge" {
+                found = true;
+                assert!(
+                    purity >= Purity::Flawless,
+                    "endersurge dropped below its Flawless floor: {purity:?}"
+                );
+                break;
+            }
+        }
+        assert!(found, "a chest in the End can never roll its End gem");
+    }
+
+    #[test]
+    fn every_bonus_has_a_per_gem_translation_key() {
+        let gem = get("apotheosis:core/ballast").unwrap();
+        let lines = description(gem, Purity::Normal);
+        assert_eq!(
+            lines[0].key,
+            "apotheosis.gem.bonus.apotheosis:core/ballast.0"
+        );
+        assert_eq!(
+            lines[1].key,
+            "apotheosis.gem.bonus.apotheosis:core/ballast.1"
+        );
+        for line in description(gem, Purity::Perfect) {
+            assert!(
+                line.key.starts_with(&format!("apotheosis.gem.bonus.{}.", gem.id)),
+                "{} is not this gem's key",
+                line.key
+            );
+        }
     }
 }

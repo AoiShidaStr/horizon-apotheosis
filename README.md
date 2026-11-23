@@ -78,15 +78,18 @@ a85af177 and covered by unit tests only.
   Distinct affixes per item, scaled by tier; an affixed copy keeps the item's
   own base modifiers in front of the rolled ones.
 - **Gems from mobs**: `gems::roll` picks a gem by dimension and Java weight,
-  above its `min_purity`; an ordinary mob killed by a player has a 12% chance
-  to drop one, a *wither*, *ender dragon*, *warden* or *elder guardian* always
-  does. Flawless and Perfect rolls stay boss-only.
-- **Gems from vanilla chests** (`loot_table_load`, API 75): every
-  `minecraft:chests/*` table has an 8% chance to roll the `apotheosis:chest_gems`
-  pool, one weighted entry per gem, whose function picks the type and its
-  purity.
+  then clamps the rolled purity to the gem's `min_purity`. Only monsters
+  (`apotheosis:is_monster`) can drop one: 4% for a player kill and 0.5% for a
+  kill with no player, as Java's two GLMs do. A *wither*, *ender dragon*,
+  *warden* or *elder guardian* always drops one, with the better purity table.
+- **Gems from chests** (`loot_table_load`, API 75): `minecraft:chests/*` tables
+  have Java's 25% chance, other domains' chests and Twilight Forest structures
+  20%, to roll the `apotheosis:chest_gems` pool. One generic entry's function
+  draws the gem type by Java weight in the table's dimension and rolls its
+  purity, so End and Nether chests give their own gems.
 - **Extra drops**: a boss always drops an affixed diamond piece (or a bow); an
-  ordinary mob killed by a player has a 4% chance to drop an affixed iron piece.
+  ordinary monster killed by a player has a 4% chance to drop an affixed iron
+  piece. Passive entities drop neither gems nor affixed gear.
 - **`/apoth reforge`** (`register_commands`/`perform_command`, API 8): rolls
   tier and affixes onto the plain piece of gear the player holds, for 3
   experience levels; on an already-affixed piece it rerolls that piece instead.

@@ -14,8 +14,8 @@
 //! entries; an unsocketed gem keeps the off-hand bonus the content mod gives it.
 
 use horizon_client::mod_api::{
-    Compound, EquipmentSlot, Flow, Host, InventoryTickEvent, ItemStack, LootFunctionEvent, Tag,
-    Text, TooltipEvent, UseItemEvent, UseItemOnEvent, serde_json,
+    Compound, EquipmentSlot, Flow, Host, InventoryTickEvent, ItemStack, LootFunctionEvent,
+    LootStack, NativeLootContext, Tag, Text, TooltipEvent, UseItemEvent, UseItemOnEvent, serde_json,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -495,8 +495,13 @@ fn is_socket_lore(entry: &Tag) -> bool {
     matches!(
         entry.get("translate"),
         Some(Tag::String(key))
-            if key.to_string_lossy() == "apotheosis.socket.line"
-                || key.to_string_lossy() == "apotheosis.socket.total"
+            if [
+                "apotheosis.socket.line",
+                "apotheosis.socket.header",
+                "apotheosis.socket.bonus",
+                "apotheosis.socket.total",
+            ]
+            .contains(&key.to_string_lossy().as_ref())
     )
 }
 
@@ -572,7 +577,7 @@ fn refresh(stack: &mut ItemStack) {
             }
         }
         apothic.extend(gems::apothic(&resolved));
-        lore.push(socket_lore(socket, entry));
+        lore.extend(socket_lore(socket, entry));
     }
 
     if total > 0 {
@@ -724,36 +729,65 @@ fn apply_enchantments(stack: &mut ItemStack, plan: &[(String, u8, bool)]) -> Vec
     added
 }
 
-fn socket_lore(socket: &Socket, entry: &crate::java_gems::Gem) -> Tag {
-    let text = gems::description(entry, socket.purity)
-        .into_iter()
-        .map(|(line, _)| line)
-        .collect::<Vec<_>>()
-        .join("; ");
-    let fallback = format!("{} {}: {text}", socket.purity.name(), entry.name);
-    Tag::compound([
-        ("translate", Tag::String("apotheosis.socket.line".into())),
-        ("fallback", Tag::String(fallback.as_str().into())),
-        ("color", Tag::String(socket.purity.hex().as_str().into())),
-        ("italic", Tag::Byte(0)),
+fn socket_lore(socket: &Socket, entry: &crate::java_gems::Gem) -> Vec<Tag> {
+    let colour = socket.purity.hex();
+    let gem = || {
+        Tag::compound([
+            (
+                "translate",
+                Tag::String(format!("item.apotheosis.gem.{}", entry.id).as_str().into()),
+            ),
+            ("fallback", Tag::String(entry.name.into())),
+        ])
+    };
+    let purity = || {
+        Tag::compound([
+            ("translate", Tag::String(socket.purity.name_key().into())),
+            ("fallback", Tag::String(socket.purity.name().into())),
+        ])
+    };
+    let mut lines = vec![Tag::compound([
         (
-            "with",
-            Tag::List(vec![
-                Tag::compound([
-                    (
-                        "translate",
-                        Tag::String(format!("item.apotheosis.gem.{}", entry.id).as_str().into()),
-                    ),
-                    ("fallback", Tag::String(entry.name.into())),
-                ]),
-                Tag::compound([
-                    ("translate", Tag::String(socket.purity.name_key().into())),
-                    ("fallback", Tag::String(socket.purity.name().into())),
-                ]),
-                Tag::String(text.as_str().into()),
-            ]),
+            "translate",
+            Tag::String("apotheosis.socket.header".into()),
         ),
-    ])
+        (
+            "fallback",
+            Tag::String(
+                format!("{} {}", socket.purity.name(), entry.name)
+                    .as_str()
+                    .into(),
+            ),
+        ),
+        ("color", Tag::String(colour.as_str().into())),
+        ("italic", Tag::Byte(0)),
+        ("with", Tag::List(vec![gem(), purity()])),
+    ])];
+    for line in gems::description(entry, socket.purity) {
+        let fallback = format!("{} {}: {}", socket.purity.name(), entry.name, line.fallback);
+        let bonus = Tag::compound([
+            ("translate", Tag::String(line.key.as_str().into())),
+            (
+                "fallback",
+                Tag::String(line.fallback.as_str().into()),
+            ),
+            (
+                "with",
+                Tag::List(vec![Tag::String(line.value.as_str().into())]),
+            ),
+        ]);
+        lines.push(Tag::compound([
+            (
+                "translate",
+                Tag::String("apotheosis.socket.bonus".into()),
+            ),
+            ("fallback", Tag::String(fallback.as_str().into())),
+            ("color", Tag::String(colour.as_str().into())),
+            ("italic", Tag::Byte(0)),
+            ("with", Tag::List(vec![gem(), purity(), bonus])),
+        ]));
+    }
+    lines
 }
 
 /// The tooltip lines this module adds: a gem's purity and how to socket it, or
@@ -825,33 +859,41 @@ pub fn tooltip(event: &mut TooltipEvent<'_>) {
         let Some(entry) = gems::get(&socket.gem) else {
             continue;
         };
-        let text = gems::description(entry, socket.purity)
-            .into_iter()
-            .map(|(line, _)| line)
-            .collect::<Vec<_>>()
-            .join("; ");
-        let fallback = format!("{} {}: {text}", socket.purity.name(), entry.name);
+        let colour = socket.purity.colour();
+        let gem_text = || {
+            Text::translate_with_fallback(
+                &format!("item.apotheosis.gem.{}", entry.id),
+                entry.name,
+                &[],
+            )
+        };
+        let purity_text = || {
+            Text::translate_with_fallback(
+                socket.purity.name_key(),
+                socket.purity.name(),
+                &[],
+            )
+        };
         event.lines.push((
             Text::translate_with_fallback(
-                "apotheosis.socket.line",
-                &fallback,
-                &[
-                    Text::translate_with_fallback(
-                        &format!("item.apotheosis.gem.{}", entry.id),
-                        entry.name,
-                        &[],
-                    ),
-                    Text::translate_with_fallback(
-                        socket.purity.name_key(),
-                        socket.purity.name(),
-                        &[],
-                    ),
-                    Text::literal(text),
-                ],
+                "apotheosis.socket.header",
+                &format!("{} {}", socket.purity.name(), entry.name),
+                &[gem_text(), purity_text()],
             )
-            .with_color(socket.purity.colour()),
-            socket.purity.colour(),
+            .with_color(colour),
+            colour,
         ));
+        for line in gems::description(entry, socket.purity) {
+            event.lines.push((
+                Text::translate_with_fallback(
+                    &line.key,
+                    &line.fallback,
+                    &[Text::literal(line.value)],
+                )
+                .with_color(colour),
+                colour,
+            ));
+        }
     }
 }
 
@@ -1467,8 +1509,15 @@ fn add_socket(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &Ite
 fn hand_out_gems(gems: &[Socket], mut give: impl FnMut(&ItemStack) -> bool) -> Vec<usize> {
     let mut unplaced = Vec::new();
     for (index, socket) in gems.iter().enumerate() {
-        let mut gem = ItemStack::new(&socket.gem, 1);
-        set_purity(&mut gem, socket.purity);
+        // The socket names a gem *type* (`apotheosis:core/ballast`), not an
+        // item: rebuilding a stack from it gave an unknown item with only a
+        // purity tag.  A real gem keeps the single `apotheosis:gem` item and
+        // its type, model and purity in custom data.
+        let Some(entry) = gems::get(&socket.gem) else {
+            unplaced.push(index);
+            continue;
+        };
+        let gem = gems::stack(entry, socket.purity);
         if !give(&gem) {
             unplaced.push(index);
         }
@@ -1706,37 +1755,55 @@ pub fn chest_gem_purity(seed: i64) -> Purity {
     roll_purity(&ORDINARY_PURITY, &mut rng)
 }
 
-/// A gem in a chest becomes a real gem of the level, at its Java weight, and
-/// rolls its purity from the loot roll's own seed.
+/// The dimension a loot roll happens in, from the level the game set around
+/// it (API 156).  A roll the game made without a place falls back to the
+/// overworld, as the old hard-coded draw did.
+fn loot_dimension<'a>(ctx: &'a NativeLootContext<'_>) -> &'a str {
+    ctx.place
+        .as_deref()
+        .and_then(|place| place.level.as_ref())
+        .map(|level| level.dimension.as_str())
+        .unwrap_or("minecraft:overworld")
+}
+
+/// A gem in a chest becomes a real gem of the table's dimension, at its Java
+/// weight, and rolls its purity from the loot roll's own seed.  No type is
+/// filtered by its purity floor: the floor clamps the rolled purity, as
+/// `Gem.toStack` does in Java.
 pub fn loot_function(event: &mut LootFunctionEvent<'_>) {
     if event.kind != "apotheosis:gem_purity" || &*event.stack.item != gems::ITEM {
         return;
     }
-    let mut rng = Rng::new(event.ctx.seed as u64);
-    let (gem, _) = gems::roll("minecraft:overworld", false, &mut rng);
-    let purity = chest_gem_purity(event.ctx.seed).max(gem.min_purity);
+    fill_chest_gem(loot_dimension(event.ctx), event.ctx.seed, event.stack);
+}
+
+/// Fills a chest's generic gem entry for a roll in `dimension` with `seed`.
+/// Split from [`loot_function`] so a test can roll a real End chest without
+/// the game handing it a level.
+fn fill_chest_gem(dimension: &str, seed: i64, stack: &mut LootStack) {
+    let mut rng = Rng::new(seed as u64);
+    let (gem, _) = gems::roll(dimension, false, &mut rng);
+    let purity = chest_gem_purity(seed).max(gem.min_purity);
     let custom_name = serde_json::json!({
         "translate": format!("item.apotheosis.gem.{}", gem.id),
         "fallback": gem.name,
         "color": purity.hex(),
         "italic": false,
     });
-    event.stack.components.retain(|(id, _)| {
+    stack.components.retain(|(id, _)| {
         id != CUSTOM && id != "minecraft:custom_name" && id != "minecraft:custom_model_data"
     });
-    event.stack.components.push((
+    stack.components.push((
         CUSTOM.to_owned(),
         serde_json::json!({
             gems::GEM_KEY: gem.id,
             gems::PURITY_KEY: purity.index(),
         }),
     ));
-    event
-        .stack
+    stack
         .components
         .push(("minecraft:custom_model_data".to_owned(), serde_json::json!(gem.id)));
-    event
-        .stack
+    stack
         .components
         .push(("minecraft:custom_name".to_owned(), custom_name));
 }
@@ -1915,10 +1982,10 @@ fn salvage(
         host.give_stack(player, gem.clone()).is_none()
     });
     if !unplaced.is_empty() {
-        for (index, socket) in gems.iter().enumerate() {
-            if !unplaced.contains(&index) {
-                let _ = host.take_items(&socket.gem, 1);
-            }
+        // Take back the gems that fitted by their real item id: the type id
+        // `socket.gem` is not an item and could never be found in a slot.
+        for _ in 0..(gems.len() - unplaced.len()) {
+            let _ = host.take_items(gems::ITEM, 1);
         }
         host.feedback(Text::translate_with_fallback(
             "apotheosis.salvage.no_room",
@@ -2290,6 +2357,48 @@ mod tests {
         assert!(!seen.contains(&Purity::Perfect) || seen.len() >= 4);
     }
 
+    #[test]
+    fn a_chest_gem_follows_the_chest_dimension() {
+        let mut found = false;
+        for seed in 0..512 {
+            let mut stack = LootStack {
+                item: gems::ITEM.to_owned(),
+                count: 1,
+                damage: 0,
+                enchantments: Vec::new(),
+                potion: None,
+                map: false,
+                exploration: None,
+                ominous_amplifier: None,
+                stew_effects: Vec::new(),
+                names: Vec::new(),
+                components: Vec::new(),
+            };
+            fill_chest_gem("minecraft:the_end", seed, &mut stack);
+            let gem = stack
+                .components
+                .iter()
+                .find(|(id, _)| id == CUSTOM)
+                .and_then(|(_, data)| data.get(gems::GEM_KEY))
+                .and_then(|id| id.as_str());
+            if gem == Some("apotheosis:the_end/endersurge") {
+                found = true;
+                let model = stack
+                    .components
+                    .iter()
+                    .find(|(id, _)| id == "minecraft:custom_model_data")
+                    .and_then(|(_, data)| data.as_str());
+                assert_eq!(
+                    model,
+                    Some("apotheosis:the_end/endersurge"),
+                    "the gem's model did not follow its type"
+                );
+                break;
+            }
+        }
+        assert!(found, "an End chest never drew an End gem");
+    }
+
     const PLAYER: u128 = 7;
 
     /// A host for the functions that act on carried stacks. `free_stacks` is
@@ -2460,8 +2569,30 @@ mod tests {
         withdraw(&mut host, 4, &sigil, &gear, PLAYER);
 
         assert_eq!(host.given.len(), 3);
+        assert!(
+            host.given.iter().all(|(item, _)| item == gems::ITEM),
+            "a gem came back as its type id, not as an apotheosis:gem"
+        );
         assert_eq!(socketed(host.slots.get(&OFFHAND).unwrap()), Vec::new());
         assert_eq!(host.slots.get(&4).unwrap().count, 0);
+    }
+
+    #[test]
+    fn a_withdrawn_gem_keeps_its_type_purity_and_model() {
+        let sockets = vec![Socket {
+            gem: "apotheosis:core/ballast".into(),
+            purity: Purity::Flawless,
+        }];
+        let mut given = Vec::new();
+        let unplaced = hand_out_gems(&sockets, |gem| {
+            given.push(gem.clone());
+            true
+        });
+        assert!(unplaced.is_empty());
+        assert_eq!(&*given[0].item, gems::ITEM);
+        assert_eq!(gems::id_of(&given[0]), Some("apotheosis:core/ballast"));
+        assert_eq!(gems::purity_of(&given[0]), Purity::Flawless);
+        assert!(gems::of_stack(&given[0]).is_some());
     }
 
     #[test]
@@ -2493,6 +2624,10 @@ mod tests {
         assert_eq!(*host.slots.get(&3).unwrap(), gear);
         assert_eq!(host.given.len(), 2);
         assert_eq!(host.taken.len(), 2, "the gems handed out were not taken back");
+        assert!(
+            host.taken.iter().all(|(item, _)| item == gems::ITEM),
+            "the rollback tried to take back a gem type id, not the gem item"
+        );
         assert!(host.items.is_empty());
     }
 
