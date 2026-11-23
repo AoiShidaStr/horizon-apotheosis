@@ -529,7 +529,7 @@ def main():
         fr[f"block.{ID}.{block}"] = name_fr
         merge_values(os.path.join(CONTENT, "data", "minecraft", "tags", "block",
                                  "mineable", tool + ".json"), [block_id])
-        if block not in entries:
+        if block_id not in entries:
             entries.append(block_id)
     # Geode and treasure shelves provide Eterna in Java, so the vanilla table
     # may count them as power providers too (the filtering shelf gives none

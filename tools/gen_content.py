@@ -245,8 +245,11 @@ def main():
     # gems for the single Java one.
     tab_path = os.path.join(decl_dir("creative_tab"), ID + ".json")
     tab = read_json(tab_path, {"title": "itemGroup.%s" % ID, "items": []})
-    items = [item for item in tab.get("items", [])
-             if not item.startswith("%s:gem_" % ID)]
+    # Drop only the gems and gem blocks this port used to invent, not the other
+    # gem_* entries (gem_cutting_table, gem_fused_slate...).
+    stale_items = {"%s:gem_%s" % (ID, s) for s in OLD_SPECIES}
+    stale_items |= {"%s:gem_block_%s" % (ID, s) for s in OLD_SPECIES}
+    items = [item for item in tab.get("items", []) if item not in stale_items]
     for item in ("%s:gem" % ID, "%s:gem_dust" % ID):
         if item not in items:
             items.insert(0, item)
