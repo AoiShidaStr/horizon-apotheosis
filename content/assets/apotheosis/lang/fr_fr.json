@@ -221,7 +221,7 @@
   "apotheosis.seal.no_piece": "Tenez un objet affixé en main secondaire pour y utiliser un sceau.",
   "apotheosis.enhance.done": "Amélioré : %s.",
   "apotheosis.enhance.max": "Cette pièce est déjà ancienne.",
-  "apotheosis.cut.no_dust": "La table de taille demande %s poussière de gemme.",
+  "apotheosis.cut.no_dust": "La table de taille de gemme demande %s poussière(s) de gemme et les matériaux de pureté.",
   "apotheosis.table.reforge.hint": "La table de recréation agit sur l'équipement tenu en main.",
   "apotheosis.table.salvage.hint": "La table de récupération recycle l'objet affixé tenu en main.",
   "apotheosis.table.cut.hint": "La table de taille aiguise la gemme tenue en main.",

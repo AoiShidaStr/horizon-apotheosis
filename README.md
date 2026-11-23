@@ -113,9 +113,11 @@ a85af177 and covered by unit tests only.
   bonus value read at the purity's index from its Java data (no invented
   multiplier), rolled where the gem drops (`loot_drops`) from the Java purity
   weights and above the gem's `min_purity`.
-  Shown in the gem's tooltip. A gem in the main hand with 4 gem dust in the
-  off hand, right-clicked, is polished one step up (4 dust per step, Perfect
-  is the ceiling).
+  Shown in the gem's tooltip. A gem in the main hand with gem dust in the off
+  hand, right-clicked, is polished one step up at the Java
+  `apotheosis:purity_upgrade` cost for the purity it reaches: 3 dust and
+  scrap/fabric/crystal to chip it, up to 9 dust and crystal/sands/pearl for
+  Flawless. Java has no perfect recipe, so a gem stops at Flawless.
 - **Reforging an affixed piece**: `/apoth reforge` on an affixed piece held in
   the main hand rerolls its rarity and affixes for 3 levels, keeping the piece
   and the gems in its sockets; the work is done on the next inventory tick, so
@@ -141,9 +143,10 @@ a85af177 and covered by unit tests only.
   and amethyst around gem dust, iron and planks, gold and scrap metal), and the
   creative tab. Right click with the piece in hand (`use_item_on`, API 13): the
   reforging table does what `/apoth reforge` does (3 levels), the salvaging
-  table what `/apoth salvage` does, and the gem cutting table spends 4 gem dust
-  from the inventory to raise the held gem's purity one step
-  (`Host::take_items`, refunded if the dust is not all there). The click is
+  table what `/apoth salvage` does, and the gem cutting table spends the Java
+  purity-upgrade cost (gem dust and rarity materials) from the inventory to
+  raise the held gem's purity one step (`Host::take_items`, everything refunded
+  if any ingredient is short). The click is
   always claimed, so a misclick shows the table's hint instead of opening
   something else.
 - **Chest gems roll their purity** (`loot_function`, API 133): the gem pool

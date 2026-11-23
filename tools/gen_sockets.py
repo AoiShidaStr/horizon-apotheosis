@@ -124,7 +124,7 @@ MESSAGES = {
         "Cette pièce est déjà ancienne.",
     ),
     "apotheosis.cut.no_dust": (
-        "The gem cutting table needs %s gem dust.",
+        "The gem cutting table needs %s gem dust and the purity materials.",
         "La table de taille demande %s poussière de gemme.",
     ),
     "apotheosis.table.reforge.hint": (

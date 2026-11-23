@@ -221,7 +221,7 @@
   "apotheosis.seal.no_piece": "Hold an affixed piece in your off hand to use a sigil on it.",
   "apotheosis.enhance.done": "Enhanced: %s.",
   "apotheosis.enhance.max": "That piece is already ancient.",
-  "apotheosis.cut.no_dust": "The gem cutting table needs %s gem dust.",
+  "apotheosis.cut.no_dust": "The gem cutting table needs %s gem dust and the purity materials.",
   "apotheosis.table.reforge.hint": "The reforging table works on the piece of gear in your hand.",
   "apotheosis.table.salvage.hint": "The salvaging table breaks down the affixed piece in your hand.",
   "apotheosis.table.cut.hint": "The gem cutting table sharpens the gem in your hand.",

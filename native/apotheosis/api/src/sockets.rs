@@ -27,8 +27,66 @@ use crate::{apply_affixes, is_equipment, Rng, Tier};
 
 /// The off hand's slot in `native_inventory`'s `Player` numbering.
 const OFFHAND: i32 = -106;
-/// Gem dust a purity upgrade costs.
-pub const POLISH_COST: u32 = 4;
+/// The Java `apotheosis:purity_upgrade` gem-cutting recipes, by the purity
+/// they reach: the gem dust count first, then the rarity materials
+/// (`data/apotheosis/recipe/gem_cutting/<purity>.json`).  Java defines no
+/// recipe for `perfect`, so a gem stops at `flawless` at the table.
+pub const UPGRADE_COSTS: &[(Purity, u32, &[(&str, u32)])] = &[
+    (
+        Purity::Cracked,
+        1,
+        &[
+            ("apotheosis:mysterious_scrap_metal", 3),
+            ("apotheosis:timeworn_fabric", 1),
+        ],
+    ),
+    (
+        Purity::Chipped,
+        3,
+        &[
+            ("apotheosis:mysterious_scrap_metal", 9),
+            ("apotheosis:timeworn_fabric", 3),
+            ("apotheosis:luminous_crystal_shard", 1),
+        ],
+    ),
+    (
+        Purity::Flawed,
+        5,
+        &[
+            ("apotheosis:mysterious_scrap_metal", 27),
+            ("apotheosis:timeworn_fabric", 9),
+            ("apotheosis:luminous_crystal_shard", 3),
+            ("apotheosis:arcane_sands", 1),
+        ],
+    ),
+    (
+        Purity::Normal,
+        7,
+        &[
+            ("apotheosis:timeworn_fabric", 27),
+            ("apotheosis:luminous_crystal_shard", 9),
+            ("apotheosis:arcane_sands", 3),
+            ("apotheosis:godforged_pearl", 1),
+        ],
+    ),
+    (
+        Purity::Flawless,
+        9,
+        &[
+            ("apotheosis:luminous_crystal_shard", 27),
+            ("apotheosis:arcane_sands", 9),
+            ("apotheosis:godforged_pearl", 3),
+        ],
+    ),
+];
+
+/// What raising a gem to `target` costs, or none where Java has no recipe.
+pub fn upgrade_cost(target: Purity) -> Option<(u32, &'static [(&'static str, u32)])> {
+    UPGRADE_COSTS
+        .iter()
+        .find(|(purity, _, _)| *purity == target)
+        .map(|(_, dust, materials)| (*dust, *materials))
+}
 /// The most sockets any piece can have.
 pub const MAX_SOCKETS: u8 = 3;
 
@@ -1339,25 +1397,37 @@ pub fn next_tier(tier: Tier) -> Tier {
     }
 }
 
-/// The gem cutting table: 4 gem dust out of the inventory raise the held gem's
-/// purity a step.
+/// The gem cutting table: the held gem rises one purity, at the Java
+/// `purity_upgrade` cost for the purity it reaches.
 fn cut(host: &mut dyn Host, slot: i32, main: &ItemStack) {
     if gems::of_stack(main).is_none() {
         return;
     }
     let purity = purity_of(main);
-    if purity == Purity::Perfect {
+    let Some((dust, materials)) = upgrade_cost(purity.next()) else {
         return;
+    };
+    let taken = host.take_items("apotheosis:gem_dust", dust);
+    let mut taken_materials = Vec::new();
+    let mut short = taken < dust;
+    for (item, count) in materials {
+        let got = host.take_items(item, *count);
+        taken_materials.push((*item, got, *count));
+        short |= got < *count;
     }
-    let taken = host.take_items("apotheosis:gem_dust", POLISH_COST);
-    if taken < POLISH_COST {
+    if short {
         if taken > 0 {
             let _ = host.give_items("apotheosis:gem_dust", taken);
         }
+        for (item, got, _) in taken_materials {
+            if got > 0 {
+                let _ = host.give_items(item, got);
+            }
+        }
         host.feedback(Text::translate_with_fallback(
             "apotheosis.cut.no_dust",
-            "The gem cutting table needs %s gem dust.",
-            &[Text::literal(POLISH_COST.to_string())],
+            "The gem cutting table needs %s gem dust and the purity materials.",
+            &[Text::literal(dust.to_string())],
         ));
         return;
     }
@@ -1480,10 +1550,14 @@ fn socket(host: &mut dyn Host, slot: i32, main: &ItemStack, off: &ItemStack) {
 }
 
 fn can_polish(main: &ItemStack, off: &ItemStack) -> bool {
-    gems::of_stack(main).is_some()
-        && &*off.item == "apotheosis:gem_dust"
-        && off.count >= POLISH_COST
-        && purity_of(main) < Purity::Perfect
+    if gems::of_stack(main).is_none() || &*off.item != "apotheosis:gem_dust" {
+        return false;
+    }
+    // No Java recipe reaches `perfect`, and the dust cost rises with the step.
+    match upgrade_cost(purity_of(main).next()) {
+        Some((dust, _)) => off.count >= dust,
+        None => false,
+    }
 }
 
 fn polish(host: &mut dyn Host, slot: i32, main: &ItemStack, off: &ItemStack) {
@@ -1491,11 +1565,34 @@ fn polish(host: &mut dyn Host, slot: i32, main: &ItemStack, off: &ItemStack) {
         return;
     }
     let purity = purity_of(main);
+    let Some((dust_cost, materials)) = upgrade_cost(purity.next()) else {
+        return;
+    };
+    let mut taken = Vec::new();
+    let mut short = false;
+    for (item, count) in materials {
+        let got = host.take_items(item, *count);
+        taken.push((*item, got, *count));
+        short |= got < *count;
+    }
+    if short {
+        for (item, got, _) in taken {
+            if got > 0 {
+                let _ = host.give_items(item, got);
+            }
+        }
+        host.feedback(Text::translate_with_fallback(
+            "apotheosis.cut.no_dust",
+            "The gem cutting table needs %s gem dust and the purity materials.",
+            &[Text::literal(dust_cost.to_string())],
+        ));
+        return;
+    }
     let mut improved = main.clone();
     set_purity(&mut improved, purity.next());
     write_slot(host, slot, improved);
     let mut dust = off.clone();
-    dust.count -= POLISH_COST;
+    dust.count -= dust_cost;
     write_slot(host, OFFHAND, dust);
     host.feedback(Text::translate_with_fallback(
         "apotheosis.polish.done",
@@ -1699,7 +1796,7 @@ mod tests {
     #[test]
     fn polishing_rejects_a_non_gem_in_the_main_hand() {
         let sword = ItemStack::new("minecraft:diamond_sword", 1);
-        let dust = ItemStack::new("apotheosis:gem_dust", POLISH_COST);
+        let dust = ItemStack::new("apotheosis:gem_dust", 4);
         assert!(!can_polish(&sword, &dust));
     }
 
@@ -1962,15 +2059,33 @@ mod tests {
     }
 
     #[test]
+    fn a_purity_step_costs_what_the_java_gem_cutting_recipe_says() {
+        assert_eq!(
+            upgrade_cost(Purity::Chipped),
+            Some((
+                3,
+                &[
+                    ("apotheosis:mysterious_scrap_metal", 9),
+                    ("apotheosis:timeworn_fabric", 3),
+                    ("apotheosis:luminous_crystal_shard", 1),
+                ][..]
+            ))
+        );
+        assert_eq!(upgrade_cost(Purity::Flawless).unwrap().0, 9);
+        // Java has no perfect purity recipe: a gem stops at flawless.
+        assert_eq!(upgrade_cost(Purity::Perfect), None);
+    }
+
+    #[test]
     fn polishing_never_touches_a_swapped_in_sword() {
         let sword = ItemStack::new("minecraft:diamond_sword", 1);
-        let dust = ItemStack::new("apotheosis:gem_dust", POLISH_COST);
+        let dust = ItemStack::new("apotheosis:gem_dust", 4);
         let mut host = Fake::default();
         host.slots.insert(0, sword.clone());
         host.slots.insert(OFFHAND, dust.clone());
         polish(&mut host, 0, &sword, &dust);
         assert_eq!(custom(host.slots.get(&0).unwrap()).get(gems::PURITY_KEY), None);
-        assert_eq!(host.slots.get(&OFFHAND).unwrap().count, POLISH_COST);
+        assert_eq!(host.slots.get(&OFFHAND).unwrap().count, 4);
         assert!(!can_polish(&sword, &dust));
     }
 

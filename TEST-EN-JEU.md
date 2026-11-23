@@ -153,7 +153,10 @@ Recettes de survie (à vérifier à l'établi) :
 
 - 1 éclat d'améthyste → 2 poussières ; 1 gemme (tag `apotheosis:gems`, qui ne
   contient que `apotheosis:gem`) → 3 poussières ;
-- 4 poussières en main secondaire, gemme en main, clic droit → pureté +1.
+- la poussière (3 à 9 selon la pureté visée) et les matériaux de rareté (scrap,
+  étoffe, éclat, sables, perle) en main secondaire, gemme en main, clic droit →
+  pureté +1 ; la table de taille applique le même coût. Java n'a pas de
+  recette pour Parfaite : une gemme s'arrête à Sans défaut.
 
 Les blocs de gemme et la taille de gemme à l'établi n'existent plus : ce port
 n'a que l'objet gemme Java et la poussière.
