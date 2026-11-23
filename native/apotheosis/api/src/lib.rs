@@ -1226,7 +1226,11 @@ impl Hooks for Apotheosis {
             return Flow::Cancel;
         }
         if words[1] == "salvage" {
-            sockets::begin_salvage(host, event.player.uuid);
+            sockets::begin_salvage(
+                host,
+                event.player.uuid,
+                i32::from(event.player.selected_slot),
+            );
             return Flow::Cancel;
         }
         if words[1] != "reforge" {
@@ -1237,7 +1241,12 @@ impl Hooks for Apotheosis {
             ));
             return Flow::Cancel;
         }
-        reforge(host, event.player.uuid, event.player.xp_level);
+        reforge(
+            host,
+            event.player.uuid,
+            event.player.xp_level,
+            i32::from(event.player.selected_slot),
+        );
         Flow::Cancel
     }
 }
@@ -1247,7 +1256,7 @@ pub const REFORGE_COST: i32 = 3;
 
 /// `/apoth reforge`: takes one plain piece of gear the player holds, gives it
 /// back with a rolled rarity, and charges `REFORGE_COST` levels.
-fn reforge(host: &mut dyn Host, player: u128, xp_level: i32) {
+fn reforge(host: &mut dyn Host, player: u128, xp_level: i32, slot: i32) {
     let Some((item, count, plain)) = host.held() else {
         host.feedback(Text::translate_with_fallback(
             "apotheosis.reforge.empty",
@@ -1286,7 +1295,7 @@ fn reforge(host: &mut dyn Host, player: u128, xp_level: i32) {
                 ));
                 return;
             }
-            sockets::begin_reforge(player);
+            sockets::begin_reforge(host, player, slot);
             host.feedback(Text::translate_with_fallback(
                 "apotheosis.reforge.rerolled",
                 "Reforged: the piece in your hand rolls again.",

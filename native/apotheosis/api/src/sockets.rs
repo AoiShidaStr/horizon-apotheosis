@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-use crate::{apply_affixes, gem, is_armor, is_equipment, Rng, Tier};
+use crate::{apply_affixes, gem, is_equipment, Rng, Tier};
 
 /// The off hand's slot in `native_inventory`'s `Player` numbering.
 const OFFHAND: i32 = -106;
@@ -702,7 +702,7 @@ pub fn table(block: &str) -> Option<Table> {
 }
 
 /// What a right click with a gem or a sigil queued, applied on the next
-/// inventory tick of the held stack.
+/// inventory tick of the stack it started from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Socket,
@@ -716,19 +716,103 @@ pub enum Action {
     Enhance,
 }
 
-fn pending() -> &'static Mutex<HashMap<u128, Action>> {
-    static PENDING: OnceLock<Mutex<HashMap<u128, Action>>> = OnceLock::new();
+/// What a delayed action was validated on: the stacks' item ids and counts,
+/// the gear's tier and sockets, a gem's purity and the ids of the modifiers a
+/// piece carries. Two pieces of the same item differ by these, so the tick can
+/// tell the piece the player clicked from another one that took its place.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Fingerprint {
+    item: String,
+    count: u32,
+    tier: Option<Tier>,
+    sockets: u8,
+    socketed: Vec<Socket>,
+    purity: Purity,
+    modifiers: Vec<String>,
+}
+
+fn fingerprint(stack: &ItemStack) -> Fingerprint {
+    let mut modifiers: Vec<String> = match stack
+        .data()
+        .and_then(|data| data.other("minecraft:attribute_modifiers"))
+    {
+        Some(Tag::List(entries)) => entries
+            .iter()
+            .filter_map(|entry| match entry.get("id") {
+                Some(Tag::String(id)) => Some(id.to_string_lossy()),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    modifiers.sort();
+    Fingerprint {
+        item: stack.item.to_string(),
+        count: stack.count,
+        tier: tier_of(stack),
+        sockets: socket_total(stack),
+        socketed: socketed(stack),
+        purity: purity_of(stack),
+        modifiers,
+    }
+}
+
+/// An action waiting for the next tick, with the slot it came from and the
+/// stacks it was validated on.
+#[derive(Clone, Debug, PartialEq)]
+struct Pending {
+    action: Action,
+    /// The inventory slot the click started from (the main hand's).
+    slot: i32,
+    /// The stack in that slot as the click saw it.
+    main: Fingerprint,
+    /// The off-hand piece the click saw, for the actions that work on one.
+    target: Option<Fingerprint>,
+}
+
+impl Pending {
+    fn new(action: Action, slot: i32, main: &ItemStack, target: Option<&ItemStack>) -> Self {
+        Self {
+            action,
+            slot,
+            main: fingerprint(main),
+            target: target.map(fingerprint),
+        }
+    }
+
+    /// Whether the tick on `slot`, holding `main` and `target`, is still the
+    /// click this action was validated on.
+    fn accepts(&self, slot: i32, main: &ItemStack, target: Option<&ItemStack>) -> bool {
+        self.slot == slot
+            && self.main == fingerprint(main)
+            && match (&self.target, target) {
+                (None, None) => true,
+                (Some(expected), Some(target)) => *expected == fingerprint(target),
+                _ => false,
+            }
+    }
+}
+
+fn pending() -> &'static Mutex<HashMap<u128, Pending>> {
+    static PENDING: OnceLock<Mutex<HashMap<u128, Pending>>> = OnceLock::new();
     PENDING.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn set_pending(player: u128, action: Action) {
+fn set_pending(player: u128, action: Pending) {
     if let Ok(mut pending) = pending().lock() {
         pending.insert(player, action);
     }
 }
 
-fn take_pending(player: u128) -> Option<Action> {
-    pending().lock().ok()?.remove(&player)
+/// Takes the pending action only when the tick is the slot it started from:
+/// another slot's tick leaves it waiting instead of consuming it.
+fn take_pending(player: u128, slot: i32) -> Option<Pending> {
+    let mut pending = pending().lock().ok()?;
+    if pending.get(&player).is_some_and(|action| action.slot == slot) {
+        pending.remove(&player)
+    } else {
+        None
+    }
 }
 
 /// Right click with a gem: socket it into the gear in the off hand, or spend
@@ -756,24 +840,36 @@ pub fn use_item(host: &mut dyn Host, event: &mut UseItemEvent<'_>) -> Flow {
         return Flow::Continue;
     };
 
+    let slot = i32::from(player.selected_slot);
     if socket_total(&off) > 0 {
-        set_pending(player.uuid, Action::Socket);
+        set_pending(
+            player.uuid,
+            Pending::new(Action::Socket, slot, &main, Some(&off)),
+        );
         return Flow::Cancel;
     }
     if can_polish(&event.stack, &off) {
-        set_pending(player.uuid, Action::Polish);
+        set_pending(
+            player.uuid,
+            Pending::new(Action::Polish, slot, &event.stack, None),
+        );
         return Flow::Cancel;
     }
     Flow::Continue
 }
 
-/// Ask for the piece in the main hand to be salvaged on its next inventory
-/// tick: `/apoth salvage`.
-pub fn begin_salvage(host: &mut dyn Host, player: u128) {
-    let affixed = host
-        .held_stack(player)
-        .is_some_and(|stack| has_affixes(&stack));
-    if !affixed {
+/// Ask for the piece in the main hand (`slot`) to be salvaged on its next
+/// inventory tick: `/apoth salvage`.
+pub fn begin_salvage(host: &mut dyn Host, player: u128, slot: i32) {
+    let Some(stack) = host.held_stack(player) else {
+        host.feedback(Text::translate_with_fallback(
+            "apotheosis.salvage.not_affixed",
+            "Hold an affixed piece to salvage it.",
+            &[],
+        ));
+        return;
+    };
+    if !has_affixes(&stack) {
         host.feedback(Text::translate_with_fallback(
             "apotheosis.salvage.not_affixed",
             "Hold an affixed piece to salvage it.",
@@ -781,13 +877,18 @@ pub fn begin_salvage(host: &mut dyn Host, player: u128) {
         ));
         return;
     }
-    set_pending(player, Action::Salvage);
+    set_pending(player, Pending::new(Action::Salvage, slot, &stack, None));
 }
 
-/// Queue a reforge of the affixed piece in the main hand; the command has
-/// already charged for it.
-pub fn begin_reforge(player: u128) {
-    set_pending(player, Action::Reforge);
+/// Queue a reforge of the affixed piece in `slot`; the command has already
+/// charged for it. The piece is remembered so the tick rerolls that one, or
+/// gives the levels back.
+pub fn begin_reforge(host: &mut dyn Host, player: u128, slot: i32) {
+    let Some(stack) = host.held_stack(player) else {
+        let _ = host.give_levels(player, crate::REFORGE_COST);
+        return;
+    };
+    set_pending(player, Pending::new(Action::Reforge, slot, &stack, None));
 }
 
 /// The counter this module's rolls draw from, mixed with the tick they run on:
@@ -803,9 +904,10 @@ pub fn can_reforge(stack: &ItemStack) -> bool {
     is_equipment(&stack.item) && has_affixes(stack)
 }
 
-/// Applies a queued action on the held stack. Runs once per player per tick:
-/// `inventory_tick` is called for every carried stack, so only the selected
-/// slot does the work.
+/// Applies a queued action on the stack it was validated on. Runs once per
+/// player per tick: `inventory_tick` is called for every carried stack, so
+/// only the selected slot does the work, and only when it is the slot the
+/// click started from.
 pub fn inventory_tick(host: &mut dyn Host, event: &mut InventoryTickEvent) {
     if !event.selected {
         return;
@@ -813,28 +915,46 @@ pub fn inventory_tick(host: &mut dyn Host, event: &mut InventoryTickEvent) {
     let Some(player) = host.acting_player() else {
         return;
     };
-    let Some(action) = take_pending(player.uuid) else {
+    let Some(pending) = take_pending(player.uuid, event.slot) else {
         return;
     };
-    let Some(main) = host.carried_stack(event.slot).cloned() else {
+    // The clicked slot, never whichever slot is selected now.
+    let Some(main) = host.carried_stack(pending.slot).cloned() else {
+        // The piece left the slot before the tick: a reforge paid for it, so
+        // give the levels back like any other hand change.
+        if pending.action == Action::Reforge {
+            let _ = host.give_levels(player.uuid, crate::REFORGE_COST);
+        }
         return;
     };
+    let target = match pending.target {
+        Some(_) => host.carried_stack(OFFHAND).cloned(),
+        None => None,
+    };
+    if !pending.accepts(pending.slot, &main, target.as_ref()) {
+        // The hand changed since the click: nothing is spent and nothing is
+        // destroyed. A reforge was paid for before the tick, so refund it.
+        if pending.action == Action::Reforge {
+            let _ = host.give_levels(player.uuid, crate::REFORGE_COST);
+        }
+        return;
+    }
 
-    match action {
-        Action::Reforge => reforge(host, event.slot, &main, player.uuid),
-        Action::Salvage => salvage(host, event.slot, &main, player.uuid),
-        Action::Cut => cut(host, event.slot, &main),
+    match pending.action {
+        Action::Reforge => reforge(host, pending.slot, &main, player.uuid, &pending.main),
+        Action::Salvage => salvage(host, pending.slot, &main, player.uuid, &pending.main),
+        Action::Cut => cut(host, pending.slot, &main),
         other => {
-            let Some(off) = host.carried_stack(OFFHAND).cloned() else {
+            let Some(off) = target else {
                 return;
             };
             match other {
-                Action::Socket => socket(host, event.slot, &main, &off),
-                Action::Polish => polish(host, event.slot, &main, &off),
-                Action::AddSocket => add_socket(host, event.slot, &main, &off),
-                Action::Withdraw => withdraw(host, event.slot, &main, &off, player.uuid),
-                Action::Rebirth => rebirth(host, event.slot, &main, &off),
-                Action::Enhance => enhance(host, event.slot, &main, &off),
+                Action::Socket => socket(host, pending.slot, &main, &off),
+                Action::Polish => polish(host, pending.slot, &main, &off),
+                Action::AddSocket => add_socket(host, pending.slot, &main, &off),
+                Action::Withdraw => withdraw(host, pending.slot, &main, &off, player.uuid),
+                Action::Rebirth => rebirth(host, pending.slot, &main, &off),
+                Action::Enhance => enhance(host, pending.slot, &main, &off),
                 _ => {}
             }
         }
@@ -843,7 +963,7 @@ pub fn inventory_tick(host: &mut dyn Host, event: &mut InventoryTickEvent) {
 
 /// A sigil in the main hand, a piece in the off hand: queue what the sigil
 /// does, and take it off the main hand on the next inventory tick.
-pub fn use_seal(host: &mut dyn Host, event: &UseItemEvent<'_>, _seal: Seal) -> Flow {
+pub fn use_seal(host: &mut dyn Host, event: &UseItemEvent<'_>, kind: Seal) -> Flow {
     let Some(player) = host.acting_player() else {
         return Flow::Continue;
     };
@@ -866,12 +986,17 @@ pub fn use_seal(host: &mut dyn Host, event: &UseItemEvent<'_>, _seal: Seal) -> F
     }
     set_pending(
         player.uuid,
-        match _seal {
-            Seal::Socketing => Action::AddSocket,
-            Seal::Withdrawal => Action::Withdraw,
-            Seal::Rebirth => Action::Rebirth,
-            Seal::Enhancement => Action::Enhance,
-        },
+        Pending::new(
+            match kind {
+                Seal::Socketing => Action::AddSocket,
+                Seal::Withdrawal => Action::Withdraw,
+                Seal::Rebirth => Action::Rebirth,
+                Seal::Enhancement => Action::Enhance,
+            },
+            i32::from(player.selected_slot),
+            &main,
+            Some(&off),
+        ),
     );
     Flow::Cancel
 }
@@ -899,7 +1024,12 @@ pub fn use_item_on(host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow 
                 ));
                 return Flow::Cancel;
             }
-            crate::reforge(host, player.uuid, player.xp_level);
+            crate::reforge(
+                host,
+                player.uuid,
+                player.xp_level,
+                i32::from(player.selected_slot),
+            );
             Flow::Cancel
         }
         Table::Salvaging => {
@@ -911,7 +1041,7 @@ pub fn use_item_on(host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow 
                 ));
                 return Flow::Cancel;
             }
-            begin_salvage(host, player.uuid);
+            begin_salvage(host, player.uuid, i32::from(player.selected_slot));
             Flow::Cancel
         }
         Table::Cutting => {
@@ -923,7 +1053,15 @@ pub fn use_item_on(host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow 
                 ));
                 return Flow::Cancel;
             }
-            set_pending(player.uuid, Action::Cut);
+            set_pending(
+                player.uuid,
+                Pending::new(
+                    Action::Cut,
+                    i32::from(player.selected_slot),
+                    &event.stack,
+                    None,
+                ),
+            );
             Flow::Cancel
         }
     }
@@ -964,6 +1102,21 @@ fn add_socket(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &Ite
     ));
 }
 
+/// Hands each socketed gem to the inventory, one stack per socket, and
+/// returns the indices of the ones that did not fit. A gem the inventory
+/// refuses is reported instead of being thrown away.
+fn hand_out_gems(gems: &[Socket], mut give: impl FnMut(&ItemStack) -> bool) -> Vec<usize> {
+    let mut unplaced = Vec::new();
+    for (index, socket) in gems.iter().enumerate() {
+        let mut gem = ItemStack::new(&socket.gem, 1);
+        set_purity(&mut gem, socket.purity);
+        if !give(&gem) {
+            unplaced.push(index);
+        }
+    }
+    unplaced
+}
+
 fn withdraw(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemStack, player: u128) {
     let gems = socketed(gear);
     if gems.is_empty() {
@@ -974,22 +1127,39 @@ fn withdraw(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemS
         ));
         return;
     }
+    // The gems go back to the inventory first: only the ones that fit leave
+    // their sockets, so a full inventory loses nothing and the sigil is only
+    // spent when at least one gem came out.
+    let unplaced = hand_out_gems(&gems, |gem| {
+        host.give_stack(player, gem.clone()).is_none()
+    });
+    let count = gems.len() - unplaced.len();
+    if count == 0 {
+        host.feedback(Text::translate_with_fallback(
+            "apotheosis.socket.no_room",
+            "No room for the gems; they stayed in their sockets.",
+            &[],
+        ));
+        return;
+    }
+    let kept: Vec<Socket> = unplaced.iter().map(|&index| gems[index].clone()).collect();
     let mut piece = gear.clone();
-    write_sockets(&mut piece, socket_total(gear), &[]);
+    write_sockets(&mut piece, socket_total(gear), &kept);
     refresh(&mut piece);
     write_slot(host, OFFHAND, piece);
-    let count = gems.len();
-    for socket in gems {
-        let mut gem = ItemStack::new(&socket.gem, 1);
-        set_purity(&mut gem, socket.purity);
-        let _ = host.give_stack(player, gem);
-    }
     consume_seal(host, slot, seal_stack);
     host.feedback(Text::translate_with_fallback(
         "apotheosis.socket.withdrawn",
         "%s gem(s) taken back out.",
         &[Text::literal(count.to_string())],
     ));
+    if !kept.is_empty() {
+        host.feedback(Text::translate_with_fallback(
+            "apotheosis.socket.no_room",
+            "No room for every gem; the rest stayed in their sockets.",
+            &[],
+        ));
+    }
 }
 
 fn rebirth(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemStack) {
@@ -1177,7 +1347,8 @@ fn socket(host: &mut dyn Host, slot: i32, main: &ItemStack, off: &ItemStack) {
 }
 
 fn can_polish(main: &ItemStack, off: &ItemStack) -> bool {
-    &*off.item == "apotheosis:gem_dust"
+    gem(&main.item).is_some()
+        && &*off.item == "apotheosis:gem_dust"
         && off.count >= POLISH_COST
         && purity_of(main) < Purity::Perfect
 }
@@ -1204,14 +1375,20 @@ fn polish(host: &mut dyn Host, slot: i32, main: &ItemStack, off: &ItemStack) {
     ));
 }
 
-fn reforge(host: &mut dyn Host, slot: i32, main: &ItemStack, player: u128) {
+fn reforge(
+    host: &mut dyn Host,
+    slot: i32,
+    main: &ItemStack,
+    player: u128,
+    expected: &Fingerprint,
+) {
     // The command charged for this tick; if the hand changed in between, the
     // levels go back rather than reroll something the player did not ask for.
-    if !can_reforge(main) {
+    if fingerprint(main) != *expected || !can_reforge(main) {
         let _ = host.give_levels(player, crate::REFORGE_COST);
         host.feedback(Text::translate_with_fallback(
-            "apotheosis.reforge.not_affixed",
-            "Hold an affixed piece to reforge it.",
+            "apotheosis.reforge.changed",
+            "The piece in your hand changed; nothing was reforged.",
             &[],
         ));
         return;
@@ -1228,11 +1405,17 @@ fn reforge(host: &mut dyn Host, slot: i32, main: &ItemStack, player: u128) {
     ));
 }
 
-fn salvage(host: &mut dyn Host, slot: i32, main: &ItemStack, player: u128) {
-    if !has_affixes(main) {
+fn salvage(
+    host: &mut dyn Host,
+    slot: i32,
+    main: &ItemStack,
+    player: u128,
+    expected: &Fingerprint,
+) {
+    if fingerprint(main) != *expected || !has_affixes(main) {
         host.feedback(Text::translate_with_fallback(
-            "apotheosis.salvage.not_affixed",
-            "Hold an affixed piece to salvage it.",
+            "apotheosis.salvage.changed",
+            "The piece in your hand changed; nothing was salvaged.",
             &[],
         ));
         return;
@@ -1240,17 +1423,30 @@ fn salvage(host: &mut dyn Host, slot: i32, main: &ItemStack, player: u128) {
     let tier = tier_of(main).unwrap_or(Tier::Common);
     let mut rng = Rng::new(next_roll());
     let (material, count, dust) = salvage_yield(tier, &mut rng);
+    // The gems come back at the purity they were socketed with, before the
+    // piece is destroyed: if one of them cannot fit, nothing is salvaged. The
+    // ones already handed out are taken back so the player gains nothing.
     let gems = socketed(main);
+    let unplaced = hand_out_gems(&gems, |gem| {
+        host.give_stack(player, gem.clone()).is_none()
+    });
+    if !unplaced.is_empty() {
+        for (index, socket) in gems.iter().enumerate() {
+            if !unplaced.contains(&index) {
+                let _ = host.take_items(&socket.gem, 1);
+            }
+        }
+        host.feedback(Text::translate_with_fallback(
+            "apotheosis.salvage.no_room",
+            "No room for the gems in it; nothing was salvaged.",
+            &[],
+        ));
+        return;
+    }
     write_slot(host, slot, emptied(main));
     let given = host.give_items(&material, count);
     if dust > 0 {
         let _ = host.give_items("apotheosis:gem_dust", dust);
-    }
-    // The gems come back at the purity they were socketed with.
-    for socket in gems {
-        let mut gem = ItemStack::new(&socket.gem, 1);
-        set_purity(&mut gem, socket.purity);
-        let _ = host.give_stack(player, gem);
     }
     host.feedback(Text::translate_with_fallback(
         "apotheosis.salvage.done",
@@ -1525,5 +1721,236 @@ mod tests {
         }
         assert!(seen.len() >= 4, "the roll is too narrow: {seen:?}");
         assert!(!seen.contains(&Purity::Perfect) || seen.len() >= 4);
+    }
+
+    const PLAYER: u128 = 7;
+
+    /// A host for the functions that act on carried stacks. `free_stacks` is
+    /// how many whole stacks the inventory still takes; 0 is a full one.
+    #[derive(Default)]
+    struct Fake {
+        slots: HashMap<i32, ItemStack>,
+        free_stacks: u32,
+        given: Vec<(String, u32)>,
+        items: Vec<(String, u32)>,
+        taken: Vec<(String, u32)>,
+        levels: Vec<i32>,
+    }
+
+    impl Host for Fake {
+        fn carried_stack(&mut self, slot: i32) -> Option<&mut ItemStack> {
+            self.slots.get_mut(&slot)
+        }
+
+        fn give_stack(&mut self, _uuid: u128, stack: ItemStack) -> Option<ItemStack> {
+            if self.free_stacks == 0 {
+                return Some(stack);
+            }
+            self.free_stacks -= 1;
+            self.given.push((stack.item.to_string(), stack.count));
+            None
+        }
+
+        fn give_items(&mut self, item: &str, count: u32) -> u32 {
+            if self.free_stacks == 0 {
+                return 0;
+            }
+            self.items.push((item.to_owned(), count));
+            count
+        }
+
+        fn take_items(&mut self, item: &str, count: u32) -> u32 {
+            self.taken.push((item.to_owned(), count));
+            count
+        }
+
+        fn give_levels(&mut self, _uuid: u128, levels: i32) -> bool {
+            self.levels.push(levels);
+            true
+        }
+
+        fn feedback(&mut self, _line: Text) {}
+    }
+
+    fn affixed(item: &str, tier: Tier, seed: u64) -> ItemStack {
+        let mut stack = ItemStack::new(item, 1);
+        let mut rng = Rng::new(seed);
+        apply_affixes(&mut stack, tier, &mut rng);
+        after_affixes(&mut stack, tier, &mut rng);
+        stack
+    }
+
+    fn three_gems() -> ItemStack {
+        let mut gear = affixed("minecraft:diamond_chestplate", Tier::Ancient, 31);
+        assert_eq!(socket_total(&gear), MAX_SOCKETS);
+        assert!(insert_gem(&mut gear, "apotheosis:gem_ruby", Purity::Normal));
+        assert!(insert_gem(&mut gear, "apotheosis:gem_sapphire", Purity::Flawless));
+        assert!(insert_gem(&mut gear, "apotheosis:gem_onyx", Purity::Perfect));
+        gear
+    }
+
+    #[test]
+    fn a_delayed_action_only_runs_on_the_slot_and_stack_it_was_validated_on() {
+        let sigil = ItemStack::new("apotheosis:sigil_of_rebirth", 1);
+        let rare = affixed("minecraft:diamond_chestplate", Tier::Rare, 3);
+        let mythic = affixed("minecraft:diamond_chestplate", Tier::Mythic, 4);
+        let pending = Pending::new(Action::Rebirth, 1, &sigil, Some(&rare));
+
+        assert!(pending.accepts(1, &sigil, Some(&rare)));
+        assert!(
+            !pending.accepts(2, &sigil, Some(&rare)),
+            "the tick of another slot ran the action"
+        );
+        assert!(
+            !pending.accepts(1, &sigil, Some(&mythic)),
+            "another piece was acted on"
+        );
+        assert_ne!(
+            fingerprint(&rare),
+            fingerprint(&mythic),
+            "two pieces of one item are the same fingerprint"
+        );
+
+        let gem = ItemStack::new("apotheosis:gem_ruby", 1);
+        let mut polished = gem.clone();
+        set_purity(&mut polished, Purity::Perfect);
+        let pending = Pending::new(Action::Polish, 0, &gem, None);
+        assert!(pending.accepts(0, &gem, None));
+        assert!(
+            !pending.accepts(0, &polished, None),
+            "a gem whose purity changed was polished again"
+        );
+    }
+
+    #[test]
+    fn a_sigil_is_taken_from_the_slot_it_was_used_from() {
+        let sigil = ItemStack::new("apotheosis:sigil_of_socketing", 4);
+        let mut host = Fake::default();
+        host.slots.insert(1, sigil.clone());
+        host.slots
+            .insert(2, ItemStack::new("minecraft:diamond", 64));
+        consume_seal(&mut host, 1, &sigil);
+        assert_eq!(host.slots.get(&1).unwrap().count, 3);
+        assert_eq!(host.slots.get(&2).unwrap().count, 64);
+    }
+
+    #[test]
+    fn polishing_never_touches_a_swapped_in_sword() {
+        let sword = ItemStack::new("minecraft:diamond_sword", 1);
+        let dust = ItemStack::new("apotheosis:gem_dust", POLISH_COST);
+        let mut host = Fake::default();
+        host.slots.insert(0, sword.clone());
+        host.slots.insert(OFFHAND, dust.clone());
+        polish(&mut host, 0, &sword, &dust);
+        assert_eq!(custom(host.slots.get(&0).unwrap()).get(PURITY_KEY), None);
+        assert_eq!(host.slots.get(&OFFHAND).unwrap().count, POLISH_COST);
+        assert!(!can_polish(&sword, &dust));
+    }
+
+    #[test]
+    fn a_full_inventory_keeps_withdrawn_gems_in_their_sockets() {
+        let gear = three_gems();
+        let sigil = ItemStack::new("apotheosis:sigil_of_withdrawal", 2);
+        let mut host = Fake::default();
+        host.slots.insert(4, sigil.clone());
+        host.slots.insert(OFFHAND, gear.clone());
+        withdraw(&mut host, 4, &sigil, &gear, PLAYER);
+
+        let kept = host.slots.get(&OFFHAND).expect("the piece was destroyed");
+        assert_eq!(socketed(kept), socketed(&gear));
+        assert_eq!(host.slots.get(&4).unwrap().count, 2, "the sigil was spent");
+        assert!(host.given.is_empty());
+    }
+
+    #[test]
+    fn withdrawing_with_room_returns_every_gem_and_spends_the_sigil() {
+        let gear = three_gems();
+        let sigil = ItemStack::new("apotheosis:sigil_of_withdrawal", 1);
+        let mut host = Fake {
+            free_stacks: 8,
+            ..Default::default()
+        };
+        host.slots.insert(4, sigil.clone());
+        host.slots.insert(OFFHAND, gear.clone());
+        withdraw(&mut host, 4, &sigil, &gear, PLAYER);
+
+        assert_eq!(host.given.len(), 3);
+        assert_eq!(socketed(host.slots.get(&OFFHAND).unwrap()), Vec::new());
+        assert_eq!(host.slots.get(&4).unwrap().count, 0);
+    }
+
+    #[test]
+    fn a_full_inventory_keeps_a_salvaged_piece_whole() {
+        let gear = three_gems();
+        let mut host = Fake::default();
+        host.slots.insert(3, gear.clone());
+        salvage(&mut host, 3, &gear, PLAYER, &fingerprint(&gear));
+
+        assert_eq!(
+            *host.slots.get(&3).expect("the piece was destroyed"),
+            gear
+        );
+        assert!(host.items.is_empty(), "material was given for nothing");
+        assert!(host.taken.is_empty());
+        assert!(host.given.is_empty());
+    }
+
+    #[test]
+    fn a_partly_full_inventory_salvages_nothing_and_takes_the_gems_back() {
+        let gear = three_gems();
+        let mut host = Fake {
+            free_stacks: 2,
+            ..Default::default()
+        };
+        host.slots.insert(3, gear.clone());
+        salvage(&mut host, 3, &gear, PLAYER, &fingerprint(&gear));
+
+        assert_eq!(*host.slots.get(&3).unwrap(), gear);
+        assert_eq!(host.given.len(), 2);
+        assert_eq!(host.taken.len(), 2, "the gems handed out were not taken back");
+        assert!(host.items.is_empty());
+    }
+
+    #[test]
+    fn a_reforge_only_rerolls_the_piece_it_was_paid_for() {
+        let paid_for = affixed("minecraft:diamond_sword", Tier::Rare, 51);
+        let swapped_in = affixed("minecraft:diamond_chestplate", Tier::Epic, 52);
+        let mut host = Fake::default();
+        host.slots.insert(2, swapped_in.clone());
+        reforge(&mut host, 2, &swapped_in, PLAYER, &fingerprint(&paid_for));
+
+        assert_eq!(host.levels, vec![crate::REFORGE_COST]);
+        assert_eq!(
+            *host.slots.get(&2).expect("the piece vanished"),
+            swapped_in,
+            "a piece the player did not designate was rerolled"
+        );
+    }
+
+    #[test]
+    fn a_reforge_of_the_paid_piece_spends_no_extra_levels() {
+        let paid_for = affixed("minecraft:diamond_sword", Tier::Rare, 61);
+        let mut host = Fake::default();
+        host.slots.insert(2, paid_for.clone());
+        reforge(&mut host, 2, &paid_for, PLAYER, &fingerprint(&paid_for));
+
+        assert!(host.levels.is_empty());
+        assert!(can_reforge(host.slots.get(&2).unwrap()));
+    }
+
+    #[test]
+    fn a_salvage_only_destroys_the_piece_it_was_validated_on() {
+        let designated = affixed("minecraft:diamond_sword", Tier::Mythic, 71);
+        let swapped_in = affixed("minecraft:diamond_chestplate", Tier::Ancient, 72);
+        let mut host = Fake {
+            free_stacks: 8,
+            ..Default::default()
+        };
+        host.slots.insert(3, swapped_in.clone());
+        salvage(&mut host, 3, &swapped_in, PLAYER, &fingerprint(&designated));
+
+        assert_eq!(*host.slots.get(&3).expect("the piece vanished"), swapped_in);
+        assert!(host.items.is_empty());
+        assert!(host.given.is_empty());
     }
 }
