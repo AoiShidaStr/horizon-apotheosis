@@ -6,3 +6,5 @@ authors = ["Saison 2 server"]
 api = "0.2"
 side = "both"
 capabilities = ["registries"]
+# The local Java asset layer keeps Apothic Enchanting's original namespace.
+namespaces = ["apothic_enchanting"]
