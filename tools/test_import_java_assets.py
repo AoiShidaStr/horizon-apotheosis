@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import import_java_assets as java  # noqa: E402
@@ -61,6 +62,28 @@ class ModelTests(unittest.TestCase):
         result, added = java.normalize_blockstate(state)
         self.assertFalse(added)
         self.assertNotIn("facing=north", result["variants"])
+
+
+class AliasTests(unittest.TestCase):
+    def test_alias_can_enable_a_gem_later(self):
+        # The gem workstream will add e.g. gem_ruby -> apotheosis:gem; the
+        # generic gem skip must not run before that explicit table.
+        source = FakeSource(
+            {
+                "assets/apotheosis/blockstates/gem_ruby.json": {},
+                "assets/apotheosis/models/item/gem_ruby.json": {},
+            }
+        )
+        importer = java.Importer(source, Path("."))
+        with mock.patch.dict(
+            java.JAVA_ALIASES, {"gem_ruby": ("apotheosis", "gem_ruby")}
+        ):
+            self.assertEqual(
+                importer.find_block("gem_ruby"), ("apotheosis", "gem_ruby")
+            )
+            self.assertEqual(
+                importer.find_item("gem_ruby"), ("apotheosis", "gem_ruby")
+            )
 
 
 class LanguageTests(unittest.TestCase):

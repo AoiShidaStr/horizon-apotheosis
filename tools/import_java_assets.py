@@ -337,14 +337,16 @@ class Importer:
         self.files[logical] = dump_json(value, sort_keys=sort_keys)
 
     def find_block(self, name: str) -> tuple[str, str] | None:
-        if name in GEM_BLOCK_IDS:
-            return None
+        # An explicit alias wins over the gem skip, so the gem workstream only
+        # has to add entries to JAVA_ALIASES.
         if name in JAVA_ALIASES:
             namespace, java_name = JAVA_ALIASES[name]
             if self.source.exists(
                 f"assets/{namespace}/blockstates/{java_name}.json"
             ):
                 return namespace, java_name
+            return None
+        if name in GEM_BLOCK_IDS:
             return None
         order = (
             ("apotheosis", "apothic_enchanting")
@@ -357,6 +359,15 @@ class Importer:
         return None
 
     def find_item(self, name: str) -> tuple[str, str] | None:
+        # An explicit alias wins over the gem skip, so the gem workstream only
+        # has to add entries to JAVA_ALIASES.
+        if name in JAVA_ALIASES:
+            namespace, java_name = JAVA_ALIASES[name]
+            if self.source.exists(f"assets/{namespace}/models/item/{java_name}.json"):
+                return namespace, java_name
+            if self.source.exists(f"assets/{namespace}/models/block/{java_name}.json"):
+                return namespace, java_name
+            return None
         if name in GEM_IDS or name in GEM_BLOCK_IDS:
             return None
         if name in self.block_map:
@@ -365,11 +376,6 @@ class Importer:
                 return namespace, java_name
             # Block items can point at the block model directly.
             if self.source.exists(f"assets/{namespace}/models/block/{java_name}.json"):
-                return namespace, java_name
-            return None
-        if name in JAVA_ALIASES:
-            namespace, java_name = JAVA_ALIASES[name]
-            if self.source.exists(f"assets/{namespace}/models/item/{java_name}.json"):
                 return namespace, java_name
             return None
         order = (
