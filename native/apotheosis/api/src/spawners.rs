@@ -26,10 +26,10 @@
 //! - `tick`: the queued reads, writes and messages run where commands may (API 1).
 
 use horizon_client::mod_api::{
-    Flow, Host, ItemStack, LootDropsEvent, PlaceBlockEvent, Tag, Text, TooltipEvent,
+    BlockStateId, Flow, Host, ItemStack, LootDropsEvent, PlaceBlockEvent, Tag, Text, TooltipEvent,
     UseItemOnEvent,
 };
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 /// The vanilla spawner block, and the block entity type it saves under.
@@ -775,9 +775,15 @@ pub fn mergeable(tag: &Tag) -> String {
 // Items
 // ---------------------------------------------------------------------------
 
-/// The silk-touch level of a tool: `minecraft:enchantments`' `levels` map, as
-/// 1.21 writes it, or a plain `minecraft:silk_touch` key on an older one.
+/// The silk-touch level of a tool. Horizon reads `minecraft:enchantments` into
+/// the stack's own enchantment list, so that is where it is looked up; a stack
+/// that kept the component as a raw tag (`levels` map, or a plain
+/// `minecraft:silk_touch` key) is read as well.
 pub fn silk_touch(stack: &ItemStack) -> i32 {
+    let typed = stack.enchantment_level("minecraft:silk_touch") as i32;
+    if typed > 0 {
+        return typed;
+    }
     let Some(data) = stack.data() else {
         return 0;
     };
@@ -1008,6 +1014,10 @@ struct Cached {
 
 static QUEUE: Mutex<Vec<Queued>> = Mutex::new(Vec::new());
 static CACHED: Mutex<Vec<Cached>> = Mutex::new(Vec::new());
+/// The block state id of a spawner, learnt from the first click on one: a
+/// break's drops name the state, not the block, and a player's break always
+/// follows a left click. A spawner has no properties, so it has one state.
+static SPAWNER_STATE: AtomicU32 = AtomicU32::new(u32::MAX);
 static TICKS: AtomicU64 = AtomicU64::new(0);
 /// How many probes have been made, so each one can be named.
 static PROBES: AtomicU64 = AtomicU64::new(0);
@@ -1135,10 +1145,11 @@ pub fn on_use_item_on(host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Fl
 }
 
 /// A left click on a spawner: read its data now, so the break can drop it.
-pub fn on_left_click(host: &mut dyn Host, pos: [i32; 3]) -> Flow {
+pub fn on_left_click(host: &mut dyn Host, pos: [i32; 3], state: BlockStateId) -> Flow {
     if host.block(pos) != SPAWNER {
         return Flow::Continue;
     }
+    SPAWNER_STATE.store(state.0, Ordering::Relaxed);
     push(host.dimension(), pos, Job::Probe);
     Flow::Continue
 }
@@ -1153,18 +1164,40 @@ pub fn on_place(host: &mut dyn Host, event: &PlaceBlockEvent<'_>) {
     push(host.dimension(), event.pos, Job::Restore(data));
 }
 
+/// The drop of a spawner broken at `dimension`/`pos`: with a silk-touch tool the
+/// spawner item, carrying the data that was read for it when the read finished
+/// and a plain spawner when it did not (a dig that ends before the next tick
+/// leaves no time for the read; Apothic Spawners drops the item all the same).
+/// Any other tool drops nothing. The read ends with the break either way, so
+/// the data never goes to another block.
+pub fn drop_for_break(dimension: &str, pos: [i32; 3], silk: i32) -> Option<ItemStack> {
+    let read = taken_by_break(dimension, pos, silk);
+    if silk < 1 {
+        return None;
+    }
+    Some(match read {
+        Some(tag) => spawner_item(&tag),
+        None => ItemStack::new(SPAWNER, 1),
+    })
+}
+
 /// A broken spawner that a silk-touch tool broke: it drops itself with its mob
 /// and its stats. A break with any other tool takes nothing and still ends the
 /// read, so the block that comes next at that position cannot inherit it.
+///
+/// Only the block state a left click saw on a spawner counts as one: the block
+/// is gone when the drops are told, and the state is all the event names.
 pub fn on_loot_drops(event: &mut LootDropsEvent<'_>) {
-    let Some((pos, _)) = event.context.block else {
+    let Some((pos, state)) = event.context.block else {
         return;
     };
+    if SPAWNER_STATE.load(Ordering::Relaxed) != state.0 {
+        return;
+    }
     let silk = event.context.tool.map(silk_touch).unwrap_or(0);
-    let Some(tag) = taken_by_break(event.context.dimension, pos, silk) else {
-        return;
-    };
-    event.drops.push(spawner_item(&tag));
+    if let Some(stack) = drop_for_break(event.context.dimension, pos, silk) {
+        event.drops.push(stack);
+    }
 }
 
 /// Once a tick: the queued reads, writes and messages, where commands may run.
@@ -1677,6 +1710,50 @@ mod tests {
             Some(tag([("levels", tag([("minecraft:fortune", Tag::Int(3))]))])),
         );
         assert_eq!(silk_touch(&plain), 0);
+    }
+
+    #[test]
+    fn silk_touch_is_read_from_the_enchantment_list_horizon_keeps() {
+        let mut stack = ItemStack::new("minecraft:iron_pickaxe", 1);
+        stack.data_mut().enchantments = vec![(std::sync::Arc::from("minecraft:silk_touch"), 1)];
+        assert_eq!(silk_touch(&stack), 1);
+        let mut other = ItemStack::new("minecraft:iron_pickaxe", 1);
+        other.data_mut().enchantments = vec![(std::sync::Arc::from("minecraft:fortune"), 3)];
+        assert_eq!(silk_touch(&other), 0);
+    }
+
+    #[test]
+    fn a_silk_break_drops_the_spawner_with_its_read_data() {
+        let (dimension, pos) = ("minecraft:overworld", [61, 62, 63]);
+        remember(dimension, pos, mob_spawner("minecraft:pig"), 3);
+        let stack = drop_for_break(dimension, pos, 1).expect("a spawner");
+        assert_eq!(&*stack.item, SPAWNER);
+        let data = stack
+            .data()
+            .and_then(|d| d.other(BLOCK_ENTITY_DATA))
+            .expect("its data");
+        assert_eq!(spawn_entity(data).as_deref(), Some("minecraft:pig"));
+        assert!(cached_drop(dimension, pos).is_none());
+    }
+
+    #[test]
+    fn a_silk_break_without_a_finished_read_still_drops_a_plain_spawner() {
+        let (dimension, pos) = ("minecraft:overworld", [71, 72, 73]);
+        let stack = drop_for_break(dimension, pos, 1).expect("a plain spawner");
+        assert_eq!(&*stack.item, SPAWNER);
+        assert_eq!(stack.count, 1);
+        assert!(stack.data().and_then(|d| d.other(BLOCK_ENTITY_DATA)).is_none());
+    }
+
+    #[test]
+    fn a_break_without_silk_touch_drops_nothing_and_leaves_no_data_behind() {
+        let (dimension, pos) = ("minecraft:overworld", [81, 82, 83]);
+        remember(dimension, pos, mob_spawner("minecraft:zombie"), 3);
+        assert!(drop_for_break(dimension, pos, 0).is_none());
+        // The next spawner there, broken with silk before its read ends, gets a
+        // plain item and not the zombie's data.
+        let stack = drop_for_break(dimension, pos, 1).expect("a plain spawner");
+        assert!(stack.data().and_then(|d| d.other(BLOCK_ENTITY_DATA)).is_none());
     }
 
     #[test]
