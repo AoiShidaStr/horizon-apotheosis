@@ -37,6 +37,11 @@ pub const SPAWNER: &str = "minecraft:spawner";
 const BLOCK_ENTITY_ID: &str = "minecraft:mob_spawner";
 const CUSTOM_DATA: &str = "minecraft:custom_data";
 const BLOCK_ENTITY_DATA: &str = "minecraft:block_entity_data";
+/// The key under which a spawner item also carries its data in
+/// `minecraft:custom_data`: Horizon's network encoding of a stack sends
+/// `custom_data` but not `block_entity_data`, so only this copy reaches a
+/// client (tooltip, inventory) and survives a round trip through one.
+const CARRIED: &str = "apoth_spawner";
 /// The tag the probe item entity carries, so it is found again.
 const PROBE: &str = "apoth_spawner_probe";
 /// The key the probe item carries its own name under: a read can leave a probe
@@ -816,10 +821,23 @@ pub fn spawner_item(tag: &Tag) -> ItemStack {
             );
         }
     }
+    let mut custom = Tag::Compound(Default::default());
+    if let Tag::Compound(entries) = &mut custom {
+        entries.insert(CARRIED.into(), data.clone());
+    }
+    stack.data_mut().set_other(CUSTOM_DATA, Some(custom));
     stack
         .data_mut()
         .set_other(BLOCK_ENTITY_DATA, Some(data));
     stack
+}
+
+/// The data a spawner item carries: its `block_entity_data`, or else the copy
+/// in its `custom_data` (the one a stack keeps after a trip over the network).
+pub fn carried_data(stack: &ItemStack) -> Option<&Tag> {
+    let data = stack.data()?;
+    data.other(BLOCK_ENTITY_DATA)
+        .or_else(|| data.other(CUSTOM_DATA).and_then(|custom| custom.get(CARRIED)))
 }
 
 // ---------------------------------------------------------------------------
@@ -973,7 +991,7 @@ pub fn on_tooltip(event: &mut TooltipEvent<'_>) {
     if event.stack.item.as_ref() != SPAWNER {
         return;
     }
-    let Some(data) = event.stack.data().and_then(|d| d.other(BLOCK_ENTITY_DATA)) else {
+    let Some(data) = carried_data(event.stack) else {
         return;
     };
     event.lines.extend(tooltip(&Stats::from_tag(data)));
@@ -1079,10 +1097,7 @@ pub fn placed_data(dimension: &str, pos: [i32; 3], stack: &ItemStack) -> Option<
     if stack.item.as_ref() != SPAWNER {
         return None;
     }
-    stack
-        .data()
-        .and_then(|d| d.other(BLOCK_ENTITY_DATA))
-        .cloned()
+    carried_data(stack).cloned()
 }
 
 /// What a probe found, or nothing when the spawner was gone or its chunk was
@@ -1689,6 +1704,33 @@ mod tests {
         assert_eq!(
             carried.get("id").and_then(tag_string).as_deref(),
             Some(BLOCK_ENTITY_ID)
+        );
+    }
+
+    #[test]
+    fn a_spawner_item_keeps_its_data_where_the_network_sends_it() {
+        // Horizon sends `custom_data` to a client and not `block_entity_data`.
+        let data = tag([("MinSpawnDelay", Tag::Int(40))]);
+        let stack = spawner_item(&data);
+        let custom = stack
+            .data()
+            .and_then(|d| d.other(CUSTOM_DATA))
+            .expect("custom data");
+        assert_eq!(
+            custom.get(CARRIED).and_then(|t| t.get("MinSpawnDelay")),
+            Some(&Tag::Int(40))
+        );
+    }
+
+    #[test]
+    fn a_spawner_item_that_lost_its_block_entity_data_still_restores_and_shows() {
+        let mut stack = spawner_item(&mob_spawner("minecraft:skeleton"));
+        stack.data_mut().set_other(BLOCK_ENTITY_DATA, None);
+        let data = placed_data("minecraft:overworld", [91, 92, 93], &stack).expect("restored");
+        assert_eq!(spawn_entity(&data).as_deref(), Some("minecraft:skeleton"));
+        assert_eq!(
+            carried_data(&stack).and_then(spawn_entity).as_deref(),
+            Some("minecraft:skeleton")
         );
     }
 
