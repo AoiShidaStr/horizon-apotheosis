@@ -671,6 +671,25 @@ Both halves use the id `apotheosis`.
 3. Clients and the dedicated server need the same `.hmod` (a `side = "both"`
    mod: a client with another version is refused).
 
+## Dedicated server in Docker
+
+`tools/docker/` builds a dedicated Horizon server image with this mod compiled
+into its engine (adapted from Horizon's `packaging/server/Dockerfile`):
+
+```sh
+bash tools/docker/stage-context.sh "<Horizon source at the pinned commit>" ../docker-ctx
+docker build -t horizon-apotheosis:0.6.0 ../docker-ctx
+docker run -d --name apotheosis -p 25565:25565 --stop-timeout 180   -v apotheosis-data:/data   -v "<prepared 26.3 folder>:/opt/horizon/.local/horizon-client/26.3:ro"   -e HORIZON_EULA=true -e HORIZON_WHITELIST=true -e HORIZON_PLAYERS=<name> -e HORIZON_OP=<name>   horizon-apotheosis:0.6.0
+```
+
+The Horizon source at the pinned commit is in the launcher's cache
+(`%APPDATA%/horizon-launcher/native/source/<commit>`); the prepared 26.3 folder
+is the one `horizon-launcher prepare --version <base>` writes under
+`versions/<base>/.local/horizon-client/26.3`. Put the same `apotheosis.hmod` as
+the clients in the data volume's `horizon-mods/` with `mod.apotheosis:true` in
+`horizon-mods.txt`. `HORIZON_EULA=true` accepts the Minecraft EULA for that
+server. The image holds no Minecraft files and no Java assets.
+
 ## Build
 
 1. Import the Java assets you own into the git-ignored layer (textures, models,
