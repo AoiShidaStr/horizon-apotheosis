@@ -177,11 +177,55 @@ class LanguageTests(unittest.TestCase):
         fr = json.loads(
             self.importer.files["assets/apotheosis/lang/fr_fr.json"]
         )
-        # Java's fr_fr has no entry, exactly as at runtime: use en_us.
+        # Java's fr_fr has no entry: the port's own French wins over Java's
+        # English, so a French text is never replaced by an English one.
         self.assertEqual(
-            fr["block.apotheosis.reforging_table"], "Reforging Table"
+            fr["block.apotheosis.reforging_table"], "Notre table"
         )
         self.assertEqual(fr["apotheosis.our_key"], "Notre valeur")
+
+    def test_java_french_beats_the_port_french(self):
+        self.source.files["assets/apotheosis/lang/fr_fr.json"] = json.dumps(
+            {"block.apotheosis.reforging_table": "Table Java"}
+        )
+        self.importer.import_lang()
+        fr = json.loads(
+            self.importer.files["assets/apotheosis/lang/fr_fr.json"]
+        )
+        self.assertEqual(fr["block.apotheosis.reforging_table"], "Table Java")
+
+
+class GemOverlayTests(unittest.TestCase):
+    def test_overlay_never_ships_the_java_gem_item(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "content"
+            (root / "assets" / java.OUR_NS / "items").mkdir(parents=True)
+            (root / "assets" / java.OUR_NS / "items" / "gem.json").write_text("{}")
+            old = java.CONTENT
+            java.CONTENT = root
+            try:
+                files = {
+                    "assets/apotheosis/models/item/gem.json": json.dumps(
+                        {"parent": "minecraft:item/generated",
+                         "textures": {"layer0": "apotheosis:item/gems/default"}}
+                    ),
+                }
+
+                class AnyTexture(FakeSource):
+                    def exists(self, logical):
+                        return logical in self.files or logical.startswith(
+                            "assets/apotheosis/textures/"
+                        )
+
+                    def read(self, logical):
+                        return b"png"
+
+                importer = java.Importer(AnyTexture(files), Path(temp) / "out")
+                importer.build()
+            finally:
+                java.CONTENT = old
+            self.assertNotIn("assets/apotheosis/items/gem.json", importer.files)
+            self.assertNotIn("assets/apotheosis/models/item/gem.json", importer.files)
 
 
 class PackOverlayTests(unittest.TestCase):
