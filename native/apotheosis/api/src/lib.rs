@@ -595,6 +595,7 @@ impl Hooks for Apotheosis {
 
     fn inventory_tick(&self, host: &mut dyn Host, event: &mut horizon_client::mod_api::InventoryTickEvent) {
         sockets::inventory_tick(host, event);
+        enchanting::inventory_tick(host, event);
     }
 
     fn loot_table_load(&self, event: &mut horizon_client::mod_api::LootTableLoadEvent<'_>) {
