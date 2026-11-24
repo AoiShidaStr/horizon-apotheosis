@@ -20,6 +20,7 @@ use horizon_client::mod_api::{
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::affixes;
 use crate::attributes::{self, Attr};
@@ -505,21 +506,31 @@ fn is_socket_lore(entry: &Tag) -> bool {
     )
 }
 
+/// The equipment slot group a socketed gem's modifier belongs to, from the
+/// item itself: Java's `EquipmentSlotGroup` follows the piece, so a sword
+/// works in the main hand only, a shield in the off hand, and each piece of
+/// armour in its own armour slot. `hand` would let a socketed sword pay out
+/// its bonus from the off hand too.
+fn socket_slot_group(item: &str) -> &'static str {
+    if item == "minecraft:shield" {
+        return "offhand";
+    }
+    for (suffix, group) in [
+        ("_helmet", "head"),
+        ("_chestplate", "chest"),
+        ("_leggings", "legs"),
+        ("_boots", "feet"),
+    ] {
+        if item.ends_with(suffix) {
+            return group;
+        }
+    }
+    "mainhand"
+}
+
 /// Rewrites the socket half of a piece's modifiers and lore, keeping the
 /// affixes' own entries: called after socketing, after a reforge, and once when
 /// the sockets are rolled.
-fn socket_slot_group(item: &str) -> &'static str {
-    if ["_helmet", "_chestplate", "_leggings", "_boots"]
-        .iter()
-        .any(|suffix| item.ends_with(suffix))
-    {
-        "armor"
-    } else {
-        // Shields are equipped in the off hand, not in an armor slot.
-        "hand"
-    }
-}
-
 fn refresh(stack: &mut ItemStack) {
     undo_socket_extras(stack);
     let total = socket_total(stack);
@@ -577,7 +588,7 @@ fn refresh(stack: &mut ItemStack) {
             }
         }
         apothic.extend(gems::apothic(&resolved));
-        lore.extend(socket_lore(socket, entry));
+        lore.extend(socket_lore(socket, entry, &stack.item));
     }
 
     if total > 0 {
@@ -729,7 +740,7 @@ fn apply_enchantments(stack: &mut ItemStack, plan: &[(String, u8, bool)]) -> Vec
     added
 }
 
-fn socket_lore(socket: &Socket, entry: &crate::java_gems::Gem) -> Vec<Tag> {
+fn socket_lore(socket: &Socket, entry: &crate::java_gems::Gem, item: &str) -> Vec<Tag> {
     let colour = socket.purity.hex();
     let gem = || {
         Tag::compound([
@@ -763,7 +774,7 @@ fn socket_lore(socket: &Socket, entry: &crate::java_gems::Gem) -> Vec<Tag> {
         ("italic", Tag::Byte(0)),
         ("with", Tag::List(vec![gem(), purity()])),
     ])];
-    for line in gems::description(entry, socket.purity) {
+    for line in gems::description_for(entry, socket.purity, item) {
         let fallback = format!("{} {}: {}", socket.purity.name(), entry.name, line.fallback);
         let bonus = Tag::compound([
             ("translate", Tag::String(line.key.as_str().into())),
@@ -883,7 +894,7 @@ pub fn tooltip(event: &mut TooltipEvent<'_>) {
             .with_color(colour),
             colour,
         ));
-        for line in gems::description(entry, socket.purity) {
+        for line in gems::description_for(entry, socket.purity, &event.stack.item) {
             event.lines.push((
                 Text::translate_with_fallback(
                     &line.key,
@@ -1061,6 +1072,9 @@ struct Pending {
     target: Option<Fingerprint>,
     /// What a reforge was charged, given back if the hand changed.
     charge: Charge,
+    /// The rarity a table reforge keeps; none for a command reforge or a
+    /// sigil of rebirth, which roll one.
+    tier: Option<Tier>,
 }
 
 impl Pending {
@@ -1071,11 +1085,17 @@ impl Pending {
             main: fingerprint(main),
             target: target.map(fingerprint),
             charge: Charge::default(),
+            tier: None,
         }
     }
 
     fn with_charge(mut self, charge: Charge) -> Self {
         self.charge = charge;
+        self
+    }
+
+    fn with_tier(mut self, tier: Tier) -> Self {
+        self.tier = Some(tier);
         self
     }
 
@@ -1161,7 +1181,7 @@ pub fn use_item(host: &mut dyn Host, event: &mut UseItemEvent<'_>) -> Flow {
 /// inventory tick: `/apoth salvage`.
 pub fn begin_salvage(host: &mut dyn Host, player: u128, slot: i32) {
     let Some(stack) = host.held_stack(player) else {
-        host.feedback(Text::translate_with_fallback(
+        say(host, player, Text::translate_with_fallback(
             "apotheosis.salvage.not_affixed",
             "Hold an affixed piece to salvage it.",
             &[],
@@ -1169,7 +1189,7 @@ pub fn begin_salvage(host: &mut dyn Host, player: u128, slot: i32) {
         return;
     };
     if !has_affixes(&stack) {
-        host.feedback(Text::translate_with_fallback(
+        say(host, player, Text::translate_with_fallback(
             "apotheosis.salvage.not_affixed",
             "Hold an affixed piece to salvage it.",
             &[],
@@ -1210,7 +1230,7 @@ fn begin_table_reforge(
 ) {
     let tier = tier_of(stack).unwrap_or(Tier::Common);
     let Some((levels, material_count, sigils)) = reforge_cost(tier, table) else {
-        host.feedback(Text::translate_with_fallback(
+        say(host, player, Text::translate_with_fallback(
             "apotheosis.table.reforge.rarity",
             "This table cannot reforge that rarity; use the reforging table.",
             &[],
@@ -1218,7 +1238,7 @@ fn begin_table_reforge(
         return;
     };
     if xp_level < levels {
-        host.feedback(Text::translate_with_fallback(
+        say(host, player, Text::translate_with_fallback(
             "apotheosis.reforge.levels",
             "Reforging costs %s experience levels.",
             &[Text::literal(levels.to_string())],
@@ -1231,7 +1251,7 @@ fn begin_table_reforge(
         if got_material > 0 {
             let _ = host.give_items(material, got_material);
         }
-        host.feedback(Text::translate_with_fallback(
+        say(host, player, Text::translate_with_fallback(
             "apotheosis.reforge.missing",
             "You do not have the materials this reforge needs.",
             &[],
@@ -1248,7 +1268,7 @@ fn begin_table_reforge(
         if got_sigils > 0 {
             let _ = host.give_items("apotheosis:sigil_of_rebirth", got_sigils);
         }
-        host.feedback(Text::translate_with_fallback(
+        say(host, player, Text::translate_with_fallback(
             "apotheosis.reforge.missing",
             "You do not have the materials this reforge needs.",
             &[],
@@ -1269,7 +1289,9 @@ fn begin_table_reforge(
     };
     set_pending(
         player,
-        Pending::new(Action::Reforge, slot, stack, None).with_charge(charge),
+        Pending::new(Action::Reforge, slot, stack, None)
+            .with_charge(charge)
+            .with_tier(tier),
     );
 }
 
@@ -1277,8 +1299,48 @@ fn begin_table_reforge(
 /// the hook API has no random source, so this is the port's own stream.
 fn next_roll() -> u64 {
     static ROLLS: AtomicU64 = AtomicU64::new(0);
-    let n = ROLLS.fetch_add(1, Ordering::Relaxed);
-    n.wrapping_mul(0x9E37_79B9_7F4A_7C15).rotate_left(17)
+    let n = ROLLS.fetch_add(1, Ordering::Relaxed) + 1;
+    seed_mix(n, &[])
+}
+
+/// The seed of one reforge, mixed from a counter that advances, the wall
+/// clock, the player and the item: Java renews a per-player reforge seed after
+/// every reforge, so two reforges never land on the same roll.
+pub(crate) fn reforge_seed(player: u128, item: &str) -> u64 {
+    static REFORGES: AtomicU64 = AtomicU64::new(0);
+    let n = REFORGES.fetch_add(1, Ordering::Relaxed) + 1;
+    let clock = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos() as u64)
+        .unwrap_or(n);
+    seed_mix(
+        n ^ clock.rotate_left(23),
+        &[player as u64, (player >> 64) as u64, item_id(item)],
+    )
+}
+
+/// A stable number for an item id, so the same piece reforge always mixes its
+/// own id in.
+fn item_id(item: &str) -> u64 {
+    let mut hash = 0xCBF2_9CE4_8422_2325u64;
+    for byte in item.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01B3);
+    }
+    hash
+}
+
+/// splitmix64's finalizer over a counter and any number of extra values.
+fn seed_mix(counter: u64, extras: &[u64]) -> u64 {
+    let mut seed = counter.wrapping_mul(0x9E37_79B9_7F4A_7C15).rotate_left(17);
+    for extra in extras {
+        seed ^= extra.rotate_left(31);
+    }
+    seed ^= seed >> 30;
+    seed = seed.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    seed ^= seed >> 27;
+    seed = seed.wrapping_mul(0x94D0_49BB_1331_11EB);
+    seed ^ (seed >> 31)
 }
 
 /// Whether the main hand holds a piece this module can reforge: affixed gear.
@@ -1323,22 +1385,29 @@ pub fn inventory_tick(host: &mut dyn Host, event: &mut InventoryTickEvent) {
     }
 
     match pending.action {
-        Action::Reforge => reforge(host, pending.slot, &main, player.uuid, &pending.main),
+        Action::Reforge => reforge(
+            host,
+            pending.slot,
+            &main,
+            player.uuid,
+            &pending.main,
+            pending.tier,
+        ),
         Action::Salvage => salvage(host, pending.slot, &main, player.uuid, &pending.main),
-        Action::Cut => cut(host, pending.slot, &main),
-        Action::SalvageGem => salvage_gem(host, pending.slot, &main),
+        Action::Cut => cut(host, pending.slot, &main, player.uuid),
+        Action::SalvageGem => salvage_gem(host, pending.slot, &main, player.uuid),
         other => {
             let Some(off) = target else {
                 return;
             };
             match other {
-                Action::Socket => socket(host, pending.slot, &main, &off),
-                Action::Polish => polish(host, pending.slot, &main, &off),
-                Action::AddSocket => add_socket(host, pending.slot, &main, &off),
+                Action::Socket => socket(host, pending.slot, &main, &off, player.uuid),
+                Action::Polish => polish(host, pending.slot, &main, &off, player.uuid),
+                Action::AddSocket => add_socket(host, pending.slot, &main, &off, player.uuid),
                 Action::Withdraw => withdraw(host, pending.slot, &main, &off, player.uuid),
-                Action::Rebirth => rebirth(host, pending.slot, &main, &off),
-                Action::Enhance => enhance(host, pending.slot, &main, &off),
-                Action::Unnaming => unname(host, pending.slot, &main, &off),
+                Action::Rebirth => rebirth(host, pending.slot, &main, &off, player.uuid),
+                Action::Enhance => enhance(host, pending.slot, &main, &off, player.uuid),
+                Action::Unnaming => unname(host, pending.slot, &main, &off, player.uuid),
                 _ => {}
             }
         }
@@ -1361,7 +1430,7 @@ pub fn use_seal(host: &mut dyn Host, event: &UseItemEvent<'_>, kind: Seal) -> Fl
         return Flow::Continue;
     };
     if !can_reforge(&off) {
-        host.feedback(Text::translate_with_fallback(
+        say(host, player.uuid, Text::translate_with_fallback(
             "apotheosis.seal.no_piece",
             "Hold an affixed piece in your off hand to use a sigil on it.",
             &[],
@@ -1404,7 +1473,7 @@ pub fn use_item_on(host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow 
             // has a rarity, which is the piece in hand. Plain gear stays on
             // the `reforge` command, a port extension.
             if !is_equipment(&event.stack.item) || tier_of(&event.stack).is_none() {
-                host.feedback(Text::translate_with_fallback(
+                say(host, player.uuid, Text::translate_with_fallback(
                     "apotheosis.table.reforge.hint",
                     "The reforging table works on the affixed piece in your hand.",
                     &[],
@@ -1435,7 +1504,7 @@ pub fn use_item_on(host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow 
                 return Flow::Cancel;
             }
             if !has_affixes(&event.stack) {
-                host.feedback(Text::translate_with_fallback(
+                say(host, player.uuid, Text::translate_with_fallback(
                     "apotheosis.table.salvage.hint",
                     "The salvaging table breaks down the affixed piece in your hand.",
                     &[],
@@ -1447,7 +1516,7 @@ pub fn use_item_on(host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow 
         }
         Table::Cutting => {
             if gems::of_stack(&event.stack).is_none() || purity_of(&event.stack) >= Purity::Perfect {
-                host.feedback(Text::translate_with_fallback(
+                say(host, player.uuid, Text::translate_with_fallback(
                     "apotheosis.table.cut.hint",
                     "The gem cutting table sharpens the gem in your hand.",
                     &[],
@@ -1475,13 +1544,13 @@ fn consume_seal(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack) {
     write_slot(host, slot, left);
 }
 
-fn add_socket(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemStack) {
+fn add_socket(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemStack, player: u128) {
     if !can_reforge(gear) {
         return;
     }
     let total = socket_total(gear);
     if total >= MAX_SOCKETS {
-        host.feedback(Text::translate_with_fallback(
+        say(host, player, Text::translate_with_fallback(
             "apotheosis.socket.max",
             "That piece already has all %s sockets.",
             &[Text::literal(total.to_string())],
@@ -1493,7 +1562,7 @@ fn add_socket(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &Ite
     refresh(&mut piece);
     write_slot(host, OFFHAND, piece);
     consume_seal(host, slot, seal_stack);
-    host.feedback(Text::translate_with_fallback(
+    say(host, player, Text::translate_with_fallback(
         "apotheosis.socket.added",
         "Socket added: %s/%s.",
         &[
@@ -1528,7 +1597,7 @@ fn hand_out_gems(gems: &[Socket], mut give: impl FnMut(&ItemStack) -> bool) -> V
 fn withdraw(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemStack, player: u128) {
     let gems = socketed(gear);
     if gems.is_empty() {
-        host.feedback(Text::translate_with_fallback(
+        say(host, player, Text::translate_with_fallback(
             "apotheosis.socket.none",
             "That piece has no gem in its sockets.",
             &[],
@@ -1543,7 +1612,7 @@ fn withdraw(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemS
     });
     let count = gems.len() - unplaced.len();
     if count == 0 {
-        host.feedback(Text::translate_with_fallback(
+        say(host, player, Text::translate_with_fallback(
             "apotheosis.socket.no_room",
             "No room for the gems; they stayed in their sockets.",
             &[],
@@ -1556,13 +1625,13 @@ fn withdraw(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemS
     refresh(&mut piece);
     write_slot(host, OFFHAND, piece);
     consume_seal(host, slot, seal_stack);
-    host.feedback(Text::translate_with_fallback(
+    say(host, player, Text::translate_with_fallback(
         "apotheosis.socket.withdrawn",
         "%s gem(s) taken back out.",
         &[Text::literal(count.to_string())],
     ));
     if !kept.is_empty() {
-        host.feedback(Text::translate_with_fallback(
+        say(host, player, Text::translate_with_fallback(
             "apotheosis.socket.no_room",
             "No room for every gem; the rest stayed in their sockets.",
             &[],
@@ -1570,13 +1639,14 @@ fn withdraw(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemS
     }
 }
 
-fn rebirth(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemStack) {
+fn rebirth(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemStack, player: u128) {
     if !can_reforge(gear) {
         return;
     }
-    let tier = reroll(host, OFFHAND, gear);
+    let seed = reforge_seed(player, &gear.item);
+    let tier = reroll(host, OFFHAND, gear, seed, None);
     consume_seal(host, slot, seal_stack);
-    host.feedback(Text::translate_with_fallback(
+    say(host, player, Text::translate_with_fallback(
         "apotheosis.reforge.done",
         "Reforged: %s.",
         &[Text::translate_with_fallback(
@@ -1587,12 +1657,12 @@ fn rebirth(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemSt
     ));
 }
 
-fn enhance(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemStack) {
+fn enhance(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemStack, player: u128) {
     let Some(tier) = tier_of(gear) else {
         return;
     };
     if tier == Tier::Ancient {
-        host.feedback(Text::translate_with_fallback(
+        say(host, player, Text::translate_with_fallback(
             "apotheosis.enhance.max",
             "That piece is already ancient.",
             &[],
@@ -1610,7 +1680,7 @@ fn enhance(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemSt
     refresh(&mut piece);
     write_slot(host, OFFHAND, piece);
     consume_seal(host, slot, seal_stack);
-    host.feedback(Text::translate_with_fallback(
+    say(host, player, Text::translate_with_fallback(
         "apotheosis.enhance.done",
         "Enhanced: %s.",
         &[Text::translate_with_fallback(
@@ -1623,14 +1693,14 @@ fn enhance(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemSt
 
 /// Removes only the name this port generated from a piece's affixes. A name a
 /// player set themselves is left alone and the sigil is not spent.
-fn unname(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemStack) {
+fn unname(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemStack, player: u128) {
     const CUSTOM_NAME: &str = "minecraft:custom_name";
     let name = gear
         .data()
         .and_then(|data| data.other(CUSTOM_NAME))
         .cloned();
     let Some(name) = name else {
-        host.feedback(Text::translate_with_fallback(
+        say(host, player, Text::translate_with_fallback(
             "apotheosis.unnaming.none",
             "That piece has no name to remove.",
             &[],
@@ -1638,7 +1708,7 @@ fn unname(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemSta
         return;
     };
     if !affixes::is_generated_name(&name) {
-        host.feedback(Text::translate_with_fallback(
+        say(host, player, Text::translate_with_fallback(
             "apotheosis.unnaming.custom",
             "That name was not written by affixes; it is left alone.",
             &[],
@@ -1651,7 +1721,7 @@ fn unname(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemSta
         .set_other(CUSTOM_NAME, Option::<Tag>::None);
     write_slot(host, OFFHAND, piece);
     consume_seal(host, slot, seal_stack);
-    host.feedback(Text::translate_with_fallback(
+    say(host, player, Text::translate_with_fallback(
         "apotheosis.unnaming.done",
         "The affix name was removed.",
         &[],
@@ -1660,7 +1730,7 @@ fn unname(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemSta
 
 /// Java's gem salvaging recipes: a gem breaks into gem dust and is consumed.
 /// If the dust cannot fit, the gem is kept.
-fn salvage_gem(host: &mut dyn Host, slot: i32, gem_stack: &ItemStack) {
+fn salvage_gem(host: &mut dyn Host, slot: i32, gem_stack: &ItemStack, player: u128) {
     if gems::of_stack(gem_stack).is_none() {
         return;
     }
@@ -1672,7 +1742,7 @@ fn salvage_gem(host: &mut dyn Host, slot: i32, gem_stack: &ItemStack) {
         if given > 0 {
             let _ = host.take_items("apotheosis:gem_dust", given);
         }
-        host.feedback(Text::translate_with_fallback(
+        say(host, player, Text::translate_with_fallback(
             "apotheosis.salvage.no_room",
             "Some of it did not fit in your inventory.",
             &[],
@@ -1682,7 +1752,7 @@ fn salvage_gem(host: &mut dyn Host, slot: i32, gem_stack: &ItemStack) {
     let mut left = gem_stack.clone();
     left.count = left.count.saturating_sub(1);
     write_slot(host, slot, left);
-    host.feedback(Text::translate_with_fallback(
+    say(host, player, Text::translate_with_fallback(
         "apotheosis.salvage.gem",
         "Salvaged into %s gem dust.",
         &[Text::literal(dust.to_string())],
@@ -1702,7 +1772,7 @@ pub fn next_tier(tier: Tier) -> Tier {
 
 /// The gem cutting table: the held gem rises one purity, at the Java
 /// `purity_upgrade` cost for the purity it reaches.
-fn cut(host: &mut dyn Host, slot: i32, main: &ItemStack) {
+fn cut(host: &mut dyn Host, slot: i32, main: &ItemStack, player: u128) {
     if gems::of_stack(main).is_none() {
         return;
     }
@@ -1727,7 +1797,7 @@ fn cut(host: &mut dyn Host, slot: i32, main: &ItemStack) {
                 let _ = host.give_items(item, got);
             }
         }
-        host.feedback(Text::translate_with_fallback(
+        say(host, player, Text::translate_with_fallback(
             "apotheosis.cut.no_dust",
             "The gem cutting table needs %s gem dust and the purity materials.",
             &[Text::literal(dust.to_string())],
@@ -1737,7 +1807,7 @@ fn cut(host: &mut dyn Host, slot: i32, main: &ItemStack) {
     let mut improved = main.clone();
     set_purity(&mut improved, purity.next());
     write_slot(host, slot, improved);
-    host.feedback(Text::translate_with_fallback(
+    say(host, player, Text::translate_with_fallback(
         "apotheosis.polish.done",
         "Purity raised to %s.",
         &[Text::translate_with_fallback(
@@ -1791,7 +1861,7 @@ fn fill_chest_gem(dimension: &str, seed: i64, stack: &mut LootStack) {
         "italic": false,
     });
     stack.components.retain(|(id, _)| {
-        id != CUSTOM && id != "minecraft:custom_name" && id != "minecraft:custom_model_data"
+        id != CUSTOM && id != "minecraft:item_name" && id != "minecraft:custom_model_data"
     });
     stack.components.push((
         CUSTOM.to_owned(),
@@ -1805,14 +1875,17 @@ fn fill_chest_gem(dimension: &str, seed: i64, stack: &mut LootStack) {
         .push(("minecraft:custom_model_data".to_owned(), serde_json::json!(gem.id)));
     stack
         .components
-        .push(("minecraft:custom_name".to_owned(), custom_name));
+        .push(("minecraft:item_name".to_owned(), custom_name));
 }
 
-/// Rerolls a piece's rarity and affixes in place, keeping its sockets and the
-/// gems in them; returns the rarity it rolled.
-fn reroll(host: &mut dyn Host, slot: i32, gear: &ItemStack) -> Tier {
-    let mut rng = Rng::new(next_roll());
-    let tier = rng.tier(&crate::ORDINARY_TIERS);
+/// Rerolls a piece's affixes in place with `seed`, keeping its sockets and the
+/// gems in them; returns the rarity it rolled. `tier` names the rarity to
+/// reroll at; none draws a fresh one. Java's reforging table rerolls at the
+/// rarity the paid material names, so the table passes the piece's own tier
+/// and a rare sword stays rare.
+fn reroll(host: &mut dyn Host, slot: i32, gear: &ItemStack, seed: u64, tier: Option<Tier>) -> Tier {
+    let mut rng = Rng::new(seed);
+    let tier = tier.unwrap_or_else(|| rng.tier(&crate::ORDINARY_TIERS));
     let mut piece = gear.clone();
     apply_affixes(&mut piece, tier, &mut rng);
     set_custom(&mut piece, |map| {
@@ -1838,14 +1911,21 @@ fn write_slot(host: &mut dyn Host, slot: i32, stack: ItemStack) {
     }
 }
 
-fn socket(host: &mut dyn Host, slot: i32, main: &ItemStack, off: &ItemStack) {
+/// A message to the player whose action this is. `Host::feedback` is only
+/// delivered for a command's answer, so a message from a table, a sigil or a
+/// tick goes to the player's own chat instead, as the tomes already do.
+fn say(host: &mut dyn Host, player: u128, line: Text) {
+    let _ = host.tell(player, line);
+}
+
+fn socket(host: &mut dyn Host, slot: i32, main: &ItemStack, off: &ItemStack, player: u128) {
     let Some(entry) = gems::of_stack(main).map(|(gem, _)| gem) else {
         return;
     };
     let purity = purity_of(main);
     let mut gear = off.clone();
     if !insert_gem(&mut gear, entry.id, purity) {
-        host.feedback(Text::translate_with_fallback(
+        say(host, player, Text::translate_with_fallback(
             "apotheosis.socket.full",
             "No free socket there, or that gem is already in it.",
             &[],
@@ -1856,7 +1936,7 @@ fn socket(host: &mut dyn Host, slot: i32, main: &ItemStack, off: &ItemStack) {
     let mut left = main.clone();
     left.count = left.count.saturating_sub(1);
     write_slot(host, slot, left);
-    host.feedback(Text::translate_with_fallback(
+    say(host, player, Text::translate_with_fallback(
         "apotheosis.socket.done",
         "Socketed %s (%s).",
         &[
@@ -1881,7 +1961,7 @@ fn can_polish(main: &ItemStack, off: &ItemStack) -> bool {
     }
 }
 
-fn polish(host: &mut dyn Host, slot: i32, main: &ItemStack, off: &ItemStack) {
+fn polish(host: &mut dyn Host, slot: i32, main: &ItemStack, off: &ItemStack, player: u128) {
     if !can_polish(main, off) {
         return;
     }
@@ -1902,7 +1982,7 @@ fn polish(host: &mut dyn Host, slot: i32, main: &ItemStack, off: &ItemStack) {
                 let _ = host.give_items(item, got);
             }
         }
-        host.feedback(Text::translate_with_fallback(
+        say(host, player, Text::translate_with_fallback(
             "apotheosis.cut.no_dust",
             "The gem cutting table needs %s gem dust and the purity materials.",
             &[Text::literal(dust_cost.to_string())],
@@ -1915,7 +1995,7 @@ fn polish(host: &mut dyn Host, slot: i32, main: &ItemStack, off: &ItemStack) {
     let mut dust = off.clone();
     dust.count -= dust_cost;
     write_slot(host, OFFHAND, dust);
-    host.feedback(Text::translate_with_fallback(
+    say(host, player, Text::translate_with_fallback(
         "apotheosis.polish.done",
         "Purity raised to %s.",
         &[Text::translate_with_fallback(
@@ -1932,20 +2012,22 @@ fn reforge(
     main: &ItemStack,
     player: u128,
     expected: &Fingerprint,
+    keep_tier: Option<Tier>,
 ) {
     // The command charged for this tick; if the hand changed in between, the
     // levels go back rather than reroll something the player did not ask for.
     if fingerprint(main) != *expected || !can_reforge(main) {
         let _ = host.give_levels(player, crate::REFORGE_COST);
-        host.feedback(Text::translate_with_fallback(
+        say(host, player, Text::translate_with_fallback(
             "apotheosis.reforge.changed",
             "The piece in your hand changed; nothing was reforged.",
             &[],
         ));
         return;
     }
-    let tier = reroll(host, slot, main);
-    host.feedback(Text::translate_with_fallback(
+    let seed = reforge_seed(player, &main.item);
+    let tier = reroll(host, slot, main, seed, keep_tier);
+    say(host, player, Text::translate_with_fallback(
         "apotheosis.reforge.done",
         "Reforged: %s.",
         &[Text::translate_with_fallback(
@@ -1964,7 +2046,7 @@ fn salvage(
     expected: &Fingerprint,
 ) {
     if fingerprint(main) != *expected || !has_affixes(main) {
-        host.feedback(Text::translate_with_fallback(
+        say(host, player, Text::translate_with_fallback(
             "apotheosis.salvage.changed",
             "The piece in your hand changed; nothing was salvaged.",
             &[],
@@ -1987,7 +2069,7 @@ fn salvage(
         for _ in 0..(gems.len() - unplaced.len()) {
             let _ = host.take_items(gems::ITEM, 1);
         }
-        host.feedback(Text::translate_with_fallback(
+        say(host, player, Text::translate_with_fallback(
             "apotheosis.salvage.no_room",
             "No room for the gems in it; nothing was salvaged.",
             &[],
@@ -1996,7 +2078,7 @@ fn salvage(
     }
     write_slot(host, slot, emptied(main));
     let given = host.give_items(&material, count);
-    host.feedback(Text::translate_with_fallback(
+    say(host, player, Text::translate_with_fallback(
         "apotheosis.salvage.done",
         "Salvaged into %s.",
         &[Text::translate_with_fallback(
@@ -2006,7 +2088,7 @@ fn salvage(
         )],
     ));
     if given < count {
-        host.feedback(Text::translate_with_fallback(
+        say(host, player, Text::translate_with_fallback(
             "apotheosis.salvage.no_room",
             "Some of it did not fit in your inventory.",
             &[],
@@ -2085,8 +2167,12 @@ mod tests {
         assert_eq!(socket_modifier.get("type"), Some(&Tag::String("minecraft:attack_damage".into())));
     }
 
+    /// The reported bug: a socketed sword's bonus paid out from the off hand
+    /// too, because its modifier used the `hand` group. Java follows the item:
+    /// main hand for a weapon or tool, its own slot for armour, off hand for a
+    /// shield.
     #[test]
-    fn a_socketed_gem_on_a_shield_targets_the_hand_slot_group() {
+    fn a_socketed_gem_uses_the_slot_group_the_item_names() {
         let mut shield = ItemStack::new("minecraft:shield", 1);
         write_sockets(&mut shield, 1, &[]);
         assert!(insert_gem(
@@ -2105,10 +2191,91 @@ mod tests {
             .iter()
             .find(|entry| is_socket_modifier(entry))
             .expect("a socket modifier");
-        assert_eq!(socket_modifier.get("slot"), Some(&Tag::String("hand".into())));
-        assert_eq!(socket_slot_group("minecraft:shield"), "hand");
-        assert_eq!(socket_slot_group("minecraft:diamond_chestplate"), "armor");
-        assert_eq!(socket_slot_group("minecraft:diamond_sword"), "hand");
+        assert_eq!(
+            socket_modifier.get("slot"),
+            Some(&Tag::String("offhand".into()))
+        );
+        assert_eq!(socket_slot_group("minecraft:shield"), "offhand");
+        assert_eq!(socket_slot_group("minecraft:diamond_helmet"), "head");
+        assert_eq!(socket_slot_group("minecraft:diamond_chestplate"), "chest");
+        assert_eq!(socket_slot_group("minecraft:diamond_leggings"), "legs");
+        assert_eq!(socket_slot_group("minecraft:diamond_boots"), "feet");
+        assert_eq!(socket_slot_group("minecraft:diamond_sword"), "mainhand");
+        assert_eq!(socket_slot_group("minecraft:iron_pickaxe"), "mainhand");
+    }
+
+    #[test]
+    fn a_weapons_socketed_bonus_is_main_hand_only() {
+        let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
+        write_sockets(&mut sword, 1, &[]);
+        assert!(insert_gem(
+            &mut sword,
+            "apotheosis:core/ballast",
+            Purity::Normal
+        ));
+        let Some(Tag::List(modifiers)) = sword
+            .data()
+            .and_then(|data| data.other("minecraft:attribute_modifiers"))
+        else {
+            panic!("no modifiers");
+        };
+        for entry in modifiers.iter().filter(|entry| is_socket_modifier(entry)) {
+            assert_eq!(entry.get("slot"), Some(&Tag::String("mainhand".into())));
+        }
+    }
+
+    #[test]
+    fn a_socketed_gems_lore_only_names_the_pieces_own_bonus() {
+        let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
+        write_sockets(&mut sword, 1, &[]);
+        assert!(insert_gem(
+            &mut sword,
+            "apotheosis:core/ballast",
+            Purity::Normal
+        ));
+        let Some(Tag::List(lines)) = sword.data().and_then(|data| data.other("minecraft:lore"))
+        else {
+            panic!("no lore");
+        };
+        let text: Vec<String> = lines
+            .iter()
+            .filter_map(|line| match line.get("fallback") {
+                Some(Tag::String(value)) => Some(value.to_string_lossy()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            text.iter().any(|line| line.contains("+5 Attack Damage")),
+            "the melee bonus is missing: {text:?}"
+        );
+        assert!(
+            !text.iter().any(|line| line.contains("Knockback Resistance")),
+            "a sword's lore listed the chestplate bonus: {text:?}"
+        );
+    }
+
+    #[test]
+    fn affix_modifiers_follow_their_own_equipment_slot() {
+        let sword = affixed("minecraft:diamond_sword", Tier::Mythic, 3);
+        let Some(Tag::List(modifiers)) = sword
+            .data()
+            .and_then(|data| data.other("minecraft:attribute_modifiers"))
+        else {
+            panic!("no modifiers");
+        };
+        for entry in modifiers.iter().filter(|entry| crate::is_affix_modifier(entry)) {
+            assert_eq!(entry.get("slot"), Some(&Tag::String("mainhand".into())));
+        }
+        let chest = affixed("minecraft:diamond_chestplate", Tier::Mythic, 4);
+        let Some(Tag::List(modifiers)) = chest
+            .data()
+            .and_then(|data| data.other("minecraft:attribute_modifiers"))
+        else {
+            panic!("no modifiers");
+        };
+        for entry in modifiers.iter().filter(|entry| crate::is_affix_modifier(entry)) {
+            assert_eq!(entry.get("slot"), Some(&Tag::String("chest".into())));
+        }
     }
 
     #[test]
@@ -2253,7 +2420,7 @@ mod tests {
         let mut host = Fake::default();
         host.slots.insert(1, sigil.clone());
         host.slots.insert(OFFHAND, gear.clone());
-        unname(&mut host, 1, &sigil, &gear);
+        unname(&mut host, 1, &sigil, &gear, PLAYER);
 
         let named = host.slots.get(&OFFHAND).unwrap();
         assert_eq!(named.data().and_then(|data| data.other("minecraft:custom_name")), None);
@@ -2268,7 +2435,7 @@ mod tests {
         let mut host = Fake::default();
         host.slots.insert(1, sigil.clone());
         host.slots.insert(OFFHAND, mine.clone());
-        unname(&mut host, 1, &sigil, &mine);
+        unname(&mut host, 1, &sigil, &mine, PLAYER);
 
         assert_eq!(
             host.slots
@@ -2411,6 +2578,10 @@ mod tests {
         items: Vec<(String, u32)>,
         taken: Vec<(String, u32)>,
         levels: Vec<i32>,
+        /// Messages sent to a player's chat, and command feedback: a table or
+        /// sigil must use the first, only a command the second.
+        told: Vec<String>,
+        feedback: Vec<String>,
     }
 
     impl Host for Fake {
@@ -2445,7 +2616,14 @@ mod tests {
             true
         }
 
-        fn feedback(&mut self, _line: Text) {}
+        fn tell(&mut self, _uuid: u128, line: Text) -> bool {
+            self.told.push(line.plain());
+            true
+        }
+
+        fn feedback(&mut self, line: Text) {
+            self.feedback.push(line.plain());
+        }
     }
 
     fn affixed(item: &str, tier: Tier, seed: u64) -> ItemStack {
@@ -2535,7 +2713,7 @@ mod tests {
         let mut host = Fake::default();
         host.slots.insert(0, sword.clone());
         host.slots.insert(OFFHAND, dust.clone());
-        polish(&mut host, 0, &sword, &dust);
+        polish(&mut host, 0, &sword, &dust, PLAYER);
         assert_eq!(custom(host.slots.get(&0).unwrap()).get(gems::PURITY_KEY), None);
         assert_eq!(host.slots.get(&OFFHAND).unwrap().count, 4);
         assert!(!can_polish(&sword, &dust));
@@ -2637,7 +2815,7 @@ mod tests {
         let swapped_in = affixed("minecraft:diamond_chestplate", Tier::Epic, 52);
         let mut host = Fake::default();
         host.slots.insert(2, swapped_in.clone());
-        reforge(&mut host, 2, &swapped_in, PLAYER, &fingerprint(&paid_for));
+        reforge(&mut host, 2, &swapped_in, PLAYER, &fingerprint(&paid_for), None);
 
         assert_eq!(host.levels, vec![crate::REFORGE_COST]);
         assert_eq!(
@@ -2652,7 +2830,7 @@ mod tests {
         let paid_for = affixed("minecraft:diamond_sword", Tier::Rare, 61);
         let mut host = Fake::default();
         host.slots.insert(2, paid_for.clone());
-        reforge(&mut host, 2, &paid_for, PLAYER, &fingerprint(&paid_for));
+        reforge(&mut host, 2, &paid_for, PLAYER, &fingerprint(&paid_for), None);
 
         assert!(host.levels.is_empty());
         assert!(can_reforge(host.slots.get(&2).unwrap()));
@@ -2672,5 +2850,63 @@ mod tests {
         assert_eq!(*host.slots.get(&3).expect("the piece vanished"), swapped_in);
         assert!(host.items.is_empty());
         assert!(host.given.is_empty());
+    }
+
+    #[test]
+    fn a_table_reforge_keeps_the_pieces_rarity() {
+        let gear = affixed("minecraft:diamond_sword", Tier::Rare, 93);
+        let mut host = Fake::default();
+        host.slots.insert(2, gear.clone());
+        begin_table_reforge(&mut host, PLAYER, 100, 2, Table::Reforging, &gear);
+        let queued = pending()
+            .lock()
+            .unwrap()
+            .remove(&PLAYER)
+            .expect("the table queued a reforge");
+        assert_eq!(
+            queued.tier,
+            Some(Tier::Rare),
+            "the table rerolls a rare piece at its own rarity"
+        );
+        reforge(&mut host, 2, &gear, PLAYER, &fingerprint(&gear), queued.tier);
+        assert_eq!(
+            tier_of(host.slots.get(&2).unwrap()),
+            Some(Tier::Rare),
+            "a rare piece came out of the table less rare"
+        );
+    }
+
+    #[test]
+    fn a_table_says_why_it_stopped_in_the_players_chat() {
+        let gear = affixed("minecraft:diamond_sword", Tier::Rare, 95);
+        let mut host = Fake::default();
+        begin_table_reforge(&mut host, PLAYER, 0, 2, Table::Reforging, &gear);
+        assert_eq!(host.told.len(), 1, "the table said nothing");
+        assert!(
+            host.told[0].contains("experience levels"),
+            "{}",
+            host.told[0]
+        );
+        assert!(
+            host.feedback.is_empty(),
+            "a table's answer went to command feedback, which is never shown"
+        );
+    }
+
+    #[test]
+    fn every_reforge_draws_a_new_seed() {
+        let first = reforge_seed(PLAYER, "minecraft:diamond_sword");
+        let second = reforge_seed(PLAYER, "minecraft:diamond_sword");
+        assert_ne!(first, second, "two reforges drew the same seed");
+        assert_ne!(
+            first,
+            reforge_seed(PLAYER + 1, "minecraft:diamond_sword"),
+            "the player is not part of the seed"
+        );
+        assert_ne!(
+            first,
+            reforge_seed(PLAYER, "minecraft:diamond_chestplate"),
+            "the item is not part of the seed"
+        );
     }
 }

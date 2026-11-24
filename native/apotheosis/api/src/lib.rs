@@ -935,8 +935,10 @@ fn reforge(host: &mut dyn Host, player: u128, xp_level: i32, slot: i32) {
         ));
         return;
     }
-    let n = DROPS.fetch_add(1, Ordering::Relaxed);
-    let mut rng = Rng::new(n);
+    // A fresh seed per reforge, as Java renews its per-player seed: a counter,
+    // the clock, the player and the item, so two reforges never match.
+    let seed = sockets::reforge_seed(player, &item);
+    let mut rng = Rng::new(seed);
     let tier = rng.tier(&ORDINARY_TIERS);
     let mut stack = one(&item);
     apply_affixes(&mut stack, tier, &mut rng);
@@ -972,10 +974,16 @@ mod tests {
         for gem in &java_gems::GEMS {
             let stack = gems::stack(gem, crate::sockets::Purity::Normal);
             assert_eq!(gems::id_of(&stack), Some(gem.id));
+            // A gem's name is an item name, never an anvil-style custom name:
+            // custom_name is what renders italics like a player-given name.
+            assert!(stack
+                .data()
+                .and_then(|data| data.other("minecraft:item_name"))
+                .is_some());
             assert!(stack
                 .data()
                 .and_then(|data| data.other("minecraft:custom_name"))
-                .is_some());
+                .is_none());
         }
     }
 

@@ -84,14 +84,18 @@ pub(crate) fn roll_range(range: Range, rng: &mut Rng) -> f64 {
 }
 
 /// The slot group the real modifier belongs to, from the piece it landed on.
+/// Java derives it from the item, not from the hand it happens to be in: a
+/// weapon or tool works in the main hand, a shield in the off hand, and a
+/// piece of armour in its own armour slot. `hand` (both hands) would let a
+/// socketed sword's bonus pay out from the off hand as well.
 pub fn slot(class: ItemClass) -> &'static str {
     match class {
-        ItemClass::Helmet
-        | ItemClass::Chestplate
-        | ItemClass::Leggings
-        | ItemClass::Boots => "armor",
+        ItemClass::Helmet => "head",
+        ItemClass::Chestplate => "chest",
+        ItemClass::Leggings => "legs",
+        ItemClass::Boots => "feet",
         ItemClass::Shield => "offhand",
-        _ => "hand",
+        _ => "mainhand",
     }
 }
 
