@@ -15,9 +15,9 @@ hook API 415).
 | Shelves and Eterna, infusion, tomes, Prismatic Web, Enchantment and Ender Library | *Apothic Enchanting* |
 | Silk-touch spawners and Apothic spawner modifiers | *Apothic Spawners* |
 
-In-game test plan (French): [`TEST-EN-JEU.md`](TEST-EN-JEU.md). Nothing in this
-port has been played in game yet: every part is type-checked against Horizon
-a85af177 and covered by unit tests only.
+In-game test plan (French): [`TEST-EN-JEU.md`](TEST-EN-JEU.md); results of the
+2026-11-24 test on a dedicated server in Docker with a Horizon client:
+[`TEST-RESULTATS.md`](TEST-RESULTATS.md).
 
 > **Clean room.** Nothing here is copied from Apotheosis: neither code nor
 > art. The code is this port's own, written against Horizon's native hook API.
@@ -709,11 +709,12 @@ server. The image holds no Minecraft files and no Java assets.
 
 ### Build state (2026-11-23)
 
-- v0.6.0 compiles against `a85af177` and **144 native unit tests pass**; the
+- v0.6.0 compiles against `a85af177` and **167 native unit tests pass**; the
   three Python test suites pass; `target/apotheosis.hmod` (with the Java layer)
   and `target/apotheosis.hnmod` pass `cargo-horizon-mod check`.
 - No Git-tracked file is identical to a file of the Java jars' `assets/`.
-- Not yet run in game nor on a dedicated server: see `TEST-EN-JEU.md`.
+- Run in game on a dedicated server in Docker with a Horizon client: see
+  `TEST-RESULTATS.md` (167 native unit tests after the in-game fixes).
 
 ## Licence
 
