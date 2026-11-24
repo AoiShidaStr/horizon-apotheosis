@@ -807,7 +807,7 @@ impl Hooks for Apotheosis {
     }
 
     fn left_click_block(&self, host: &mut dyn Host, event: &mut LeftClickBlockEvent) -> Flow {
-        spawners::on_left_click(host, event.pos)
+        spawners::on_left_click(host, event.pos, event.state)
     }
 
     fn place_block(&self, host: &mut dyn Host, event: &mut PlaceBlockEvent<'_>) {
