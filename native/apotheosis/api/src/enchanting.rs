@@ -1,9 +1,10 @@
 use horizon_client::mod_api::{
     BlockEntityEvent, BlockEntityTickEvent, BlockEntityTicksEvent, Compound, EquipmentSlot, Flow,
-    Hand, Host, ItemStack, PrepareItemEnchantEvent, RightClickBlockEvent, Tag, Text, UseItemEvent,
-    UseItemOnEvent,
+    Host, InventoryTickEvent, ItemStack, PrepareItemEnchantEvent, RightClickBlockEvent, Tag, Text,
+    UseItemEvent, UseItemOnEvent,
 };
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct ShelfStats {
@@ -242,6 +243,94 @@ fn dice(uuid: u128) -> u64 {
     (uuid as u64) ^ ((uuid >> 64) as u64)
 }
 
+/// The off hand's slot in `native_inventory`'s `Player` numbering.
+const OFFHAND: i32 = -106;
+
+/// A refusal or a result, shown where a player is sure to see it: over the
+/// hotbar (`spawners.rs` does the same) and as a chat line.
+fn say(host: &mut dyn Host, player: u128, line: Text) {
+    let _ = host.action_bar(player, line.clone());
+    let _ = host.tell(player, line);
+}
+
+/// What a click asked for, applied on the next inventory tick.
+#[derive(Clone, Debug, PartialEq)]
+enum Job {
+    Tome(Tome),
+    Infuse { pos: [i32; 3] },
+    Library { dimension: String, pos: [i32; 3], max_level: u32 },
+}
+
+/// A click waiting for the next tick: the slot it came from and the stacks it
+/// saw. The tick applies it only if both hands are still exactly those.
+#[derive(Clone, Debug, PartialEq)]
+struct Pending {
+    job: Job,
+    slot: i32,
+    main: ItemStack,
+    off: Option<ItemStack>,
+}
+
+fn pending() -> &'static Mutex<HashMap<u128, Pending>> {
+    static PENDING: OnceLock<Mutex<HashMap<u128, Pending>>> = OnceLock::new();
+    PENDING.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn set_pending(player: u128, action: Pending) {
+    if let Ok(mut pending) = pending().lock() {
+        pending.insert(player, action);
+    }
+}
+
+/// Takes the pending click only when the tick is the slot it started from.
+fn take_pending(player: u128, slot: i32) -> Option<Pending> {
+    let mut pending = pending().lock().ok()?;
+    if pending.get(&player).is_some_and(|action| action.slot == slot) {
+        pending.remove(&player)
+    } else {
+        None
+    }
+}
+
+/// An empty slot reads as nothing.
+fn present(stack: Option<ItemStack>) -> Option<ItemStack> {
+    stack.filter(|stack| stack.count > 0)
+}
+
+/// Writes a stack into a carried slot; a count of 0 empties it.
+fn write_slot(host: &mut dyn Host, slot: i32, stack: ItemStack) -> bool {
+    match host.carried_stack(slot) {
+        Some(current) => {
+            *current = stack;
+            true
+        }
+        None => false,
+    }
+}
+
+/// One item fewer in the stack (an empty stack when it was the last).
+fn one_fewer(stack: &ItemStack) -> ItemStack {
+    let mut left = stack.clone();
+    left.count = left.count.saturating_sub(1);
+    left
+}
+
+/// The player a queued click belongs to, as the tick sees them.
+#[derive(Clone, Copy, Debug)]
+struct Who {
+    uuid: u128,
+    xp_level: i32,
+    creative: bool,
+}
+
+impl Who {
+    fn can_pay(&self, cost: i32) -> bool {
+        self.creative || self.xp_level >= cost
+    }
+}
+
+/// A tome in the main hand, the item it acts on in the off hand: queued here,
+/// applied on the next inventory tick like the sockets' sigils.
 pub(super) fn on_use_item(host: &mut dyn Host, event: &mut UseItemEvent<'_>) -> Flow {
     let Some(tome) = tome_kind(&event.stack.item) else {
         return Flow::Continue;
@@ -249,54 +338,82 @@ pub(super) fn on_use_item(host: &mut dyn Host, event: &mut UseItemEvent<'_>) -> 
     let Some(player) = host.acting_player() else {
         return Flow::Continue;
     };
-    if player.entity_id <= 0 {
+    let Some(main) = host.player_equipment(player.uuid, EquipmentSlot::MainHand) else {
+        return Flow::Continue;
+    };
+    if main.item != event.stack.item {
         return Flow::Continue;
     }
-    let Some(entity) = host.entity(player.entity_id as u32) else {
-        return Flow::Continue;
-    };
-    let Some(living) = host.living(entity) else {
-        return Flow::Continue;
-    };
+    let off = host.player_equipment(player.uuid, EquipmentSlot::OffHand);
+    set_pending(
+        player.uuid,
+        Pending {
+            job: Job::Tome(tome),
+            slot: i32::from(player.selected_slot),
+            main,
+            off,
+        },
+    );
+    Flow::Cancel
+}
 
-    // The used stack is a tome; the other hand holds the item it acts on.
-    let main = living.hand_item(host, Hand::Main);
-    let off = living.hand_item(host, Hand::Off);
-    let (tome_slot, target_slot, target) = if main
-        .as_ref()
-        .is_some_and(|stack| stack.item == event.stack.item)
-    {
-        (EquipmentSlot::MainHand, EquipmentSlot::OffHand, off)
-    } else if off
-        .as_ref()
-        .is_some_and(|stack| stack.item == event.stack.item)
-    {
-        (EquipmentSlot::OffHand, EquipmentSlot::MainHand, main)
-    } else {
-        return Flow::Continue;
+/// Applies a queued click on the stacks it was validated on. `inventory_tick`
+/// runs for every carried stack, so only the selected slot works, and only when
+/// it is the slot the click came from.
+pub(super) fn inventory_tick(host: &mut dyn Host, event: &mut InventoryTickEvent) {
+    if !event.selected {
+        return;
+    }
+    let Some(player) = host.acting_player() else {
+        return;
     };
+    let Some(pending) = take_pending(player.uuid, event.slot) else {
+        return;
+    };
+    let Some(main) = present(host.carried_stack(pending.slot).cloned()) else {
+        return;
+    };
+    let off = present(host.carried_stack(OFFHAND).cloned());
+    if main != pending.main || off != pending.off {
+        // The hand changed since the click: nothing is spent or destroyed.
+        return;
+    }
+    let who = Who {
+        uuid: player.uuid,
+        xp_level: player.xp_level,
+        creative: player.game_mode == 1,
+    };
+    match pending.job {
+        Job::Tome(tome) => apply_tome(host, who, tome, pending.slot, &main, off),
+        Job::Infuse { pos } => apply_infusion(host, who, pending.slot, pos, &main),
+        Job::Library { dimension, pos, max_level } => {
+            apply_library(host, who, &dimension, pos, max_level, pending.slot, &main)
+        }
+    }
+}
 
+fn apply_tome(
+    host: &mut dyn Host,
+    who: Who,
+    tome: Tome,
+    slot: i32,
+    tome_stack: &ItemStack,
+    target: Option<ItemStack>,
+) {
+    let no_target = || {
+        Text::translate_with_fallback(
+            "apotheosis.tome.no_target",
+            "Offhand must hold an enchanted item or a cursed item.",
+            &[],
+        )
+    };
     let Some(target) = target else {
-        host.tell(
-            player.uuid,
-            Text::translate_with_fallback(
-                "apotheosis.tome.no_target",
-                "Offhand must hold an enchanted item or a cursed item.",
-                &[],
-            ),
-        );
-        return Flow::Cancel;
+        say(host, who.uuid, no_target());
+        return;
     };
     if tome_kind(&target.item).is_some() {
-        host.tell(
-            player.uuid,
-            Text::translate_with_fallback(
-                "apotheosis.tome.no_target",
-                "Offhand must hold an enchanted item or a cursed item.",
-                &[],
-            ),
-        );
-        return Flow::Cancel;
+        say(host, who.uuid, no_target());
+        return;
     }
 
     let (kept, removed) = if tome == Tome::Web {
@@ -305,44 +422,43 @@ pub(super) fn on_use_item(host: &mut dyn Host, event: &mut UseItemEvent<'_>) -> 
         (target.crafting_enchantments().to_vec(), 0)
     };
     if tome == Tome::Web && removed == 0 {
-        host.tell(
-            player.uuid,
-            Text::translate_with_fallback(
-                "apotheosis.tome.no_curse",
-                "That item carries no curse.",
-                &[],
-            ),
+        say(
+            host,
+            who.uuid,
+            Text::translate_with_fallback("apotheosis.tome.no_curse", "That item carries no curse.", &[]),
         );
-        return Flow::Cancel;
+        return;
     }
     if tome != Tome::Web && kept.is_empty() {
-        host.tell(
-            player.uuid,
+        say(
+            host,
+            who.uuid,
             Text::translate_with_fallback(
                 "apotheosis.tome.not_enchanted",
                 "That item has no enchantments.",
                 &[],
             ),
         );
-        return Flow::Cancel;
+        return;
     }
 
     let kept = if tome == Tome::Scrap {
-        scrap_selection(&kept, dice(player.uuid))
+        scrap_selection(&kept, dice(who.uuid))
     } else {
         kept
     };
     let cost = tome_cost(tome, kept.len());
-    if player.game_mode != 1 && player.xp_level < cost {
-        host.tell(
-            player.uuid,
+    if !who.can_pay(cost) {
+        say(
+            host,
+            who.uuid,
             Text::translate_with_fallback(
                 "apotheosis.tome.levels",
                 "You need %s experience levels.",
                 &[Text::literal(cost.to_string())],
             ),
         );
-        return Flow::Cancel;
+        return;
     }
 
     let replacement = output_stack(tome, &target, kept.clone());
@@ -351,54 +467,36 @@ pub(super) fn on_use_item(host: &mut dyn Host, event: &mut UseItemEvent<'_>) -> 
         "No room for the extracted book; nothing was changed.",
         &[],
     );
-    if tome == Tome::Extraction {
-        // The item stays in the hand, stripped, while the book goes to the
-        // inventory. Restore it if there is no room for the book.
-        let mut stripped = target.clone();
-        stripped.set_crafting_enchantments(Vec::new());
-        if !living.set_equipment(host, target_slot, Some(stripped)) {
-            return Flow::Continue;
-        }
-        if host.give_stack(player.uuid, replacement).is_some() {
-            let _ = living.set_equipment(host, target_slot, Some(target));
-            host.tell(player.uuid, no_room);
-            return Flow::Cancel;
-        }
-    } else if tome == Tome::Web {
-        if !living.set_equipment(host, target_slot, Some(replacement)) {
-            return Flow::Continue;
+    // A book is handed out before anything is taken: a full inventory leaves
+    // both hands untouched, and nothing is ever given without being taken.
+    if tome == Tome::Web {
+        if !write_slot(host, OFFHAND, replacement) {
+            return;
         }
     } else {
-        // Scrapping consumes the item; take it before handing out the book so
-        // a full inventory leaves it in the hand instead of losing it.
-        if !living.set_equipment(host, target_slot, None) {
-            return Flow::Continue;
+        if host.give_stack(who.uuid, replacement).is_some() {
+            say(host, who.uuid, no_room);
+            return;
         }
-        if host.give_stack(player.uuid, replacement).is_some() {
-            let _ = living.set_equipment(host, target_slot, Some(target));
-            host.tell(player.uuid, no_room);
-            return Flow::Cancel;
-        }
+        let rest = if tome == Tome::Extraction {
+            let mut stripped = target.clone();
+            stripped.set_crafting_enchantments(Vec::new());
+            stripped
+        } else {
+            // Scrapping consumes the item.
+            let mut gone = target.clone();
+            gone.count = 0;
+            gone
+        };
+        write_slot(host, OFFHAND, rest);
     }
+    write_slot(host, slot, one_fewer(tome_stack));
 
-    let left = event.stack.count.saturating_sub(1);
-    let tome_left = if left == 0 {
-        None
-    } else {
-        let mut stack = event.stack.clone();
-        stack.count = left;
-        Some(stack)
-    };
-    let _ = living.set_equipment(host, tome_slot, tome_left);
-
-    if player.game_mode != 1 {
-        let _ = host.give_levels(player.uuid, -cost);
+    if !who.creative {
+        let _ = host.give_levels(who.uuid, -cost);
     }
     let message = match tome {
-        Tome::Scrap | Tome::Improved => (
-            "apotheosis.tome.scrapped",
-            "Scrapped %s enchantments.",
-        ),
+        Tome::Scrap | Tome::Improved => ("apotheosis.tome.scrapped", "Scrapped %s enchantments."),
         Tome::Extraction => ("apotheosis.tome.extracted", "Extracted %s enchantments."),
         Tome::Web => ("apotheosis.tome.cleansed", "Curses removed."),
     };
@@ -408,11 +506,7 @@ pub(super) fn on_use_item(host: &mut dyn Host, event: &mut UseItemEvent<'_>) -> 
     } else {
         std::slice::from_ref(&count)
     };
-    host.tell(
-        player.uuid,
-        Text::translate_with_fallback(message.0, message.1, args),
-    );
-    Flow::Cancel
+    say(host, who.uuid, Text::translate_with_fallback(message.0, message.1, args));
 }
 
 // ---------------------------------------------------------------------------
@@ -599,16 +693,40 @@ pub(super) fn on_use_item_on(host: &mut dyn Host, event: &mut UseItemOnEvent<'_>
     let Some(player) = host.acting_player() else {
         return Flow::Continue;
     };
-    let stats = read_table_stats(host, event.pos);
+    let Some(main) = host.player_equipment(player.uuid, EquipmentSlot::MainHand) else {
+        return Flow::Continue;
+    };
+    if main.item != event.stack.item {
+        return Flow::Continue;
+    }
+    set_pending(
+        player.uuid,
+        Pending {
+            job: Job::Infuse { pos: event.pos },
+            slot: i32::from(player.selected_slot),
+            main,
+            off: None,
+        },
+    );
+    // The click belongs to the table, so vanilla never opens a block GUI.
+    Flow::Cancel
+}
+
+fn apply_infusion(host: &mut dyn Host, who: Who, slot: i32, pos: [i32; 3], held: &ItemStack) {
+    if host.block(pos) != INFUSION_TABLE {
+        return;
+    }
+    let stats = read_table_stats(host, pos);
     let available = StackStats {
         eterna: stats.eterna,
         quanta: stats.quanta,
         arcana: stats.arcana,
     };
-    let Some(recipe) = find_infusion(&event.stack.item, available) else {
-        host.tell(
-            player.uuid,
-            match easiest_infusion(&event.stack.item) {
+    let Some(recipe) = find_infusion(&held.item, available) else {
+        say(
+            host,
+            who.uuid,
+            match easiest_infusion(&held.item) {
                 Some(recipe) => Text::translate_with_fallback(
                     "apotheosis.infusion.requirements",
                     "Needs Eterna %s, Quanta %s and Arcana %s; the shelves give %s, %s and %s.",
@@ -628,46 +746,44 @@ pub(super) fn on_use_item_on(host: &mut dyn Host, event: &mut UseItemOnEvent<'_>
                 ),
             },
         );
-        // The click belongs to the table, so vanilla never opens a block GUI.
-        return Flow::Cancel;
+        return;
     };
-    if event.stack.count != 1 {
-        host.tell(
-            player.uuid,
+    if held.count != 1 {
+        say(
+            host,
+            who.uuid,
             Text::translate_with_fallback(
                 "apotheosis.infusion.single",
                 "The table infuses one item at a time.",
                 &[],
             ),
         );
-        return Flow::Cancel;
+        return;
     }
     let cost = infusion_cost(recipe, available.eterna);
-    if player.game_mode != 1 && player.xp_level < cost {
-        host.tell(
-            player.uuid,
+    if !who.can_pay(cost) {
+        say(
+            host,
+            who.uuid,
             Text::translate_with_fallback(
                 "apotheosis.infusion.levels",
                 "You need %s experience levels.",
                 &[Text::literal(cost.to_string())],
             ),
         );
-        return Flow::Cancel;
-    }
-    let Some(current) = host.carried_stack(i32::from(player.selected_slot)) else {
-        return Flow::Continue;
-    };
-    if current.item != event.stack.item {
-        return Flow::Continue;
+        return;
     }
     // The hand's stack is the only copy: replacing it in place consumes the
     // input and hands out the result in one write, so nothing can duplicate.
-    *current = ItemStack::new(recipe.output, recipe.count);
-    if player.game_mode != 1 {
-        let _ = host.give_levels(player.uuid, -cost);
+    if !write_slot(host, slot, ItemStack::new(recipe.output, recipe.count)) {
+        return;
     }
-    host.tell(
-        player.uuid,
+    if !who.creative {
+        let _ = host.give_levels(who.uuid, -cost);
+    }
+    say(
+        host,
+        who.uuid,
         Text::translate_with_fallback(
             "apotheosis.infusion.done",
             "Infused %s.",
@@ -678,7 +794,6 @@ pub(super) fn on_use_item_on(host: &mut dyn Host, event: &mut UseItemOnEvent<'_>
             )],
         ),
     );
-    Flow::Cancel
 }
 
 // ---------------------------------------------------------------------------
@@ -924,9 +1039,9 @@ fn enchantment_name(id: &str) -> String {
     format!("enchantment.{}", id.replace(':', "."))
 }
 
-/// A book stored into the library: each of its enchantments adds its level in
-/// points, past the cap the extra levels are lost. The book is consumed only
-/// once the points are recorded.
+/// A right click on a library. An empty hand cycles the offer and a stray item
+/// explains itself at once (no stack changes); a book or an enchanted book is
+/// queued and applied on the next inventory tick.
 pub(super) fn on_right_click_block(host: &mut dyn Host, event: &mut RightClickBlockEvent) -> Flow {
     let Some((_, max_level)) = library_kind(&host.block(event.pos)) else {
         return Flow::Continue;
@@ -935,143 +1050,28 @@ pub(super) fn on_right_click_block(host: &mut dyn Host, event: &mut RightClickBl
         return Flow::Continue;
     };
     let dimension = player.dimension.clone();
-    let Some(entity) = u32::try_from(player.entity_id)
-        .ok()
-        .and_then(|id| host.entity(id))
-    else {
-        return Flow::Continue;
-    };
-    let Some(living) = host.living(entity) else {
-        return Flow::Continue;
-    };
-    let held = living.hand_item(host, Hand::Main);
-    let mut library = library_at(&dimension, event.pos, max_level);
+    let held = host.player_equipment(player.uuid, EquipmentSlot::MainHand);
 
-    match held.as_ref().map(|stack| stack.item.as_ref()) {
-        Some("minecraft:enchanted_book") => {
-            let stack = held.expect("checked above");
-            let enchantments = stack.crafting_enchantments().to_vec();
-            if enchantments.is_empty() {
-                host.tell(
-                    player.uuid,
-                    Text::translate_with_fallback(
-                        "apotheosis.library.not_enchanted",
-                        "That book carries no enchantment.",
-                        &[],
-                    ),
-                );
-                return Flow::Continue;
-            }
-            for (enchantment, level) in &enchantments {
-                library.absorb(enchantment, *level);
-            }
-            library.dirty = true;
-            let left = stack.count.saturating_sub(1);
-            let mut rest = stack.clone();
-            rest.count = left;
-            let kept = if left == 0 {
-                living.set_equipment(host, EquipmentSlot::MainHand, None)
-            } else {
-                living.set_equipment(host, EquipmentSlot::MainHand, Some(rest))
-            };
-            if !kept {
-                return Flow::Continue;
-            }
-            store_library(&dimension, event.pos, library.clone());
-            let levels: u32 = enchantments.iter().map(|(_, level)| *level).sum();
-            let total: u32 = library.points.iter().map(|(_, points)| *points).sum();
-            host.tell(
+    match held {
+        Some(main) if matches!(&*main.item, "minecraft:enchanted_book" | "minecraft:book") => {
+            set_pending(
                 player.uuid,
-                Text::translate_with_fallback(
-                    "apotheosis.library.absorbed",
-                    "Stored %s levels; the library holds %s points.",
-                    &[
-                        Text::literal(levels.to_string()),
-                        Text::literal(total.to_string()),
-                    ],
-                ),
-            );
-        }
-        Some("minecraft:book") => {
-            let offers = library.offers();
-            if offers.is_empty() {
-                host.tell(
-                    player.uuid,
-                    Text::translate_with_fallback(
-                        "apotheosis.library.empty",
-                        "The library holds no points yet: store enchanted books first.",
-                        &[],
-                    ),
-                );
-                return Flow::Continue;
-            }
-            let offer = selected_offer(player.uuid, &dimension, event.pos)
-                .filter(|(id, level)| library.stored(id) >= *level)
-                .unwrap_or_else(|| offers[0].clone());
-            let stack = held.expect("checked above");
-            let mut book = ItemStack::new("minecraft:enchanted_book", 1);
-            book.set_crafting_enchantments(vec![offer.clone()]);
-            let left = stack.count.saturating_sub(1);
-            let mut rest = stack.clone();
-            rest.count = left;
-            let kept = if left == 0 {
-                living.set_equipment(host, EquipmentSlot::MainHand, None)
-            } else {
-                living.set_equipment(host, EquipmentSlot::MainHand, Some(rest))
-            };
-            if !kept {
-                return Flow::Continue;
-            }
-            if host.give_stack(player.uuid, book).is_some() {
-                let _ = living.set_equipment(host, EquipmentSlot::MainHand, Some(stack.clone()));
-                host.tell(
-                    player.uuid,
-                    Text::translate_with_fallback(
-                        "apotheosis.library.no_room",
-                        "No room for the book; nothing was taken.",
-                        &[],
-                    ),
-                );
-                return Flow::Continue;
-            }
-            if !library.withdraw(&offer.0, offer.1) {
-                return Flow::Continue;
-            }
-            library.dirty = true;
-            store_library(&dimension, event.pos, library);
-            remember_selection(player.uuid, &dimension, event.pos, offer.clone());
-            host.tell(
-                player.uuid,
-                Text::translate_with_fallback(
-                    "apotheosis.library.withdrawn",
-                    "Took %s %s for %s points.",
-                    &[
-                        Text::translate_with_fallback(
-                            &enchantment_name(&offer.0),
-                            &offer.0,
-                            &[],
-                        ),
-                        Text::literal(offer.1.to_string()),
-                        Text::literal(offer.1.to_string()),
-                    ],
-                ),
+                Pending {
+                    job: Job::Library { dimension, pos: event.pos, max_level },
+                    slot: i32::from(player.selected_slot),
+                    main,
+                    off: None,
+                },
             );
         }
         None => {
+            let library = library_at(&dimension, event.pos, max_level);
             let offers = library.offers();
             if offers.is_empty() {
-                host.tell(
-                    player.uuid,
-                    Text::translate_with_fallback(
-                        "apotheosis.library.empty",
-                        "The library holds no points yet: store enchanted books first.",
-                        &[],
-                    ),
-                );
+                say(host, player.uuid, library_empty());
                 return Flow::Continue;
             }
-            let current = selected_offer(player.uuid, &dimension, event.pos);
-            let next = match current {
+            let next = match selected_offer(player.uuid, &dimension, event.pos) {
                 Some(ref offer) => offers
                     .iter()
                     .position(|candidate| candidate == offer)
@@ -1080,17 +1080,14 @@ pub(super) fn on_right_click_block(host: &mut dyn Host, event: &mut RightClickBl
             };
             let offer = offers[next].clone();
             remember_selection(player.uuid, &dimension, event.pos, offer.clone());
-            host.tell(
+            say(
+                host,
                 player.uuid,
                 Text::translate_with_fallback(
                     "apotheosis.library.offer",
                     "Offer: %s %s (%s points stored). Right-click with a book to take it.",
                     &[
-                        Text::translate_with_fallback(
-                            &enchantment_name(&offer.0),
-                            &offer.0,
-                            &[],
-                        ),
+                        Text::translate_with_fallback(&enchantment_name(&offer.0), &offer.0, &[]),
                         Text::literal(offer.1.to_string()),
                         Text::literal(library.stored(&offer.0).to_string()),
                     ],
@@ -1098,7 +1095,8 @@ pub(super) fn on_right_click_block(host: &mut dyn Host, event: &mut RightClickBl
             );
         }
         Some(_) => {
-            host.tell(
+            say(
+                host,
                 player.uuid,
                 Text::translate_with_fallback(
                     "apotheosis.library.usage",
@@ -1109,6 +1107,109 @@ pub(super) fn on_right_click_block(host: &mut dyn Host, event: &mut RightClickBl
         }
     }
     Flow::Continue
+}
+
+fn library_empty() -> Text {
+    Text::translate_with_fallback(
+        "apotheosis.library.empty",
+        "The library holds no points yet: store enchanted books first.",
+        &[],
+    )
+}
+
+/// A book stored into the library: each of its enchantments adds its level in
+/// points, past the cap the extra levels are lost. The book is consumed only
+/// once the points are recorded. A plain book takes the selected offer out.
+fn apply_library(
+    host: &mut dyn Host,
+    who: Who,
+    dimension: &str,
+    pos: [i32; 3],
+    max_level: u32,
+    slot: i32,
+    held: &ItemStack,
+) {
+    let mut library = library_at(dimension, pos, max_level);
+    if &*held.item == "minecraft:enchanted_book" {
+        let enchantments = held.crafting_enchantments().to_vec();
+        if enchantments.is_empty() {
+            say(
+                host,
+                who.uuid,
+                Text::translate_with_fallback(
+                    "apotheosis.library.not_enchanted",
+                    "That book carries no enchantment.",
+                    &[],
+                ),
+            );
+            return;
+        }
+        if !write_slot(host, slot, one_fewer(held)) {
+            return;
+        }
+        for (enchantment, level) in &enchantments {
+            library.absorb(enchantment, *level);
+        }
+        library.dirty = true;
+        let levels: u32 = enchantments.iter().map(|(_, level)| *level).sum();
+        let total: u32 = library.points.iter().map(|(_, points)| *points).sum();
+        store_library(dimension, pos, library);
+        say(
+            host,
+            who.uuid,
+            Text::translate_with_fallback(
+                "apotheosis.library.absorbed",
+                "Stored %s levels; the library holds %s points.",
+                &[Text::literal(levels.to_string()), Text::literal(total.to_string())],
+            ),
+        );
+        return;
+    }
+
+    let offers = library.offers();
+    if offers.is_empty() {
+        say(host, who.uuid, library_empty());
+        return;
+    }
+    let offer = selected_offer(who.uuid, dimension, pos)
+        .filter(|(id, level)| library.stored(id) >= *level)
+        .unwrap_or_else(|| offers[0].clone());
+    let mut book = ItemStack::new("minecraft:enchanted_book", 1);
+    book.set_crafting_enchantments(vec![offer.clone()]);
+    // The book is handed out first: a full inventory leaves the hand and the
+    // points as they were, and the points are spent only once it is out.
+    if host.give_stack(who.uuid, book).is_some() {
+        say(
+            host,
+            who.uuid,
+            Text::translate_with_fallback(
+                "apotheosis.library.no_room",
+                "No room for the book; nothing was taken.",
+                &[],
+            ),
+        );
+        return;
+    }
+    write_slot(host, slot, one_fewer(held));
+    if !library.withdraw(&offer.0, offer.1) {
+        return;
+    }
+    library.dirty = true;
+    store_library(dimension, pos, library);
+    remember_selection(who.uuid, dimension, pos, offer.clone());
+    say(
+        host,
+        who.uuid,
+        Text::translate_with_fallback(
+            "apotheosis.library.withdrawn",
+            "Took %s %s for %s points.",
+            &[
+                Text::translate_with_fallback(&enchantment_name(&offer.0), &offer.0, &[]),
+                Text::literal(offer.1.to_string()),
+                Text::literal(offer.1.to_string()),
+            ],
+        ),
+    );
 }
 
 /// Every library block gets a block entity, saved with its chunk.
@@ -1414,5 +1515,209 @@ mod tests {
         library.absorb(&Arc::from("minecraft:sharpness"), 0);
         assert!(library.points.is_empty());
         assert_eq!(encode_points(&library.points), "");
+    }
+
+    const PLAYER: u128 = 11;
+    const TEST_DIM: &str = "test:ingame";
+
+    /// A host holding carried slots; `free` is how many whole stacks the
+    /// inventory still takes (0 is a full one).
+    #[derive(Default)]
+    struct Fake {
+        slots: HashMap<i32, ItemStack>,
+        free: u32,
+        given: Vec<ItemStack>,
+        levels: Vec<i32>,
+        lines: Vec<Text>,
+        chat: Vec<Text>,
+    }
+
+    impl Host for Fake {
+        fn block(&self, _pos: [i32; 3]) -> String {
+            INFUSION_TABLE.to_owned()
+        }
+        fn carried_stack(&mut self, slot: i32) -> Option<&mut ItemStack> {
+            // Like the real host, a slot written with a count of 0 is emptied.
+            if self.slots.get(&slot).is_some_and(|stack| stack.count == 0) {
+                self.slots.remove(&slot);
+            }
+            self.slots.get_mut(&slot)
+        }
+        fn give_stack(&mut self, _uuid: u128, stack: ItemStack) -> Option<ItemStack> {
+            if self.free == 0 {
+                return Some(stack);
+            }
+            self.free -= 1;
+            self.given.push(stack);
+            None
+        }
+        fn give_levels(&mut self, _uuid: u128, levels: i32) -> bool {
+            self.levels.push(levels);
+            true
+        }
+        fn action_bar(&mut self, _uuid: u128, line: Text) -> bool {
+            self.lines.push(line);
+            true
+        }
+        fn tell(&mut self, _uuid: u128, line: Text) -> bool {
+            self.chat.push(line);
+            true
+        }
+    }
+
+    fn who(levels: i32) -> Who {
+        Who { uuid: PLAYER, xp_level: levels, creative: false }
+    }
+
+    fn enchanted(item: &str, ids: &[(&str, u32)]) -> ItemStack {
+        let mut stack = ItemStack::new(item, 1);
+        stack.set_crafting_enchantments(levels(ids));
+        stack
+    }
+
+    fn hands(main: ItemStack, off: Option<ItemStack>) -> Fake {
+        let mut host = Fake { free: 1, ..Fake::default() };
+        host.slots.insert(2, main);
+        if let Some(off) = off {
+            host.slots.insert(OFFHAND, off);
+        }
+        host
+    }
+
+    #[test]
+    fn a_tome_scraps_the_off_hand_item_into_a_book_and_charges_levels() {
+        let pick = enchanted("minecraft:diamond_pickaxe", &[("minecraft:efficiency", 4)]);
+        let tome = ItemStack::new(IMPROVED_TOME, 2);
+        let mut host = hands(tome.clone(), Some(pick));
+        let target = host.slots.get(&OFFHAND).cloned();
+        apply_tome(&mut host, who(30), Tome::Improved, 2, &tome, target);
+        assert_eq!(host.given.len(), 1);
+        assert_eq!(&*host.given[0].item, "minecraft:enchanted_book");
+        assert!(host.carried_stack(OFFHAND).is_none(), "the scrapped item is gone");
+        assert_eq!(host.slots[&2].count, 1, "one tome is used");
+        assert_eq!(host.levels, vec![-IMPROVED_COST]);
+        assert_eq!((host.lines.len(), host.chat.len()), (1, 1), "the result is shown");
+    }
+
+    #[test]
+    fn a_full_inventory_changes_nothing_and_says_so() {
+        let pick = enchanted("minecraft:diamond_pickaxe", &[("minecraft:efficiency", 4)]);
+        let tome = ItemStack::new(EXTRACTION_TOME, 1);
+        let mut host = hands(tome.clone(), Some(pick.clone()));
+        host.free = 0;
+        apply_tome(&mut host, who(30), Tome::Extraction, 2, &tome, Some(pick.clone()));
+        assert!(host.given.is_empty() && host.levels.is_empty());
+        assert_eq!(host.slots[&OFFHAND], pick);
+        assert_eq!(host.slots[&2], tome);
+        assert_eq!(host.lines.len(), 1);
+    }
+
+    #[test]
+    fn extraction_strips_the_item_and_keeps_it() {
+        let pick = enchanted("minecraft:diamond_pickaxe", &[("minecraft:fortune", 2)]);
+        let tome = ItemStack::new(EXTRACTION_TOME, 1);
+        let mut host = hands(tome.clone(), Some(pick.clone()));
+        apply_tome(&mut host, who(30), Tome::Extraction, 2, &tome, Some(pick));
+        assert!(host.slots[&OFFHAND].crafting_enchantments().is_empty());
+        assert_eq!(host.given.len(), 1);
+        assert!(host.carried_stack(2).is_none(), "the last tome is used up");
+    }
+
+    #[test]
+    fn every_tome_refusal_is_shown_to_the_player() {
+        let tome = ItemStack::new(SCRAP_TOME, 1);
+        let plain = ItemStack::new("minecraft:diamond_pickaxe", 1);
+        let pick = enchanted("minecraft:diamond_pickaxe", &[("minecraft:efficiency", 4)]);
+        let web = ItemStack::new(PRISMATIC_WEB, 1);
+        let cases = [
+            (Tome::Scrap, None, 30),
+            (Tome::Scrap, Some(plain.clone()), 30),
+            (Tome::Scrap, Some(pick), 0),
+            (Tome::Web, Some(plain), 30),
+        ];
+        for (kind, target, xp) in cases {
+            let held = if kind == Tome::Web { &web } else { &tome };
+            let mut host = hands(held.clone(), target.clone());
+            apply_tome(&mut host, who(xp), kind, 2, held, target);
+            assert_eq!(host.lines.len(), 1, "{kind:?} refusal shows on the action bar");
+            assert_eq!(host.chat.len(), 1, "{kind:?} refusal shows in chat");
+            assert!(host.given.is_empty() && host.levels.is_empty());
+        }
+    }
+
+    #[test]
+    fn the_web_cleanses_curses_in_the_hand_slot() {
+        let helm = enchanted(
+            "minecraft:diamond_helmet",
+            &[("minecraft:binding_curse", 1), ("minecraft:protection", 3)],
+        );
+        let web = ItemStack::new(PRISMATIC_WEB, 1);
+        let mut host = hands(web.clone(), Some(helm.clone()));
+        apply_tome(&mut host, who(40), Tome::Web, 2, &web, Some(helm));
+        assert_eq!(host.slots[&OFFHAND].crafting_enchantments().len(), 1);
+        assert_eq!(host.levels, vec![-WEB_COST]);
+    }
+
+    #[test]
+    fn an_infusion_with_nothing_to_infuse_explains_itself() {
+        let stick = ItemStack::new("minecraft:stick", 1);
+        let mut host = hands(stick.clone(), None);
+        apply_infusion(&mut host, who(50), 2, [0, 64, 0], &stick);
+        assert_eq!((host.lines.len(), host.chat.len()), (1, 1));
+        assert_eq!(host.slots[&2], stick);
+    }
+
+    #[test]
+    fn a_library_stores_a_book_then_gives_one_back_for_a_plain_book() {
+        let pos = [101, 5, 101];
+        let book = enchanted("minecraft:enchanted_book", &[("minecraft:sharpness", 3)]);
+        let mut host = hands(book.clone(), None);
+        apply_library(&mut host, who(0), TEST_DIM, pos, 10, 2, &book);
+        assert!(!host.slots.contains_key(&2) || host.slots[&2].count == 0);
+        assert_eq!(library_at(TEST_DIM, pos, 10).stored("minecraft:sharpness"), 3);
+        assert_eq!((host.lines.len(), host.chat.len()), (1, 1));
+
+        let blank = ItemStack::new("minecraft:book", 1);
+        let mut host = hands(blank.clone(), None);
+        apply_library(&mut host, who(0), TEST_DIM, pos, 10, 2, &blank);
+        assert_eq!(host.given.len(), 1);
+        assert_eq!(&*host.given[0].item, "minecraft:enchanted_book");
+        assert!(library_at(TEST_DIM, pos, 10).stored("minecraft:sharpness") < 3);
+    }
+
+    #[test]
+    fn a_library_refuses_visibly_and_keeps_the_book_when_inventory_is_full() {
+        let pos = [102, 5, 102];
+        let blank = ItemStack::new("minecraft:book", 1);
+        let mut host = hands(blank.clone(), None);
+        apply_library(&mut host, who(0), TEST_DIM, pos, 10, 2, &blank);
+        assert_eq!((host.lines.len(), host.chat.len()), (1, 1), "empty library says so");
+
+        let book = enchanted("minecraft:enchanted_book", &[("minecraft:power", 2)]);
+        let mut host = hands(book.clone(), None);
+        apply_library(&mut host, who(0), TEST_DIM, pos, 10, 2, &book);
+        let mut host = hands(blank.clone(), None);
+        host.free = 0;
+        apply_library(&mut host, who(0), TEST_DIM, pos, 10, 2, &blank);
+        assert_eq!(host.slots[&2], blank, "the book stays in the hand");
+        assert_eq!(library_at(TEST_DIM, pos, 10).stored("minecraft:power"), 2);
+        assert_eq!(host.lines.len(), 1);
+
+        let bare = ItemStack::new("minecraft:enchanted_book", 1);
+        let mut host = hands(bare.clone(), None);
+        apply_library(&mut host, who(0), TEST_DIM, pos, 10, 2, &bare);
+        assert_eq!(host.lines.len(), 1, "an unenchanted book is refused aloud");
+    }
+
+    #[test]
+    fn a_pending_click_is_taken_only_on_its_own_slot() {
+        let held = ItemStack::new(SCRAP_TOME, 1);
+        set_pending(
+            909,
+            Pending { job: Job::Tome(Tome::Scrap), slot: 4, main: held, off: None },
+        );
+        assert!(take_pending(909, 3).is_none());
+        assert!(take_pending(909, 4).is_some());
+        assert!(take_pending(909, 4).is_none());
     }
 }
