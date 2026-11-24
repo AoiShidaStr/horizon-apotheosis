@@ -7,11 +7,11 @@ Source inspectée : `java-ref`
 ## Résumé
 
 - blocs avec blockstate Java : 33
-- objets avec modèle Java : 53
-- modèles copiés : 120
-- textures copiées : 130
-- clés lang en_us : 1741
-- clés lang fr_fr : 1620
+- objets avec modèle Java : 52
+- modèles copiés : 119
+- textures copiées : 129
+- clés lang en_us : 1742
+- clés lang fr_fr : 1621
 
 Les ids sans équivalent Java gardent nos définitions et nos textures originales de `content/`. Les gemmes viennent de Java : une seule gemme (`apotheosis:gem`) dont le modèle choisit la texture du type qu'elle porte, ci-dessous en liste à part.
 
@@ -74,7 +74,7 @@ Les ids sans équivalent Java gardent nos définitions et nos textures originale
 | `endshelf` | `apothic_enchanting:endshelf` | `items/endshelf.json` → `apothic_enchanting:item/endshelf` |
 | `extraction_tome` | `apothic_enchanting:extraction_tome` | `items/extraction_tome.json` → `apothic_enchanting:item/extraction_tome` |
 | `filtering_shelf` | `apothic_enchanting:filtering_shelf` | `items/filtering_shelf.json` → `apothic_enchanting:item/filtering_shelf` |
-| `gem` | `apotheosis:gem` | `items/gem.json` → `apotheosis:item/gem` |
+| `gem` | original — pas d'équivalent Java | — |
 | `gem_cutting_table` | `apotheosis:gem_cutting_table` | `items/gem_cutting_table.json` → `apotheosis:item/gem_cutting_table` |
 | `gem_dust` | `apotheosis:gem_dust` | `items/gem_dust.json` → `apotheosis:item/gem_dust` |
 | `gem_fused_slate` | `apotheosis:gem_fused_slate` | `items/gem_fused_slate.json` → `apotheosis:item/gem_fused_slate` |

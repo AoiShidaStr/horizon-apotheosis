@@ -103,6 +103,11 @@ APOTHEOSIS_ITEMS = {
     "sigil_of_unnaming",
     "sigil_of_withdrawal",
 }
+# Items this port declares itself, whose Java namesake must never replace them.
+# `items/gem.json` is the port's `minecraft:select` over the gem types; the
+# Java base gem model would render the default texture for every gem.
+PORT_ITEMS_KEPT = {"gem"}
+
 # Block items whose Later versions live in Apotheosis rather than Apothic
 # Enchanting.
 APOTHEOSIS_BLOCKS = {
@@ -509,15 +514,21 @@ class Importer:
                     merged.update(self.source.read_json(logical))
             java[locale] = merged
 
-        # Java's en_us is the fallback for a key its fr_fr lacks.
+        # Java's en_us only fills a key that neither Java's fr_fr nor the port's
+        # own fr_fr has.
         for locale in LOCALES:
             table = base[locale]
             for kind, mapping in (("block", self.block_map), ("item", self.item_map)):
                 for name, (namespace, java_name) in mapping.items():
                     source_key = f"{kind}.{namespace}.{java_name}"
-                    value = java[locale].get(source_key) or java["en_us"].get(source_key)
+                    our_key = f"{kind}.{OUR_NS}.{name}"
+                    # Java fr_fr, then the port's own text, then Java en_us: a
+                    # French text the port has is never replaced by English.
+                    value = java[locale].get(source_key)
+                    if value is None and our_key not in table:
+                        value = java["en_us"].get(source_key)
                     if value is not None:
-                        table[f"{kind}.{OUR_NS}.{name}"] = value
+                        table[our_key] = value
             table.update(
                 {
                     key: value
@@ -544,6 +555,8 @@ class Importer:
             if source is not None:
                 self.block_map[name] = source
         for name in item_names:
+            if name in PORT_ITEMS_KEPT:
+                continue
             source = self.find_item(name)
             if source is not None:
                 self.item_map[name] = source

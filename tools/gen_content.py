@@ -269,6 +269,9 @@ def main():
         key = "item.%s.gem.%s:%s" % (ID, ID, gem_id)
         en[key] = english_gem_name(gem_id)
         fr[key] = french_gem_name(gem_id)
+    # The base name the item shows: the gem's own name is the key above.
+    en["item.%s.gem" % ID] = "Gem"
+    fr["item.%s.gem" % ID] = "Gemme"
     en["item.%s.gem_dust" % ID] = "Gem Dust"
     fr["item.%s.gem_dust" % ID] = "Poussière de gemme"
 

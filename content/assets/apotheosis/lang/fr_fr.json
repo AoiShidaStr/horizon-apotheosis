@@ -511,5 +511,6 @@
   "apotheosis.gem.bonus.apotheosis:the_nether/inferno.1": "Casques : %s Dégâts de feu",
   "apotheosis.gem.bonus.apotheosis:the_nether/molten_breach.0": "Arcs : %s Perce-armure",
   "apotheosis.gem.bonus.apotheosis:the_nether/molten_breach.1": "Plastrons : %s Dégâts d'attaque",
-  "apotheosis.gem.bonus.apotheosis:the_nether/molten_breach.2": "Plastrons : %s Soins reçus"
+  "apotheosis.gem.bonus.apotheosis:the_nether/molten_breach.2": "Plastrons : %s Soins reçus",
+  "item.apotheosis.gem": "Gemme"
 }
