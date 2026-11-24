@@ -251,7 +251,9 @@ fn roman(amplifier: u8) -> &'static str {
         .unwrap_or("")
 }
 
-/// A vanilla effect's name key and English fallback.
+/// A vanilla effect's translation key and English fallback. The key is the
+/// game's own `effect.<namespace>.<path>`, so the effect name translates like
+/// any other component rather than staying English in the lore.
 fn effect_name(effect: &str, amplifier: u8) -> (String, String) {
     let path = effect.rsplit(':').next().unwrap_or(effect);
     let fallback = match path {
@@ -267,7 +269,51 @@ fn effect_name(effect: &str, amplifier: u8) -> (String, String) {
         "haste" => "Haste",
         _ => path,
     };
-    (format!("apotheosis.effect.{path}"), format!("{fallback}{}", roman(amplifier)))
+    (
+        format!("effect.{}", effect.replacen(':', ".", 1)),
+        format!("{fallback}{}", roman(amplifier)),
+    )
+}
+
+/// An effect as a translatable argument: the game's own effect key, with the
+/// amplifier as vanilla's `enchantment.level.*` line after it.
+fn effect_arg(effect: &str, amplifier: u8) -> Tag {
+    let (key, fallback) = effect_name(effect, amplifier);
+    let mut fields: Vec<(&'static str, Tag)> = vec![
+        ("translate", string(&key)),
+        ("fallback", string(&fallback)),
+    ];
+    if amplifier > 0 {
+        fields.push((
+            "extra",
+            Tag::List(vec![
+                string(" "),
+                Tag::compound([
+                    (
+                        "translate",
+                        string(&format!("enchantment.level.{}", amplifier + 1)),
+                    ),
+                    ("fallback", string(roman(amplifier).trim())),
+                ]),
+            ]),
+        ));
+    }
+    Tag::compound(fields)
+}
+
+/// The English text of a lore argument, for the fallback string.
+fn arg_text(arg: &Tag) -> String {
+    match arg {
+        Tag::String(text) => text.to_string_lossy(),
+        Tag::Compound(fields) => match fields
+            .get(&"fallback".into())
+            .or_else(|| fields.get(&"text".into()))
+        {
+            Some(Tag::String(text)) => text.to_string_lossy(),
+            _ => String::new(),
+        },
+        _ => String::new(),
+    }
 }
 
 /// A damage class's name key and English fallback.
@@ -296,19 +342,27 @@ fn fill(template: &str, args: &[String]) -> String {
 
 /// The lore line, its English fallback, and the values the language file
 /// fills in. The keys are this port's own; Java's line is computed, not keyed.
-fn description(entry: &Entry, roll: Roll) -> (String, String, Vec<String>) {
-    let generic = |kind: &str, template: &str, args: Vec<String>| {
+fn description(entry: &Entry, roll: Roll) -> (String, String, Vec<Tag>) {
+    let generic = |kind: &str, template: &str, args: Vec<Tag>| {
+        let text: Vec<String> = args.iter().map(arg_text).collect();
         (
             format!("apotheosis.affix.effect.{kind}"),
-            fill(template, &args),
+            fill(template, &text),
             args,
         )
     };
+    let literal = |value: String| Tag::String(value.as_str().into());
     match entry.kind {
         Kind::MobEffect => {
             let effect = entry.affix.and_then(|a| a.effect).unwrap_or("minecraft:unknown");
-            let (_, name) = effect_name(effect, roll.amplifier);
-            generic("effect", "%s for %s s", vec![name, seconds(roll.duration)])
+            generic(
+                "effect",
+                "%s for %s s",
+                vec![
+                    effect_arg(effect, roll.amplifier),
+                    literal(seconds(roll.duration)),
+                ],
+            )
         }
         Kind::DamageReduction => {
             let kind = entry.affix.and_then(|a| a.damage_kind).unwrap_or("physical");
@@ -316,30 +370,37 @@ fn description(entry: &Entry, roll: Roll) -> (String, String, Vec<String>) {
             generic(
                 "reduction",
                 "-%s%% %s damage",
-                vec![percent(roll.value), name],
+                vec![literal(percent(roll.value)), literal(name)],
             )
         }
         Kind::Execution => generic(
             "executing",
             "Executes below %s%% health",
-            vec![percent(roll.value)],
+            vec![literal(percent(roll.value))],
         ),
         Kind::Cleaving => generic(
             "cleaving",
             "%s%% chance to hit %s foes",
-            vec![percent(roll.chance), format!("{:.0}", roll.targets)],
+            vec![
+                literal(percent(roll.chance)),
+                literal(format!("{:.0}", roll.targets)),
+            ],
         ),
         Kind::Thunderstruck => generic(
             "thunderstruck",
             "Lightning for %s damage",
-            vec![format!("{:.0}", roll.value)],
+            vec![literal(format!("{:.0}", roll.value))],
         ),
         Kind::Festive => generic(
             "festive",
             "%s%% chance of extra loot",
-            vec![percent(roll.chance)],
+            vec![literal(percent(roll.chance))],
         ),
-        Kind::Durable => generic("durable", "%s%% less wear", vec![percent(roll.value)]),
+        Kind::Durable => generic(
+            "durable",
+            "%s%% less wear",
+            vec![literal(percent(roll.value))],
+        ),
         Kind::Enchantment => {
             let enchantment = entry.affix.and_then(|a| a.enchantment).unwrap_or("minecraft:fortune");
             let path = enchantment.rsplit(':').next().unwrap_or(enchantment);
@@ -347,7 +408,10 @@ fn description(entry: &Entry, roll: Roll) -> (String, String, Vec<String>) {
             generic(
                 "enchantment",
                 "+%s %s",
-                vec![format!("{:.0}", roll.value), fallback.to_string()],
+                vec![
+                    literal(format!("{:.0}", roll.value)),
+                    literal(fallback.to_string()),
+                ],
             )
         }
         Kind::Retreating => (
@@ -416,7 +480,7 @@ pub fn add_effect_affix(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) -> Vec
 }
 
 /// Appends one effect line after the attribute lines.
-fn append_lore(stack: &mut ItemStack, key: &str, fallback: &str, args: &[String]) {
+fn append_lore(stack: &mut ItemStack, key: &str, fallback: &str, args: &[Tag]) {
     let mut lore = match stack
         .data()
         .and_then(|data| data.other("minecraft:lore"))
@@ -429,10 +493,7 @@ fn append_lore(stack: &mut ItemStack, key: &str, fallback: &str, args: &[String]
         ("fallback", string(fallback)),
         ("color", string("#55FF55")),
         ("italic", Tag::Byte(0)),
-        (
-            "with",
-            Tag::List(args.iter().map(|arg| string(arg)).collect()),
-        ),
+        ("with", Tag::List(args.to_vec())),
     ]));
     stack
         .data_mut()
@@ -1278,6 +1339,39 @@ mod tests {
             .iter()
             .find(|affix| affix.path == path)
             .unwrap_or_else(|| panic!("no {path}"))
+    }
+
+    /// The reported bug: the lore showed the effect as a bare English word
+    /// ("Weakness"), so a client's language never translated it. The argument
+    /// must be the game's own `effect.minecraft.*` key.
+    #[test]
+    fn an_effect_lore_line_carries_the_vanilla_effect_key() {
+        let entry = catalogue()
+            .iter()
+            .find(|entry| {
+                entry.kind == Kind::MobEffect
+                    && entry.affix.and_then(|affix| affix.effect).is_some()
+            })
+            .expect("a mob-effect affix");
+        let (_, _, args) = description(
+            entry,
+            Roll {
+                amplifier: 1,
+                duration: 140.0,
+                ..Roll::default()
+            },
+        );
+        let key = args.iter().find_map(|arg| match arg {
+            Tag::Compound(fields) => match fields.get(&"translate".into()) {
+                Some(Tag::String(key)) => Some(key.to_string_lossy()),
+                _ => None,
+            },
+            _ => None,
+        });
+        let effect = entry.affix.and_then(|affix| affix.effect).unwrap();
+        let expected = format!("effect.{}", effect.replacen(':', ".", 1));
+        assert_eq!(key.as_deref(), Some(expected.as_str()));
+        assert!(expected.starts_with("effect.minecraft."), "{expected}");
     }
 
     #[test]

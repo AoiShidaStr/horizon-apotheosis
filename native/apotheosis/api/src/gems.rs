@@ -195,6 +195,10 @@ pub fn set_identity(stack: &mut ItemStack, gem: &Gem, purity: Purity) {
 }
 
 /// A gem stack: the item, its type, its purity, and the name Java gives it.
+///
+/// The name is `minecraft:item_name`, not `minecraft:custom_name`: Java gives
+/// a gem its normal item name (translated with the purity's colour), and only
+/// `custom_name` carries the player-given italics of an anvil rename.
 pub fn stack(gem: &Gem, purity: Purity) -> ItemStack {
     let mut stack = ItemStack::new(ITEM, 1);
     set_identity(&mut stack, gem, purity);
@@ -209,7 +213,7 @@ pub fn stack(gem: &Gem, purity: Purity) -> ItemStack {
     ]);
     stack
         .data_mut()
-        .set_other("minecraft:custom_name", Some(name));
+        .set_other("minecraft:item_name", Some(name));
     let rarity = match purity {
         Purity::Cracked => "common",
         Purity::Chipped | Purity::Flawed => "uncommon",
@@ -297,10 +301,26 @@ pub struct DescriptionLine {
 /// English text stays the fallback.  Bonuses this port cannot pay out are not
 /// shown here; the README lists them.
 pub fn description(gem: &Gem, purity: Purity) -> Vec<DescriptionLine> {
+    description_filtered(gem, purity, None)
+}
+
+/// The bonus lines a gem gives a piece of `item`, and only those: a sword
+/// shows its melee bonus, never the chestplate's. Java's tooltip filters the
+/// gem's data by the item it is socketed into, not by every class it names.
+pub fn description_for(gem: &Gem, purity: Purity, item: &str) -> Vec<DescriptionLine> {
+    description_filtered(gem, purity, Some(item))
+}
+
+fn description_filtered(gem: &Gem, purity: Purity, item: Option<&str>) -> Vec<DescriptionLine> {
     let colour = purity.colour();
     let mut lines = Vec::new();
     let index = purity.index() as usize;
     for (number, bonus) in gem.bonuses.iter().enumerate() {
+        if let Some(item) = item
+            && !bonus.classes.iter().any(|class| class.matches(item))
+        {
+            continue;
+        }
         let classes = bonus
             .classes
             .iter()
@@ -609,6 +629,28 @@ mod tests {
         let gem = get("apotheosis:core/ballast").unwrap();
         let lines = resolved(gem, Purity::Normal, "minecraft:diamond_sword");
         assert!(apothic(&lines).is_empty());
+    }
+
+    #[test]
+    fn a_pieces_description_only_names_the_bonus_it_gets() {
+        let gem = get("apotheosis:core/ballast").unwrap();
+        let sword = description_for(gem, Purity::Normal, "minecraft:diamond_sword");
+        assert_eq!(sword.len(), 1, "a sword showed another class's bonus");
+        assert!(sword[0].fallback.contains("+5"));
+        assert!(
+            !sword[0].fallback.contains("Chestplate"),
+            "a sword's lore listed the chestplate bonus: {}",
+            sword[0].fallback
+        );
+        let chest = description_for(gem, Purity::Normal, "minecraft:diamond_chestplate");
+        assert_eq!(chest.len(), 1);
+        assert!(chest[0].fallback.contains("Knockback Resistance"));
+        assert!(
+            !chest[0].fallback.contains("Attack Damage"),
+            "a chestplate's lore listed the melee bonus"
+        );
+        // The gem item's own tooltip still lists every class it applies to.
+        assert_eq!(description(gem, Purity::Normal).len(), 2);
     }
 
     #[test]
