@@ -1,0 +1,17 @@
+{
+  "template": "minecraft:amethyst_shard",
+  "max_stack_size": 64,
+  "rarity": "epic",
+  "components": {
+    "minecraft:custom_data": {
+      "apotheosis:gem": "apotheosis:core/combatant",
+      "apotheosis:gem_purity": 5
+    },
+    "minecraft:item_name": {
+      "translate": "item.apotheosis.gem.apotheosis:core/combatant",
+      "fallback": "Gem of the Combatant",
+      "color": "#FFD700",
+      "italic": false
+    }
+  }
+}

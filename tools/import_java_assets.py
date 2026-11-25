@@ -84,6 +84,14 @@ GEM_TEXTURES = (
     "warlord",
 )
 
+# One item per gem and purity (`tools/gen_java_gems.py`), mapped to the Java
+# texture its `item/gem_<name>` model draws.
+PORT_GEM_ITEMS = {
+    f"gem_{gem}_{purity}": f"apotheosis:item/gems/{gem}"
+    for gem in GEM_TEXTURES
+    for purity in ("cracked", "chipped", "flawed", "normal", "flawless", "perfect")
+}
+
 # Items that only exist in Apotheosis (the Java mod) and not in Apothic
 # Enchanting, or whose Apotheosis copy is the canonical one.
 APOTHEOSIS_ITEMS = {
@@ -107,6 +115,8 @@ APOTHEOSIS_ITEMS = {
 # `items/gem.json` is the port's `minecraft:select` over the gem types; the
 # Java base gem model would render the default texture for every gem.
 PORT_ITEMS_KEPT = {"gem"}
+# The per-purity gem items (`PORT_GEM_ITEMS`) are kept too: Java has no item of
+# that name, and its base gem model must never stand in for one.
 
 # Block items whose Later versions live in Apotheosis rather than Apothic
 # Enchanting.
@@ -555,7 +565,7 @@ class Importer:
             if source is not None:
                 self.block_map[name] = source
         for name in item_names:
-            if name in PORT_ITEMS_KEPT:
+            if name in PORT_ITEMS_KEPT or name in PORT_GEM_ITEMS:
                 continue
             source = self.find_item(name)
             if source is not None:
@@ -711,6 +721,12 @@ def report(
     ]
     for name in item_names:
         source = importer.item_map.get(name)
+        if name in PORT_GEM_ITEMS:
+            texture = PORT_GEM_ITEMS[name]
+            lines.append(
+                f"| `{name}` | gemme du port, texture Java `{texture}` | `{texture}` |"
+            )
+            continue
         if source is None:
             reason = "original — pas d'équivalent Java"
             lines.append(f"| `{name}` | {reason} | — |")

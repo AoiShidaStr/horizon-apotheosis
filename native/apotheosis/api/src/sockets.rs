@@ -272,21 +272,22 @@ fn roll_purity(purity_weights: &[(Purity, u64)], rng: &mut Rng) -> Purity {
     Purity::Normal
 }
 
-/// Marks a gem stack with the purity it dropped at.
+/// Marks a gem stack with the purity it dropped at: a gem becomes the item of
+/// that purity; one below its floor, which has no item, keeps the purity in
+/// its custom data.
 pub fn set_purity(stack: &mut ItemStack, purity: Purity) {
+    if gems::change_purity(stack, purity) {
+        return;
+    }
     set_custom(stack, |map| {
         map.insert(gems::PURITY_KEY.into(), Tag::Int(purity.index() as i32));
     });
 }
 
-/// The purity a gem stack carries; an unmarked gem (a chest gem, a crafted
-/// one) is normal.
+/// The purity a gem stack carries: its custom data's, else its item id's; an
+/// unmarked generic gem is normal.
 pub fn purity_of(stack: &ItemStack) -> Purity {
-    let tag = custom(stack);
-    match tag.get(gems::PURITY_KEY) {
-        Some(Tag::Int(index)) => Purity::from_index(*index as u8),
-        _ => Purity::Normal,
-    }
+    gems::purity_of(stack)
 }
 
 /// Gives a freshly dropped gem its purity, never below the floor its Java data
@@ -1841,7 +1842,7 @@ fn loot_dimension<'a>(ctx: &'a NativeLootContext<'_>) -> &'a str {
 /// filtered by its purity floor: the floor clamps the rolled purity, as
 /// `Gem.toStack` does in Java.
 pub fn loot_function(event: &mut LootFunctionEvent<'_>) {
-    if event.kind != "apotheosis:gem_purity" || &*event.stack.item != gems::ITEM {
+    if event.kind != "apotheosis:gem_purity" || event.stack.item != gems::ITEM {
         return;
     }
     fill_chest_gem(loot_dimension(event.ctx), event.ctx.seed, event.stack);
@@ -1854,6 +1855,15 @@ fn fill_chest_gem(dimension: &str, seed: i64, stack: &mut LootStack) {
     let mut rng = Rng::new(seed as u64);
     let (gem, _) = gems::roll(dimension, false, &mut rng);
     let purity = chest_gem_purity(seed).max(gem.min_purity);
+    // The gem's own item: its declaration carries the type, purity, name and
+    // model, so the generic entry's patch is dropped.
+    if let Some(item) = gems::item_id(gem, purity) {
+        stack.item = item;
+        stack.components.retain(|(id, _)| {
+            id != CUSTOM && id != "minecraft:item_name" && id != "minecraft:custom_model_data"
+        });
+        return;
+    }
     let custom_name = serde_json::json!({
         "translate": format!("item.apotheosis.gem.{}", gem.id),
         "fallback": gem.name,
@@ -2066,8 +2076,13 @@ fn salvage(
     if !unplaced.is_empty() {
         // Take back the gems that fitted by their real item id: the type id
         // `socket.gem` is not an item and could never be found in a slot.
-        for _ in 0..(gems.len() - unplaced.len()) {
-            let _ = host.take_items(gems::ITEM, 1);
+        for (index, socket) in gems.iter().enumerate() {
+            if unplaced.contains(&index) {
+                continue;
+            }
+            if let Some(entry) = gems::get(&socket.gem) {
+                let _ = host.take_items(&gems::stack(entry, socket.purity).item, 1);
+            }
         }
         say(host, player, Text::translate_with_fallback(
             "apotheosis.salvage.no_room",
@@ -2542,24 +2557,14 @@ mod tests {
                 components: Vec::new(),
             };
             fill_chest_gem("minecraft:the_end", seed, &mut stack);
-            let gem = stack
-                .components
-                .iter()
-                .find(|(id, _)| id == CUSTOM)
-                .and_then(|(_, data)| data.get(gems::GEM_KEY))
-                .and_then(|id| id.as_str());
-            if gem == Some("apotheosis:the_end/endersurge") {
+            // The entry becomes the gem's own item, whose declaration carries
+            // its type, purity, name and model: no patch is left on it.
+            let (gem, purity) =
+                gems::from_item(&stack.item).expect("the chest gem is no gem item");
+            assert!(stack.components.is_empty(), "{:?}", stack.components);
+            assert!(purity >= gem.min_purity);
+            if gem.id == "apotheosis:the_end/endersurge" {
                 found = true;
-                let model = stack
-                    .components
-                    .iter()
-                    .find(|(id, _)| id == "minecraft:custom_model_data")
-                    .and_then(|(_, data)| data.as_str());
-                assert_eq!(
-                    model,
-                    Some("apotheosis:the_end/endersurge"),
-                    "the gem's model did not follow its type"
-                );
                 break;
             }
         }
@@ -2748,8 +2753,8 @@ mod tests {
 
         assert_eq!(host.given.len(), 3);
         assert!(
-            host.given.iter().all(|(item, _)| item == gems::ITEM),
-            "a gem came back as its type id, not as an apotheosis:gem"
+            host.given.iter().all(|(item, _)| gems::from_item(item).is_some()),
+            "a gem came back as its type id, not as its gem item"
         );
         assert_eq!(socketed(host.slots.get(&OFFHAND).unwrap()), Vec::new());
         assert_eq!(host.slots.get(&4).unwrap().count, 0);
@@ -2767,7 +2772,8 @@ mod tests {
             true
         });
         assert!(unplaced.is_empty());
-        assert_eq!(&*given[0].item, gems::ITEM);
+        assert_eq!(&*given[0].item, "apotheosis:gem_ballast_flawless");
+        assert!(given[0].data().is_none(), "the declaration carries the identity");
         assert_eq!(gems::id_of(&given[0]), Some("apotheosis:core/ballast"));
         assert_eq!(gems::purity_of(&given[0]), Purity::Flawless);
         assert!(gems::of_stack(&given[0]).is_some());
@@ -2803,9 +2809,15 @@ mod tests {
         assert_eq!(host.given.len(), 2);
         assert_eq!(host.taken.len(), 2, "the gems handed out were not taken back");
         assert!(
-            host.taken.iter().all(|(item, _)| item == gems::ITEM),
+            host.taken.iter().all(|(item, _)| gems::from_item(item).is_some()),
             "the rollback tried to take back a gem type id, not the gem item"
         );
+        let ids = |list: &[(String, u32)]| {
+            let mut ids: Vec<String> = list.iter().map(|(item, _)| item.clone()).collect();
+            ids.sort();
+            ids
+        };
+        assert_eq!(ids(&host.taken), ids(&host.given), "the rollback took other gems back");
         assert!(host.items.is_empty());
     }
 

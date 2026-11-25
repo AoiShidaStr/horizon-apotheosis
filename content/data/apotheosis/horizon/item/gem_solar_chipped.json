@@ -1,0 +1,17 @@
+{
+  "template": "minecraft:amethyst_shard",
+  "max_stack_size": 64,
+  "rarity": "uncommon",
+  "components": {
+    "minecraft:custom_data": {
+      "apotheosis:gem": "apotheosis:core/solar",
+      "apotheosis:gem_purity": 1
+    },
+    "minecraft:item_name": {
+      "translate": "item.apotheosis.gem.apotheosis:core/solar",
+      "fallback": "Solar Gem",
+      "color": "#A0A0A0",
+      "italic": false
+    }
+  }
+}

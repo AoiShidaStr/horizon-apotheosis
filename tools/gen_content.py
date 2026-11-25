@@ -230,8 +230,13 @@ def main():
         "result": {"id": "%s:gem_dust" % ID, "count": 3},
     })
 
-    write_json(os.path.join(CONTENT, "data", ID, "tags", "item", "gems.json"),
-               {"values": ["%s:gem" % ID]})
+    # The per-purity gem items are added by `tools/gen_java_gems.py`; keep them.
+    gems_tag_path = os.path.join(CONTENT, "data", ID, "tags", "item", "gems.json")
+    gems_tag = read_json(gems_tag_path, {"values": []})
+    values = gems_tag.get("values", [])
+    if "%s:gem" % ID not in values:
+        values = ["%s:gem" % ID] + values
+    write_json(gems_tag_path, {"values": values})
 
     # The blocks this port invented are gone; keep the tables' entries.
     tag_path = os.path.join(CONTENT, "data", "minecraft", "tags", "block",
