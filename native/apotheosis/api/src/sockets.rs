@@ -984,7 +984,6 @@ pub fn table(block: &str) -> Option<Table> {
 pub enum Action {
     Socket,
     Polish,
-    Reforge,
     Salvage,
     Cut,
     AddSocket,
@@ -1036,29 +1035,6 @@ fn fingerprint(stack: &ItemStack) -> Fingerprint {
     }
 }
 
-/// What a delayed reforge already took, so a hand that changed can be paid
-/// back in full: the levels, the rarity material and the sigils.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct Charge {
-    levels: i32,
-    material: Option<(&'static str, u32)>,
-    sigils: u32,
-}
-
-fn refund(host: &mut dyn Host, player: u128, charge: &Charge) {
-    if charge.levels != 0 {
-        let _ = host.give_levels(player, charge.levels);
-    }
-    if let Some((item, count)) = charge.material {
-        if count > 0 {
-            let _ = host.give_items(item, count);
-        }
-    }
-    if charge.sigils > 0 {
-        let _ = host.give_items("apotheosis:sigil_of_rebirth", charge.sigils);
-    }
-}
-
 /// An action waiting for the next tick, with the slot it came from and the
 /// stacks it was validated on.
 #[derive(Clone, Debug, PartialEq)]
@@ -1070,11 +1046,6 @@ struct Pending {
     main: Fingerprint,
     /// The off-hand piece the click saw, for the actions that work on one.
     target: Option<Fingerprint>,
-    /// What a reforge was charged, given back if the hand changed.
-    charge: Charge,
-    /// The rarity a table reforge keeps; none for a command reforge or a
-    /// sigil of rebirth, which roll one.
-    tier: Option<Tier>,
 }
 
 impl Pending {
@@ -1084,23 +1055,9 @@ impl Pending {
             slot,
             main: fingerprint(main),
             target: target.map(fingerprint),
-            charge: Charge::default(),
-            tier: None,
         }
     }
 
-    fn with_charge(mut self, charge: Charge) -> Self {
-        self.charge = charge;
-        self
-    }
-
-    fn with_tier(mut self, tier: Tier) -> Self {
-        self.tier = Some(tier);
-        self
-    }
-
-    /// Whether the tick on `slot`, holding `main` and `target`, is still the
-    /// click this action was validated on.
     fn accepts(&self, slot: i32, main: &ItemStack, target: Option<&ItemStack>) -> bool {
         self.slot == slot
             && self.main == fingerprint(main)
@@ -1199,102 +1156,6 @@ pub fn begin_salvage(host: &mut dyn Host, player: u128, slot: i32) {
     set_pending(player, Pending::new(Action::Salvage, slot, &stack, None));
 }
 
-/// Queue a reforge of the affixed piece in `slot`; the command has already
-/// charged for it. The piece is remembered so the tick rerolls that one, or
-/// gives the levels back.
-pub fn begin_reforge(host: &mut dyn Host, player: u128, slot: i32) {
-    let charge = Charge {
-        levels: crate::REFORGE_COST,
-        ..Charge::default()
-    };
-    let Some(stack) = host.held_stack(player) else {
-        refund(host, player, &charge);
-        return;
-    };
-    set_pending(
-        player,
-        Pending::new(Action::Reforge, slot, &stack, None).with_charge(charge),
-    );
-}
-
-/// Reforging at a table with Java's recipe costs: experience levels, the
-/// rarity's material and sigils of rebirth. Everything is taken before the
-/// action is queued and given back in full if any part is missing.
-fn begin_table_reforge(
-    host: &mut dyn Host,
-    player: u128,
-    xp_level: i32,
-    slot: i32,
-    table: Table,
-    stack: &ItemStack,
-) {
-    let tier = tier_of(stack).unwrap_or(Tier::Common);
-    let Some((levels, material_count, sigils)) = reforge_cost(tier, table) else {
-        say(host, player, Text::translate_with_fallback(
-            "apotheosis.table.reforge.rarity",
-            "This table cannot reforge that rarity; use the reforging table.",
-            &[],
-        ));
-        return;
-    };
-    if xp_level < levels {
-        say(host, player, Text::translate_with_fallback(
-            "apotheosis.reforge.levels",
-            "Reforging costs %s experience levels.",
-            &[Text::literal(levels.to_string())],
-        ));
-        return;
-    }
-    let (material, _) = salvage_material(tier);
-    let got_material = host.take_items(material, material_count);
-    if got_material < material_count {
-        if got_material > 0 {
-            let _ = host.give_items(material, got_material);
-        }
-        say(host, player, Text::translate_with_fallback(
-            "apotheosis.reforge.missing",
-            "You do not have the materials this reforge needs.",
-            &[],
-        ));
-        return;
-    }
-    let got_sigils = if sigils > 0 {
-        host.take_items("apotheosis:sigil_of_rebirth", sigils)
-    } else {
-        0
-    };
-    if got_sigils < sigils {
-        let _ = host.give_items(material, material_count);
-        if got_sigils > 0 {
-            let _ = host.give_items("apotheosis:sigil_of_rebirth", got_sigils);
-        }
-        say(host, player, Text::translate_with_fallback(
-            "apotheosis.reforge.missing",
-            "You do not have the materials this reforge needs.",
-            &[],
-        ));
-        return;
-    }
-    if !host.give_levels(player, -levels) {
-        let _ = host.give_items(material, material_count);
-        if sigils > 0 {
-            let _ = host.give_items("apotheosis:sigil_of_rebirth", sigils);
-        }
-        return;
-    }
-    let charge = Charge {
-        levels,
-        material: Some((material, material_count)),
-        sigils,
-    };
-    set_pending(
-        player,
-        Pending::new(Action::Reforge, slot, stack, None)
-            .with_charge(charge)
-            .with_tier(tier),
-    );
-}
-
 /// The counter this module's rolls draw from, mixed with the tick they run on:
 /// the hook API has no random source, so this is the port's own stream.
 fn next_roll() -> u64 {
@@ -1321,7 +1182,7 @@ pub(crate) fn reforge_seed(player: u128, item: &str) -> u64 {
 
 /// A stable number for an item id, so the same piece reforge always mixes its
 /// own id in.
-fn item_id(item: &str) -> u64 {
+pub(crate) fn item_id(item: &str) -> u64 {
     let mut hash = 0xCBF2_9CE4_8422_2325u64;
     for byte in item.bytes() {
         hash ^= u64::from(byte);
@@ -1364,11 +1225,6 @@ pub fn inventory_tick(host: &mut dyn Host, event: &mut InventoryTickEvent) {
     };
     // The clicked slot, never whichever slot is selected now.
     let Some(main) = host.carried_stack(pending.slot).cloned() else {
-        // The piece left the slot before the tick: a reforge paid for it, so
-        // give everything back like any other hand change.
-        if pending.action == Action::Reforge {
-            refund(host, player.uuid, &pending.charge);
-        }
         return;
     };
     let target = match pending.target {
@@ -1377,22 +1233,11 @@ pub fn inventory_tick(host: &mut dyn Host, event: &mut InventoryTickEvent) {
     };
     if !pending.accepts(pending.slot, &main, target.as_ref()) {
         // The hand changed since the click: nothing is spent and nothing is
-        // destroyed. A reforge was paid for before the tick, so refund it.
-        if pending.action == Action::Reforge {
-            refund(host, player.uuid, &pending.charge);
-        }
+        // destroyed.
         return;
     }
 
     match pending.action {
-        Action::Reforge => reforge(
-            host,
-            pending.slot,
-            &main,
-            player.uuid,
-            &pending.main,
-            pending.tier,
-        ),
         Action::Salvage => salvage(host, pending.slot, &main, player.uuid, &pending.main),
         Action::Cut => cut(host, pending.slot, &main, player.uuid),
         Action::SalvageGem => salvage_gem(host, pending.slot, &main, player.uuid),
@@ -1467,29 +1312,8 @@ pub fn use_item_on(host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow 
     // The click belongs to the table, never to the block under it: a table
     // that opened a crafting grid on a misclick would hide its own use.
     match table {
-        Table::SimpleReforging | Table::Reforging => {
-            // Java's tables take the target rarity from a rarity material in
-            // their own grid; a click can only reforge a piece that already
-            // has a rarity, which is the piece in hand. Plain gear stays on
-            // the `reforge` command, a port extension.
-            if !is_equipment(&event.stack.item) || tier_of(&event.stack).is_none() {
-                say(host, player.uuid, Text::translate_with_fallback(
-                    "apotheosis.table.reforge.hint",
-                    "The reforging table works on the affixed piece in your hand.",
-                    &[],
-                ));
-                return Flow::Cancel;
-            }
-            begin_table_reforge(
-                host,
-                player.uuid,
-                player.xp_level,
-                i32::from(player.selected_slot),
-                table,
-                &event.stack,
-            );
-            Flow::Cancel
-        }
+        // The reforging tables open their own menu (`menus`).
+        Table::SimpleReforging | Table::Reforging => Flow::Continue,
         Table::Salvaging => {
             if gems::of_stack(&event.stack).is_some() {
                 set_pending(
@@ -1644,7 +1468,7 @@ fn rebirth(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemSt
         return;
     }
     let seed = reforge_seed(player, &gear.item);
-    let tier = reroll(host, OFFHAND, gear, seed, None);
+    let tier = reroll(host, OFFHAND, gear, seed);
     consume_seal(host, slot, seal_stack);
     say(host, player, Text::translate_with_fallback(
         "apotheosis.reforge.done",
@@ -1878,22 +1702,32 @@ fn fill_chest_gem(dimension: &str, seed: i64, stack: &mut LootStack) {
         .push(("minecraft:item_name".to_owned(), custom_name));
 }
 
-/// Rerolls a piece's affixes in place with `seed`, keeping its sockets and the
-/// gems in them; returns the rarity it rolled. `tier` names the rarity to
-/// reroll at; none draws a fresh one. Java's reforging table rerolls at the
-/// rarity the paid material names, so the table passes the piece's own tier
-/// and a rare sword stays rare.
-fn reroll(host: &mut dyn Host, slot: i32, gear: &ItemStack, seed: u64, tier: Option<Tier>) -> Tier {
+/// What reforging `gear` at `tier` with `seed` gives, the piece itself left
+/// untouched: Java's `LootController.createLootItem(input.copy(), rarity)`.
+/// An affixed piece keeps its sockets and the gems in them; plain gear rolls
+/// its sockets as a drop does.
+pub(crate) fn reforged(gear: &ItemStack, tier: Tier, seed: u64) -> ItemStack {
     let mut rng = Rng::new(seed);
-    let tier = tier.unwrap_or_else(|| rng.tier(&crate::ORDINARY_TIERS));
     let mut piece = gear.clone();
+    let affixed = has_affixes(gear);
     apply_affixes(&mut piece, tier, &mut rng);
-    set_custom(&mut piece, |map| {
-        map.insert(TIER_KEY.into(), Tag::Int(tier as i32));
-    });
-    write_sockets(&mut piece, socket_total(gear), &socketed(gear));
-    refresh(&mut piece);
-    write_slot(host, slot, piece);
+    if affixed {
+        set_custom(&mut piece, |map| {
+            map.insert(TIER_KEY.into(), Tag::Int(tier as i32));
+        });
+        write_sockets(&mut piece, socket_total(gear), &socketed(gear));
+        refresh(&mut piece);
+    } else {
+        after_affixes(&mut piece, tier, &mut rng);
+    }
+    piece
+}
+
+/// Rerolls the piece in `slot` in place at a rarity drawn from `seed`: the
+/// sigil of rebirth.
+fn reroll(host: &mut dyn Host, slot: i32, gear: &ItemStack, seed: u64) -> Tier {
+    let tier = Rng::new(seed ^ 0x5EED).tier(&crate::ORDINARY_TIERS);
+    write_slot(host, slot, reforged(gear, tier, seed));
     tier
 }
 
@@ -2001,38 +1835,6 @@ fn polish(host: &mut dyn Host, slot: i32, main: &ItemStack, off: &ItemStack, pla
         &[Text::translate_with_fallback(
             purity.next().name_key(),
             purity.next().name(),
-            &[],
-        )],
-    ));
-}
-
-fn reforge(
-    host: &mut dyn Host,
-    slot: i32,
-    main: &ItemStack,
-    player: u128,
-    expected: &Fingerprint,
-    keep_tier: Option<Tier>,
-) {
-    // The command charged for this tick; if the hand changed in between, the
-    // levels go back rather than reroll something the player did not ask for.
-    if fingerprint(main) != *expected || !can_reforge(main) {
-        let _ = host.give_levels(player, crate::REFORGE_COST);
-        say(host, player, Text::translate_with_fallback(
-            "apotheosis.reforge.changed",
-            "The piece in your hand changed; nothing was reforged.",
-            &[],
-        ));
-        return;
-    }
-    let seed = reforge_seed(player, &main.item);
-    let tier = reroll(host, slot, main, seed, keep_tier);
-    say(host, player, Text::translate_with_fallback(
-        "apotheosis.reforge.done",
-        "Reforged: %s.",
-        &[Text::translate_with_fallback(
-            tier.name_key(),
-            tier.name(),
             &[],
         )],
     ));
@@ -2810,33 +2612,6 @@ mod tests {
     }
 
     #[test]
-    fn a_reforge_only_rerolls_the_piece_it_was_paid_for() {
-        let paid_for = affixed("minecraft:diamond_sword", Tier::Rare, 51);
-        let swapped_in = affixed("minecraft:diamond_chestplate", Tier::Epic, 52);
-        let mut host = Fake::default();
-        host.slots.insert(2, swapped_in.clone());
-        reforge(&mut host, 2, &swapped_in, PLAYER, &fingerprint(&paid_for), None);
-
-        assert_eq!(host.levels, vec![crate::REFORGE_COST]);
-        assert_eq!(
-            *host.slots.get(&2).expect("the piece vanished"),
-            swapped_in,
-            "a piece the player did not designate was rerolled"
-        );
-    }
-
-    #[test]
-    fn a_reforge_of_the_paid_piece_spends_no_extra_levels() {
-        let paid_for = affixed("minecraft:diamond_sword", Tier::Rare, 61);
-        let mut host = Fake::default();
-        host.slots.insert(2, paid_for.clone());
-        reforge(&mut host, 2, &paid_for, PLAYER, &fingerprint(&paid_for), None);
-
-        assert!(host.levels.is_empty());
-        assert!(can_reforge(host.slots.get(&2).unwrap()));
-    }
-
-    #[test]
     fn a_salvage_only_destroys_the_piece_it_was_validated_on() {
         let designated = affixed("minecraft:diamond_sword", Tier::Mythic, 71);
         let swapped_in = affixed("minecraft:diamond_chestplate", Tier::Ancient, 72);
@@ -2850,47 +2625,6 @@ mod tests {
         assert_eq!(*host.slots.get(&3).expect("the piece vanished"), swapped_in);
         assert!(host.items.is_empty());
         assert!(host.given.is_empty());
-    }
-
-    #[test]
-    fn a_table_reforge_keeps_the_pieces_rarity() {
-        let gear = affixed("minecraft:diamond_sword", Tier::Rare, 93);
-        let mut host = Fake::default();
-        host.slots.insert(2, gear.clone());
-        begin_table_reforge(&mut host, PLAYER, 100, 2, Table::Reforging, &gear);
-        let queued = pending()
-            .lock()
-            .unwrap()
-            .remove(&PLAYER)
-            .expect("the table queued a reforge");
-        assert_eq!(
-            queued.tier,
-            Some(Tier::Rare),
-            "the table rerolls a rare piece at its own rarity"
-        );
-        reforge(&mut host, 2, &gear, PLAYER, &fingerprint(&gear), queued.tier);
-        assert_eq!(
-            tier_of(host.slots.get(&2).unwrap()),
-            Some(Tier::Rare),
-            "a rare piece came out of the table less rare"
-        );
-    }
-
-    #[test]
-    fn a_table_says_why_it_stopped_in_the_players_chat() {
-        let gear = affixed("minecraft:diamond_sword", Tier::Rare, 95);
-        let mut host = Fake::default();
-        begin_table_reforge(&mut host, PLAYER, 0, 2, Table::Reforging, &gear);
-        assert_eq!(host.told.len(), 1, "the table said nothing");
-        assert!(
-            host.told[0].contains("experience levels"),
-            "{}",
-            host.told[0]
-        );
-        assert!(
-            host.feedback.is_empty(),
-            "a table's answer went to command feedback, which is never shown"
-        );
     }
 
     #[test]

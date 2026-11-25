@@ -16,8 +16,8 @@
 //! - `loot_drops`: gear a mob drops is rolled into a rarity with affixes (real
 //!   attribute modifiers plus lore), and a kill adds a gem of the level's
 //!   dimension, at its Java weight and purity floor.
-//! - `register_commands` / `perform_command`: `/apoth reforge` rolls affixes
-//!   onto plain gear, for experience levels.
+//! - `register_commands` / `perform_command`: `/apoth salvage`. Reforging is
+//!   the reforging tables' own menus (`menus`), as in Java.
 //! - `prepare_item_enchant`: Apothic Eterna from nearby shelf blocks raises the
 //!   three enchanting offers; shelves are read through Horizon's server Host.
 //! - `use_item`: scrapping, superior scrapping and extraction tomes move
@@ -51,6 +51,7 @@ use horizon_client::mod_api::{
 mod spawners;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod menus;
 mod sockets;
 
 pub fn hooks() -> Box<dyn Hooks> {
@@ -775,7 +776,7 @@ impl Hooks for Apotheosis {
         _host: &mut dyn Host,
         event: &mut horizon_client::mod_api::BlockEntityEvent<'_>,
     ) -> Option<(String, horizon_client::mod_api::Compound)> {
-        enchanting::on_block_entity(event)
+        enchanting::on_block_entity(event).or_else(|| menus::on_block_entity(event))
     }
 
     fn block_entity_ticks(
@@ -784,6 +785,7 @@ impl Hooks for Apotheosis {
         event: &mut horizon_client::mod_api::BlockEntityTicksEvent<'_>,
     ) {
         enchanting::on_block_entity_ticks(event);
+        menus::on_block_entity_ticks(event);
     }
 
     fn block_entity_tick(
@@ -791,7 +793,49 @@ impl Hooks for Apotheosis {
         host: &mut dyn Host,
         event: &mut horizon_client::mod_api::BlockEntityTickEvent<'_>,
     ) {
-        enchanting::on_block_entity_tick(host, event);
+        if !menus::on_block_entity_tick(event) {
+            enchanting::on_block_entity_tick(host, event);
+        }
+    }
+
+    fn block_entity_container(
+        &self,
+        _host: &dyn Host,
+        event: &mut horizon_client::mod_api::BlockEntityContainerEvent<'_>,
+    ) -> Option<horizon_client::mod_api::ModContainer> {
+        menus::on_block_entity_container(event)
+    }
+
+    fn screen(
+        &self,
+        _host: &dyn Host,
+        event: &mut horizon_client::mod_api::ScreenEvent<'_>,
+    ) -> Option<horizon_client::mod_api::NativeScreen> {
+        menus::on_screen(event)
+    }
+
+    fn screen_draw(&self, host: &dyn Host, event: &mut horizon_client::mod_api::ScreenDrawEvent<'_>) {
+        menus::on_screen_draw(host, event);
+    }
+
+    fn screen_click(
+        &self,
+        _host: &dyn Host,
+        event: &mut horizon_client::mod_api::ScreenClickEvent<'_>,
+    ) -> Option<i32> {
+        menus::on_screen_click(event)
+    }
+
+    fn screen_tooltip(&self, _host: &dyn Host, event: &mut horizon_client::mod_api::ScreenTooltipEvent<'_>) {
+        menus::on_screen_tooltip(event);
+    }
+
+    fn menu_button(&self, host: &mut dyn Host, event: &mut horizon_client::mod_api::MenuButtonEvent<'_>) {
+        menus::on_menu_button(host, event);
+    }
+
+    fn menu_slot_rules(&self, event: &mut horizon_client::mod_api::MenuSlotRulesEvent<'_>) {
+        menus::on_menu_slot_rules(event);
     }
 
     fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
@@ -817,7 +861,6 @@ impl Hooks for Apotheosis {
 
     fn register_commands(&self, _host: &mut dyn Host, event: &mut RegisterCommandsEvent<'_>) {
         event.commands.push(NativeCommand::new("apoth"));
-        event.commands.push(NativeCommand::new("apoth reforge"));
         event.commands.push(NativeCommand::new("apoth salvage"));
     }
 
@@ -830,7 +873,7 @@ impl Hooks for Apotheosis {
         if words.len() < 2 {
             host.feedback(Text::translate_with_fallback(
                 "apotheosis.command.help",
-                "Apotheosis: /apoth reforge — roll affixes onto the gear you hold (3 levels); /apoth salvage — break an affixed piece into rarity materials.",
+                "Apotheosis: /apoth salvage — break an affixed piece into rarity materials. Reforge at a reforging table.",
                 &[],
             ));
             return Flow::Cancel;
@@ -843,127 +886,13 @@ impl Hooks for Apotheosis {
             );
             return Flow::Cancel;
         }
-        if words[1] != "reforge" {
-            host.feedback(Text::translate_with_fallback(
-                "apotheosis.command.unknown",
-                "Unknown Apotheosis command.",
-                &[],
-            ));
-            return Flow::Cancel;
-        }
-        reforge(
-            host,
-            event.player.uuid,
-            event.player.xp_level,
-            i32::from(event.player.selected_slot),
-        );
+        host.feedback(Text::translate_with_fallback(
+            "apotheosis.command.unknown",
+            "Unknown Apotheosis command.",
+            &[],
+        ));
         Flow::Cancel
     }
-}
-
-/// How many levels a reforge costs.
-pub const REFORGE_COST: i32 = 3;
-
-/// `/apoth reforge`: takes one plain piece of gear the player holds, gives it
-/// back with a rolled rarity, and charges `REFORGE_COST` levels.
-fn reforge(host: &mut dyn Host, player: u128, xp_level: i32, slot: i32) {
-    let Some((item, count, plain)) = host.held() else {
-        host.feedback(Text::translate_with_fallback(
-            "apotheosis.reforge.empty",
-            "Hold the piece of gear you want reforged.",
-            &[],
-        ));
-        return;
-    };
-    if !is_equipment(&item) {
-        host.feedback(Text::translate_with_fallback(
-            "apotheosis.reforge.not_gear",
-            "That is not a weapon, a tool or a piece of armour.",
-            &[],
-        ));
-        return;
-    }
-    if !plain || count == 0 {
-        // An affixed piece is rerolled in place, on its next inventory tick.
-        if host
-            .held_stack(player)
-            .is_some_and(|stack| sockets::can_reforge(&stack))
-        {
-            if xp_level < REFORGE_COST {
-                host.feedback(Text::translate_with_fallback(
-                    "apotheosis.reforge.levels",
-                    "Reforging costs 3 experience levels.",
-                    &[],
-                ));
-                return;
-            }
-            if !host.give_levels(player, -REFORGE_COST) {
-                host.feedback(Text::translate_with_fallback(
-                    "apotheosis.reforge.levels",
-                    "Reforging costs 3 experience levels.",
-                    &[],
-                ));
-                return;
-            }
-            sockets::begin_reforge(host, player, slot);
-            host.feedback(Text::translate_with_fallback(
-                "apotheosis.reforge.rerolled",
-                "Reforged: the piece in your hand rolls again.",
-                &[],
-            ));
-            return;
-        }
-        host.feedback(Text::translate_with_fallback(
-            "apotheosis.reforge.already",
-            "That piece is neither plain gear nor an affixed piece of this mod.",
-            &[],
-        ));
-        return;
-    }
-    if xp_level < REFORGE_COST {
-        host.feedback(Text::translate_with_fallback(
-            "apotheosis.reforge.levels",
-            "Reforging costs 3 experience levels.",
-            &[],
-        ));
-        return;
-    }
-    if host.take_items(&item, 1) != 1 {
-        host.feedback(Text::translate_with_fallback(
-            "apotheosis.reforge.empty",
-            "Hold the piece of gear you want reforged.",
-            &[],
-        ));
-        return;
-    }
-    // A fresh seed per reforge, as Java renews its per-player seed: a counter,
-    // the clock, the player and the item, so two reforges never match.
-    let seed = sockets::reforge_seed(player, &item);
-    let mut rng = Rng::new(seed);
-    let tier = rng.tier(&ORDINARY_TIERS);
-    let mut stack = one(&item);
-    apply_affixes(&mut stack, tier, &mut rng);
-    sockets::after_affixes(&mut stack, tier, &mut rng);
-    if host.give_stack(player, stack).is_some() {
-        // No room: hand the plain piece back rather than lose it.
-        let _ = host.give_stack(player, one(&item));
-        host.feedback(Text::translate_with_fallback(
-            "apotheosis.reforge.no_room",
-            "No room for the reforged piece; nothing was charged.",
-            &[],
-        ));
-        return;
-    }
-    let _ = host.give_levels(player, -REFORGE_COST);
-    host.feedback(Text::translate_with_fallback(
-        "apotheosis.reforge.done",
-        "Reforged: %s.",
-        &[Text::translate_with_fallback(
-            tier.name_key(),
-            tier.name(),
-            &[],
-        )],
-    ));
 }
 
 #[cfg(test)]

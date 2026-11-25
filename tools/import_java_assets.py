@@ -60,6 +60,10 @@ JAVA_ALIASES: dict[str, tuple[str, str]] = {
 # The real Apotheosis gems: one item (`apotheosis:gem`) whose model selector
 # names `item/gem_<name>`, so each of these Java textures is imported under our
 # own texture id.  They live at `textures/items/gems/<name>.png` in the jar.
+# The tables' screens (`menus.rs` draws `apotheosis:gui/<name>`, with a panel of
+# its own when the texture is missing, as in the `--no-java` pack).
+GUI_TEXTURES = ("reforge",)
+
 GEM_TEXTURES = (
     "ballast",
     "blood_lord",
@@ -567,6 +571,8 @@ class Importer:
             self.import_item(name, source)
         for gem in GEM_TEXTURES:
             self.copy_texture(f"apotheosis:item/gems/{gem}")
+        for gui in GUI_TEXTURES:
+            self.copy_texture(f"apotheosis:gui/{gui}")
         lang_counts = self.import_lang()
         return {
             "blocks": len(self.blockstates),

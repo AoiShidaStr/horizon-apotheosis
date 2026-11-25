@@ -6,7 +6,7 @@
   "apotheosis.tier.epic": "Epic",
   "apotheosis.tier.mythic": "Mythic",
   "apotheosis.tier.ancient": "Ancient",
-  "apotheosis.command.help": "Apotheosis: /apoth reforge — roll affixes onto the gear you hold (3 levels); /apoth salvage — break an affixed piece into rarity materials.",
+  "apotheosis.command.help": "Apotheosis: /apoth salvage — break an affixed piece into rarity materials. Reforge at a reforging table.",
   "apotheosis.command.unknown": "Unknown Apotheosis command.",
   "apotheosis.reforge.empty": "Hold the piece of gear you want reforged.",
   "apotheosis.reforge.not_gear": "That is not a weapon, a tool or a piece of armour.",
