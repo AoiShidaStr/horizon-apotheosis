@@ -19,9 +19,9 @@
 //! results go into output slots the player can take from but not place into,
 //! and only after the salvage button destroyed the inputs.
 //!
-//! A gem cutting screen adds its table to `menu_of`, its layout
-//! to `screen`, its data to `block_entity_tick` and its buttons to
-//! `menu_button`.
+//! The gem cutting table (Java's `GemCuttingMenu`) follows it too: a gem, a
+//! second one of the same type and purity, gem dust and a rarity material; its
+//! button turns the first gem into the next purity's item.
 //!
 //! Deviation: Java gives the gear back to the player when the menu closes
 //! (`removed()`); taking a slot out of a block entity from a close hook needs a
@@ -38,7 +38,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 use crate::gems;
-use crate::sockets::{self, Table, REFORGE_COSTS};
+use crate::sockets::{self, Purity, Table, REFORGE_COSTS, UPGRADE_COSTS};
 use crate::{is_equipment, Rng, Tier};
 
 /// The reforging menu type, shared by both reforging tables.
@@ -63,7 +63,7 @@ fn menu_of(block: &str) -> Option<&'static str> {
     match sockets::table(block)? {
         Table::SimpleReforging | Table::Reforging => Some(REFORGING),
         Table::Salvaging => Some(SALVAGING),
-        Table::Cutting => None,
+        Table::Cutting => Some(CUTTING),
     }
 }
 
@@ -196,7 +196,11 @@ pub fn on_block_entity_ticks(event: &mut BlockEntityTicksEvent<'_>) {
 pub fn on_block_entity_container(event: &BlockEntityContainerEvent<'_>) -> Option<ModContainer> {
     let menu = menu_of(event.block)?;
     Some(ModContainer {
-        slots: if menu == SALVAGING { SALVAGE_SLOTS } else { 3 },
+        slots: match menu {
+            SALVAGING => SALVAGE_SLOTS,
+            CUTTING => CUT_SLOTS,
+            _ => 3,
+        },
         faces: Default::default(),
         inputs: Vec::new(),
         outputs: Vec::new(),
@@ -206,6 +210,13 @@ pub fn on_block_entity_container(event: &BlockEntityContainerEvent<'_>) -> Optio
 
 /// True when the entity was one of ours.
 pub fn on_block_entity_tick(event: &mut BlockEntityTickEvent<'_>) -> bool {
+    if menu_of(&event.entity.id) == Some(CUTTING) {
+        let data = cut_data(&event.entity.items);
+        if event.entity.data[..] != data[..] {
+            event.entity.data = data.to_vec();
+        }
+        return true;
+    }
     if menu_of(&event.entity.id) == Some(SALVAGING) {
         let data = salvage_data(&event.entity.items);
         if event.entity.data[..] != data[..] {
@@ -226,6 +237,12 @@ pub fn on_block_entity_tick(event: &mut BlockEntityTickEvent<'_>) -> bool {
 pub fn on_menu_button(host: &mut dyn Host, event: &mut MenuButtonEvent<'_>) {
     if menu_of(&event.entity.id) == Some(SALVAGING) {
         return salvage_button(host, event);
+    }
+    if menu_of(&event.entity.id) == Some(CUTTING) {
+        if event.id == 0 && host.acting_player().is_some() && cut(&mut event.entity.items) {
+            event.entity.data = cut_data(&event.entity.items).to_vec();
+        }
+        return;
     }
     let Some(table) = reforge_table(&event.entity.id) else {
         return;
@@ -258,6 +275,7 @@ pub fn on_menu_slot_rules(event: &mut MenuSlotRulesEvent<'_>) {
     let rule = match event.menu {
         REFORGING => slot_rule(event.slot, &event.stack.item),
         SALVAGING => salvage_slot_rule(event.slot, event.stack),
+        CUTTING => cut_slot_rule(event.slot, event.stack),
         _ => return,
     };
     if let Some((may_place, max_stack)) = rule {
@@ -302,8 +320,10 @@ fn get(data: &[i32], i: usize) -> i32 {
 }
 
 pub fn on_screen(event: &ScreenEvent<'_>) -> Option<NativeScreen> {
-    if menu_of(event.block)? == SALVAGING {
-        return Some(salvage_screen());
+    match menu_of(event.block)? {
+        SALVAGING => return Some(salvage_screen()),
+        CUTTING => return Some(cut_screen()),
+        _ => {}
     }
     Some(NativeScreen {
         width: WIDTH,
@@ -320,6 +340,7 @@ pub fn on_screen_draw(host: &dyn Host, event: &mut ScreenDrawEvent<'_>) {
     match menu_of(event.block) {
         Some(REFORGING) => {}
         Some(SALVAGING) => return salvage_draw(host, event),
+        Some(CUTTING) => return cut_draw(host, event),
         _ => return,
     }
     let [ox, oy] = event.origin;
@@ -373,6 +394,10 @@ pub fn on_screen_click(event: &ScreenClickEvent<'_>) -> Option<i32> {
         let ready = !event.right && get(event.data, 0) & VALID != 0;
         return (ready && on_salvage_button(event.at)).then_some(0);
     }
+    if menu_of(event.block)? == CUTTING {
+        let ready = !event.right && get(event.data, 0) & VALID != 0;
+        return (ready && on_cut_button(event.at)).then_some(0);
+    }
     if event.right || get(event.data, 3) & VALID == 0 {
         return None;
     }
@@ -382,6 +407,9 @@ pub fn on_screen_click(event: &ScreenClickEvent<'_>) -> Option<i32> {
 pub fn on_screen_tooltip(event: &mut ScreenTooltipEvent<'_>) {
     if menu_of(event.block) == Some(SALVAGING) {
         return salvage_tooltip(event);
+    }
+    if menu_of(event.block) == Some(CUTTING) {
+        return cut_tooltip(event);
     }
     if menu_of(event.block).is_none() || get(event.data, 3) & VALID == 0 {
         return;
@@ -651,6 +679,159 @@ fn salvage_tooltip(event: &mut ScreenTooltipEvent<'_>) {
     }
 }
 
+// --- Gem cutting table ---------------------------------------------------------
+
+/// The gem cutting menu type: Java's `GemCuttingMenu`.
+pub const CUTTING: &str = "apotheosis:gem_cutting";
+/// Its slots: the gem cut (base), a second gem of the same type and purity
+/// (top), gem dust (left), a rarity material (right).
+const CUT_BASE: usize = 0;
+const CUT_TOP: usize = 1;
+const CUT_DUST: usize = 2;
+const CUT_MATERIAL: usize = 3;
+const CUT_SLOTS: usize = 4;
+const GEM_DUST: &str = "apotheosis:gem_dust";
+/// Its data slots: flags (`VALID` when the button cuts), the dust the cut
+/// takes, and the purity it reaches (`Purity::index`).
+const CUT_DATA: usize = 3;
+
+/// What cutting the gems in `items` takes (Java's `PurityUpgradeRecipe`): the
+/// recipe of the base gem's current purity, its dust, and the first of its
+/// alternative materials the right slot holds enough of (any one suffices).
+/// Returns `(reached purity, dust, material count)`, or none when the slots
+/// do not make a cut.
+pub fn cut_plan(items: &[Option<ItemStack>]) -> Option<(Purity, u32, u32)> {
+    let slot = |i: usize| items.get(i).and_then(|s| s.as_ref());
+    let (gem, purity) = gems::of_stack(slot(CUT_BASE)?)?;
+    let (top_gem, top_purity) = gems::of_stack(slot(CUT_TOP)?)?;
+    if top_gem.id != gem.id || top_purity != purity {
+        return None;
+    }
+    let (dust, materials) = sockets::upgrade_cost(purity)?;
+    if count_of(items.get(CUT_DUST), Some(GEM_DUST)) < dust {
+        return None;
+    }
+    let right = slot(CUT_MATERIAL)?;
+    let (_, count) = materials
+        .iter()
+        .find(|(item, count)| &*right.item == *item && right.count >= *count)?;
+    // The gem must have an item at the purity it reaches.
+    gems::item_id(gem, purity.next())?;
+    Some((purity.next(), dust, *count))
+}
+
+/// The data slots, from the slots.
+pub fn cut_data(items: &[Option<ItemStack>]) -> [i32; CUT_DATA] {
+    match cut_plan(items) {
+        Some((purity, dust, _)) => [VALID, dust as i32, purity.index() as i32],
+        None => [0; CUT_DATA],
+    }
+}
+
+fn take(items: &mut [Option<ItemStack>], slot: usize, n: u32) {
+    if let Some(stack) = &mut items[slot] {
+        stack.count = stack.count.saturating_sub(n);
+        if stack.count == 0 {
+            items[slot] = None;
+        }
+    }
+}
+
+/// The upgrade button (Java's `GemCuttingMenu.clickMenuButton`): the base gem
+/// becomes the next purity's item; one second gem, the dust and the material
+/// are spent. False, with nothing changed, when the slots do not make a cut.
+pub fn cut(items: &mut [Option<ItemStack>]) -> bool {
+    if items.len() < CUT_SLOTS {
+        return false;
+    }
+    let Some((purity, dust, material)) = cut_plan(items) else {
+        return false;
+    };
+    let Some(mut gem) = items[CUT_BASE].clone() else {
+        return false;
+    };
+    if !gems::change_purity(&mut gem, purity) {
+        return false;
+    }
+    items[CUT_BASE] = Some(gem);
+    take(items, CUT_TOP, 1);
+    take(items, CUT_DUST, dust);
+    take(items, CUT_MATERIAL, material);
+    true
+}
+
+/// Java's slots: a gem below perfect in the base (one) and the top, gem dust
+/// on the left, a material some purity upgrade takes on the right.
+pub fn cut_slot_rule(slot: usize, stack: &ItemStack) -> Option<(bool, Option<u32>)> {
+    let cuttable = gems::of_stack(stack).is_some_and(|(_, p)| p < Purity::Perfect);
+    match slot {
+        CUT_BASE => Some((cuttable, Some(1))),
+        CUT_TOP => Some((cuttable, None)),
+        CUT_DUST => Some((&*stack.item == GEM_DUST, None)),
+        CUT_MATERIAL => Some((
+            UPGRADE_COSTS.iter().any(|(_, _, mats)| mats.iter().any(|(m, _)| *m == &*stack.item)),
+            None,
+        )),
+        _ => None,
+    }
+}
+
+const CUT_TEXTURE: &str = "apotheosis:gui/gem_cutting";
+const CUT_HEIGHT: f32 = 180.0;
+const CUT_INVENTORY_Y: f32 = 98.0;
+/// Java's slots: base (62, 45), top (62, 12), left (33, 64), right (90, 64).
+const CUT_LAYOUT: [[f32; 2]; CUT_SLOTS] = [[62.0, 45.0], [62.0, 12.0], [33.0, 64.0], [90.0, 64.0]];
+/// Java's upgrade button, at (135, 44), 18 square; its sprite at (238, 0),
+/// the inactive one 18 below.
+const CUT_BUTTON: [f32; 2] = [135.0, 44.0];
+
+pub fn on_cut_button(at: [f32; 2]) -> bool {
+    let [x, y] = CUT_BUTTON;
+    at[0] >= x && at[0] < x + 18.0 && at[1] >= y && at[1] < y + 18.0
+}
+
+fn cut_screen() -> NativeScreen {
+    NativeScreen {
+        width: WIDTH,
+        height: CUT_HEIGHT,
+        slots: CUT_LAYOUT.iter().map(|s| Some(*s)).collect(),
+        inventory_y: CUT_INVENTORY_Y,
+        inventory_x: 8.0,
+        own_labels: false,
+        own_background: true,
+    }
+}
+
+fn cut_draw(host: &dyn Host, event: &mut ScreenDrawEvent<'_>) {
+    let [ox, oy] = event.origin;
+    let java = host.sprite(event.batch, CUT_TEXTURE, [0.0, 0.0, WIDTH, CUT_HEIGHT], [ox, oy, WIDTH, CUT_HEIGHT]);
+    if !java {
+        draw_panel(host, event.batch, event.origin, CUT_HEIGHT, &CUT_LAYOUT, CUT_INVENTORY_Y);
+    }
+    let ready = get(event.data, 0) & VALID != 0;
+    let [bx, by] = CUT_BUTTON;
+    let src = [238.0, if ready { 0.0 } else { 18.0 }, 18.0, 18.0];
+    if !(java && host.sprite(event.batch, CUT_TEXTURE, src, [ox + bx, oy + by, 18.0, 18.0])) {
+        host.fill(event.batch, [ox + bx, oy + by, 18.0, 18.0], if ready { 0xFF6A_6070 } else { 0xFF1A_181D });
+        host.text(event.batch, "^", [ox + bx + 6.0, oy + by + 5.0], if ready { 0xFFFFFF } else { 0x606060 }, true);
+    }
+}
+
+fn cut_tooltip(event: &mut ScreenTooltipEvent<'_>) {
+    if !on_cut_button(event.at) {
+        return;
+    }
+    if get(event.data, 0) & VALID == 0 {
+        event
+            .lines
+            .push("§cTwo identical gems, gem dust and a material / Deux gemmes identiques, poussière et matériau".to_owned());
+        return;
+    }
+    let purity = Purity::from_index(get(event.data, 2) as u8);
+    event.lines.push(format!("§e§nUpgrade to {} / Améliorer en {}", purity.name(), purity.name()));
+    event.lines.push(format!("§7{} x gem dust / poussière de gemme", get(event.data, 1)));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -842,5 +1023,74 @@ mod tests {
         assert!(on_salvage_button([100.0, 40.0]));
         assert!(!on_salvage_button([90.0, 40.0]));
         assert_eq!(menu_of("apotheosis:salvaging_table"), Some(SALVAGING));
+    }
+
+    fn cut_table(base: Purity, top: Purity, dust: u32, material: (&str, u32)) -> Vec<Option<ItemStack>> {
+        vec![Some(gem(base)), Some(gem(top)), stack(GEM_DUST, dust), stack(material.0, material.1)]
+    }
+
+    #[test]
+    fn a_cut_costs_the_recipe_of_the_current_purity() {
+        // cracked.json: a cracked gem, 1 dust and 3 scrap OR 1 fabric.
+        let scrap = cut_table(Purity::Cracked, Purity::Cracked, 1, ("apotheosis:mysterious_scrap_metal", 3));
+        assert_eq!(cut_plan(&scrap), Some((Purity::Chipped, 1, 3)));
+        let fabric = cut_table(Purity::Cracked, Purity::Cracked, 1, ("apotheosis:timeworn_fabric", 1));
+        assert_eq!(cut_plan(&fabric), Some((Purity::Chipped, 1, 1)), "one alternative suffices");
+        // flawed.json: a flawed gem, 5 dust and a single arcane sands.
+        let flawed = cut_table(Purity::Flawed, Purity::Flawed, 5, ("apotheosis:arcane_sands", 1));
+        assert_eq!(cut_plan(&flawed), Some((Purity::Normal, 5, 1)));
+        assert_eq!(cut_plan(&cut_table(Purity::Flawed, Purity::Flawed, 4, ("apotheosis:arcane_sands", 1))), None);
+        assert_eq!(cut_plan(&cut_table(Purity::Flawed, Purity::Flawed, 5, ("apotheosis:godforged_pearl", 9))), None);
+        assert_eq!(
+            cut_plan(&cut_table(Purity::Cracked, Purity::Cracked, 1, ("apotheosis:mysterious_scrap_metal", 2))),
+            None
+        );
+    }
+
+    #[test]
+    fn flawless_cuts_to_perfect_and_perfect_does_not_cut() {
+        let flawless = cut_table(Purity::Flawless, Purity::Flawless, 9, ("apotheosis:godforged_pearl", 3));
+        assert_eq!(cut_plan(&flawless), Some((Purity::Perfect, 9, 3)));
+        assert_eq!(cut_plan(&cut_table(Purity::Perfect, Purity::Perfect, 64, ("apotheosis:godforged_pearl", 64))), None);
+    }
+
+    #[test]
+    fn the_second_gem_must_match_type_and_purity() {
+        assert_eq!(cut_plan(&cut_table(Purity::Cracked, Purity::Chipped, 1, ("apotheosis:timeworn_fabric", 1))), None);
+        let mut other = cut_table(Purity::Cracked, Purity::Cracked, 1, ("apotheosis:timeworn_fabric", 1));
+        other[CUT_TOP] = Some(gems::stack(gems::get("apotheosis:core/brawlers").unwrap(), Purity::Cracked));
+        assert_eq!(cut_plan(&other), None);
+    }
+
+    #[test]
+    fn the_upgrade_button_gives_the_next_purity_item_and_spends_the_inputs() {
+        let mut items = cut_table(Purity::Chipped, Purity::Chipped, 5, ("apotheosis:luminous_crystal_shard", 2));
+        items[CUT_TOP].as_mut().unwrap().count = 2;
+        assert_eq!(cut_data(&items), [VALID, 3, Purity::Flawed.index() as i32]);
+        assert!(cut(&mut items));
+        let base = items[CUT_BASE].as_ref().unwrap();
+        assert_eq!(&*base.item, "apotheosis:gem_ballast_flawed");
+        assert_eq!(gems::of_stack(base).map(|(_, p)| p), Some(Purity::Flawed));
+        assert_eq!(items[CUT_TOP].as_ref().map(|s| s.count), Some(1));
+        assert_eq!(items[CUT_DUST].as_ref().map(|s| s.count), Some(2));
+        assert_eq!(items[CUT_MATERIAL].as_ref().map(|s| s.count), Some(1));
+        assert!(!cut(&mut items), "the second gem is now of another purity");
+        assert_eq!(cut_data(&items), [0; CUT_DATA]);
+    }
+
+    #[test]
+    fn cut_slots_follow_java() {
+        assert_eq!(cut_slot_rule(CUT_BASE, &gem(Purity::Normal)), Some((true, Some(1))));
+        assert_eq!(cut_slot_rule(CUT_BASE, &gem(Purity::Perfect)).map(|r| r.0), Some(false));
+        assert_eq!(cut_slot_rule(CUT_TOP, &gem(Purity::Flawed)), Some((true, None)));
+        assert_eq!(cut_slot_rule(CUT_DUST, &ItemStack::new(GEM_DUST, 1)).map(|r| r.0), Some(true));
+        assert_eq!(cut_slot_rule(CUT_DUST, &gem(Purity::Flawed)).map(|r| r.0), Some(false));
+        let fabric = ItemStack::new("apotheosis:timeworn_fabric", 1);
+        assert_eq!(cut_slot_rule(CUT_MATERIAL, &fabric).map(|r| r.0), Some(true));
+        assert_eq!(cut_slot_rule(CUT_MATERIAL, &ItemStack::new("minecraft:stone", 1)).map(|r| r.0), Some(false));
+        assert_eq!(cut_slot_rule(4, &gem(Purity::Flawed)), None);
+        assert_eq!(menu_of("apotheosis:gem_cutting_table"), Some(CUTTING));
+        assert!(on_cut_button([140.0, 50.0]));
+        assert!(!on_cut_button([130.0, 50.0]));
     }
 }

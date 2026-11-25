@@ -15,7 +15,7 @@
 
 use horizon_client::mod_api::{
     Compound, EquipmentSlot, Flow, Host, InventoryTickEvent, ItemStack, LootFunctionEvent,
-    LootStack, NativeLootContext, Tag, Text, TooltipEvent, UseItemEvent, UseItemOnEvent, serde_json,
+    LootStack, NativeLootContext, Tag, Text, TooltipEvent, UseItemEvent, serde_json,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -30,9 +30,10 @@ use crate::{apply_affixes, is_equipment, Rng, Tier};
 /// The off hand's slot in `native_inventory`'s `Player` numbering.
 const OFFHAND: i32 = -106;
 /// The Java `apotheosis:purity_upgrade` gem-cutting recipes, by the purity
-/// they reach: the gem dust count first, then the rarity materials
-/// (`data/apotheosis/recipe/gem_cutting/<purity>.json`).  Java defines no
-/// recipe for `perfect`, so a gem stops at `flawless` at the table.
+/// of the gem being cut (the recipe's `purity`): the gem dust count first,
+/// then the rarity materials, alternatives of which any one suffices
+/// (`data/apotheosis/recipe/gem_cutting/<purity>.json`).  `flawless` cuts to
+/// `perfect`; a perfect gem has no recipe.
 pub const UPGRADE_COSTS: &[(Purity, u32, &[(&str, u32)])] = &[
     (
         Purity::Cracked,
@@ -82,11 +83,12 @@ pub const UPGRADE_COSTS: &[(Purity, u32, &[(&str, u32)])] = &[
     ),
 ];
 
-/// What raising a gem to `target` costs, or none where Java has no recipe.
-pub fn upgrade_cost(target: Purity) -> Option<(u32, &'static [(&'static str, u32)])> {
+/// What cutting a gem of `current` purity one step up costs, or none where
+/// Java has no recipe.
+pub fn upgrade_cost(current: Purity) -> Option<(u32, &'static [(&'static str, u32)])> {
     UPGRADE_COSTS
         .iter()
-        .find(|(purity, _, _)| *purity == target)
+        .find(|(purity, _, _)| *purity == current)
         .map(|(_, dust, materials)| (*dust, *materials))
 }
 
@@ -836,17 +838,6 @@ pub fn tooltip(event: &mut TooltipEvent<'_>) {
             .with_color(0x55_55FF),
             0x55_55FF,
         ));
-        if purity < Purity::Perfect {
-            event.lines.push((
-                Text::translate_with_fallback(
-                    "apotheosis.polish.hint",
-                    "Right-click with gem dust in your off hand to raise its purity.",
-                    &[],
-                )
-                .with_color(0x80_8080),
-                0x80_8080,
-            ));
-        }
         return;
     }
 
@@ -984,9 +975,7 @@ pub fn table(block: &str) -> Option<Table> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Socket,
-    Polish,
     Salvage,
-    Cut,
     AddSocket,
     Withdraw,
     Rebirth,
@@ -1091,9 +1080,9 @@ fn take_pending(player: u128, slot: i32) -> Option<Pending> {
     }
 }
 
-/// Right click with a gem: socket it into the gear in the off hand, or spend
-/// gem dust from the off hand to raise its purity. A sigil instead acts on the
-/// gear in the off hand.
+/// Right click with a gem: socket it into the gear in the off hand. A sigil
+/// instead acts on the gear in the off hand. Purity rises only at the gem
+/// cutting table (`menus`), as in Java.
 pub fn use_item(host: &mut dyn Host, event: &mut UseItemEvent<'_>) -> Flow {
     if let Some(seal) = seal(&event.stack.item) {
         return use_seal(host, event, seal);
@@ -1121,13 +1110,6 @@ pub fn use_item(host: &mut dyn Host, event: &mut UseItemEvent<'_>) -> Flow {
         set_pending(
             player.uuid,
             Pending::new(Action::Socket, slot, &main, Some(&off)),
-        );
-        return Flow::Cancel;
-    }
-    if can_polish(&event.stack, &off) {
-        set_pending(
-            player.uuid,
-            Pending::new(Action::Polish, slot, &event.stack, None),
         );
         return Flow::Cancel;
     }
@@ -1239,14 +1221,12 @@ pub fn inventory_tick(host: &mut dyn Host, event: &mut InventoryTickEvent) {
 
     match pending.action {
         Action::Salvage => salvage(host, pending.slot, &main, player.uuid, &pending.main),
-        Action::Cut => cut(host, pending.slot, &main, player.uuid),
         other => {
             let Some(off) = target else {
                 return;
             };
             match other {
                 Action::Socket => socket(host, pending.slot, &main, &off, player.uuid),
-                Action::Polish => polish(host, pending.slot, &main, &off, player.uuid),
                 Action::AddSocket => add_socket(host, pending.slot, &main, &off, player.uuid),
                 Action::Withdraw => withdraw(host, pending.slot, &main, &off, player.uuid),
                 Action::Rebirth => rebirth(host, pending.slot, &main, &off, player.uuid),
@@ -1297,43 +1277,6 @@ pub fn use_seal(host: &mut dyn Host, event: &UseItemEvent<'_>, kind: Seal) -> Fl
         ),
     );
     Flow::Cancel
-}
-
-/// A right click on one of the working tables: the block does what the command
-/// of the same name does, on the stack in the main hand.
-pub fn use_item_on(host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
-    let Some(table) = table(&host.block(event.pos)) else {
-        return Flow::Continue;
-    };
-    let Some(player) = host.acting_player() else {
-        return Flow::Continue;
-    };
-    // The click belongs to the table, never to the block under it: a table
-    // that opened a crafting grid on a misclick would hide its own use.
-    match table {
-        // The reforging and salvaging tables open their own menu (`menus`).
-        Table::SimpleReforging | Table::Reforging | Table::Salvaging => Flow::Continue,
-        Table::Cutting => {
-            if gems::of_stack(&event.stack).is_none() || purity_of(&event.stack) >= Purity::Perfect {
-                say(host, player.uuid, Text::translate_with_fallback(
-                    "apotheosis.table.cut.hint",
-                    "The gem cutting table sharpens the gem in your hand.",
-                    &[],
-                ));
-                return Flow::Cancel;
-            }
-            set_pending(
-                player.uuid,
-                Pending::new(
-                    Action::Cut,
-                    i32::from(player.selected_slot),
-                    &event.stack,
-                    None,
-                ),
-            );
-            Flow::Cancel
-        }
-    }
 }
 
 /// Takes one sigil off the main hand; the slot empties when that was the last.
@@ -1538,54 +1481,6 @@ pub fn next_tier(tier: Tier) -> Tier {
     }
 }
 
-/// The gem cutting table: the held gem rises one purity, at the Java
-/// `purity_upgrade` cost for the purity it reaches.
-fn cut(host: &mut dyn Host, slot: i32, main: &ItemStack, player: u128) {
-    if gems::of_stack(main).is_none() {
-        return;
-    }
-    let purity = purity_of(main);
-    let Some((dust, materials)) = upgrade_cost(purity.next()) else {
-        return;
-    };
-    let taken = host.take_items("apotheosis:gem_dust", dust);
-    let mut taken_materials = Vec::new();
-    let mut short = taken < dust;
-    for (item, count) in materials {
-        let got = host.take_items(item, *count);
-        taken_materials.push((*item, got, *count));
-        short |= got < *count;
-    }
-    if short {
-        if taken > 0 {
-            let _ = host.give_items("apotheosis:gem_dust", taken);
-        }
-        for (item, got, _) in taken_materials {
-            if got > 0 {
-                let _ = host.give_items(item, got);
-            }
-        }
-        say(host, player, Text::translate_with_fallback(
-            "apotheosis.cut.no_dust",
-            "The gem cutting table needs %s gem dust and the purity materials.",
-            &[Text::literal(dust.to_string())],
-        ));
-        return;
-    }
-    let mut improved = main.clone();
-    set_purity(&mut improved, purity.next());
-    write_slot(host, slot, improved);
-    say(host, player, Text::translate_with_fallback(
-        "apotheosis.polish.done",
-        "Purity raised to %s.",
-        &[Text::translate_with_fallback(
-            purity.next().name_key(),
-            purity.next().name(),
-            &[],
-        )],
-    ));
-}
-
 /// The purity a gem from a chest rolls: the ordinary weights, drawn from the
 /// loot roll's own seed so the table stays deterministic.
 pub fn chest_gem_purity(seed: i64) -> Purity {
@@ -1734,62 +1629,6 @@ fn socket(host: &mut dyn Host, slot: i32, main: &ItemStack, off: &ItemStack, pla
             ),
             Text::translate_with_fallback(purity.name_key(), purity.name(), &[]),
         ],
-    ));
-}
-
-fn can_polish(main: &ItemStack, off: &ItemStack) -> bool {
-    if gems::of_stack(main).is_none() || &*off.item != "apotheosis:gem_dust" {
-        return false;
-    }
-    // No Java recipe reaches `perfect`, and the dust cost rises with the step.
-    match upgrade_cost(purity_of(main).next()) {
-        Some((dust, _)) => off.count >= dust,
-        None => false,
-    }
-}
-
-fn polish(host: &mut dyn Host, slot: i32, main: &ItemStack, off: &ItemStack, player: u128) {
-    if !can_polish(main, off) {
-        return;
-    }
-    let purity = purity_of(main);
-    let Some((dust_cost, materials)) = upgrade_cost(purity.next()) else {
-        return;
-    };
-    let mut taken = Vec::new();
-    let mut short = false;
-    for (item, count) in materials {
-        let got = host.take_items(item, *count);
-        taken.push((*item, got, *count));
-        short |= got < *count;
-    }
-    if short {
-        for (item, got, _) in taken {
-            if got > 0 {
-                let _ = host.give_items(item, got);
-            }
-        }
-        say(host, player, Text::translate_with_fallback(
-            "apotheosis.cut.no_dust",
-            "The gem cutting table needs %s gem dust and the purity materials.",
-            &[Text::literal(dust_cost.to_string())],
-        ));
-        return;
-    }
-    let mut improved = main.clone();
-    set_purity(&mut improved, purity.next());
-    write_slot(host, slot, improved);
-    let mut dust = off.clone();
-    dust.count -= dust_cost;
-    write_slot(host, OFFHAND, dust);
-    say(host, player, Text::translate_with_fallback(
-        "apotheosis.polish.done",
-        "Purity raised to %s.",
-        &[Text::translate_with_fallback(
-            purity.next().name_key(),
-            purity.next().name(),
-            &[],
-        )],
     ));
 }
 
@@ -2036,13 +1875,6 @@ mod tests {
         for entry in modifiers.iter().filter(|entry| crate::is_affix_modifier(entry)) {
             assert_eq!(entry.get("slot"), Some(&Tag::String("chest".into())));
         }
-    }
-
-    #[test]
-    fn polishing_rejects_a_non_gem_in_the_main_hand() {
-        let sword = ItemStack::new("minecraft:diamond_sword", 1);
-        let dust = ItemStack::new("apotheosis:gem_dust", 4);
-        assert!(!can_polish(&sword, &dust));
     }
 
     #[test]
@@ -2416,13 +2248,13 @@ mod tests {
         );
 
         let gem = ItemStack::new("apotheosis:gem_ruby", 1);
-        let mut polished = gem.clone();
-        set_purity(&mut polished, Purity::Perfect);
-        let pending = Pending::new(Action::Polish, 0, &gem, None);
+        let mut cut = gem.clone();
+        set_purity(&mut cut, Purity::Perfect);
+        let pending = Pending::new(Action::Salvage, 0, &gem, None);
         assert!(pending.accepts(0, &gem, None));
         assert!(
-            !pending.accepts(0, &polished, None),
-            "a gem whose purity changed was polished again"
+            !pending.accepts(0, &cut, None),
+            "a gem whose purity changed was salvaged"
         );
     }
 
@@ -2440,6 +2272,7 @@ mod tests {
 
     #[test]
     fn a_purity_step_costs_what_the_java_gem_cutting_recipe_says() {
+        // chipped.json: the recipe of a chipped gem.
         assert_eq!(
             upgrade_cost(Purity::Chipped),
             Some((
@@ -2451,22 +2284,9 @@ mod tests {
                 ][..]
             ))
         );
+        // flawless.json cuts a flawless gem to perfect.
         assert_eq!(upgrade_cost(Purity::Flawless).unwrap().0, 9);
-        // Java has no perfect purity recipe: a gem stops at flawless.
         assert_eq!(upgrade_cost(Purity::Perfect), None);
-    }
-
-    #[test]
-    fn polishing_never_touches_a_swapped_in_sword() {
-        let sword = ItemStack::new("minecraft:diamond_sword", 1);
-        let dust = ItemStack::new("apotheosis:gem_dust", 4);
-        let mut host = Fake::default();
-        host.slots.insert(0, sword.clone());
-        host.slots.insert(OFFHAND, dust.clone());
-        polish(&mut host, 0, &sword, &dust, PLAYER);
-        assert_eq!(custom(host.slots.get(&0).unwrap()).get(gems::PURITY_KEY), None);
-        assert_eq!(host.slots.get(&OFFHAND).unwrap().count, 4);
-        assert!(!can_polish(&sword, &dust));
     }
 
     #[test]

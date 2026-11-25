@@ -5,7 +5,7 @@
 //! Apotheosis code or asset is used: see `../../README.md` and `NOTICE.md`.
 //!
 //! The hooks below are the real game's trait API (plus `sockets`' own
-//! `use_item_on` and `loot_function` for the tables and the chest gems):
+//! `loot_function` for the chest gems; the tables open menus, `menus`):
 //! Seven hooks, all on the real game's trait API:
 //! - `modify_default_components`: a gem keeps its own item definition; its
 //!   bonuses are written onto the gear it is socketed into, as Apotheosis does.
@@ -839,14 +839,10 @@ impl Hooks for Apotheosis {
     }
 
     fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
-        // The Apotheosis tables (reforge, salvage, gem cutting) first, then a
-        // spawner modifier on a spawner block, then an infusion on the
-        // apothic enchanting table.
-        match sockets::use_item_on(host, event) {
-            Flow::Continue => match spawners::on_use_item_on(host, event) {
-                Flow::Continue => enchanting::on_use_item_on(host, event),
-                Flow::Cancel => Flow::Cancel,
-            },
+        // A spawner modifier on a spawner block, then an infusion on the
+        // apothic enchanting table. The Apotheosis tables open their menus.
+        match spawners::on_use_item_on(host, event) {
+            Flow::Continue => enchanting::on_use_item_on(host, event),
             Flow::Cancel => Flow::Cancel,
         }
     }

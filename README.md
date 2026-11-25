@@ -118,11 +118,12 @@ In-game test plan (French): [`TEST-EN-JEU.md`](TEST-EN-JEU.md); results of the
   bonus value read at the purity's index from its Java data (no invented
   multiplier), rolled where the gem drops (`loot_drops`) from the Java purity
   weights and above the gem's `min_purity`.
-  Shown in the gem's tooltip. A gem in the main hand with gem dust in the off
-  hand, right-clicked, is polished one step up at the Java
-  `apotheosis:purity_upgrade` cost for the purity it reaches: 3 dust and
-  scrap/fabric/crystal to chip it, up to 9 dust and crystal/sands/pearl for
-  Flawless. Java has no perfect recipe, so a gem stops at Flawless.
+  Shown in the gem's tooltip. Purity rises only at the gem cutting table's
+  menu, as in Java: the gem, a second one of the same type and purity, gem
+  dust and one of the Java `apotheosis:purity_upgrade` recipe's alternative
+  materials for the gem's current purity (1 dust and 3 scrap or 1 fabric for
+  a cracked gem, up to 9 dust and 27 crystal, 9 sands or 3 pearls for a
+  flawless one, which becomes perfect).
 - **Reforging an affixed piece**: `/apoth reforge` on an affixed piece held in
   the main hand rerolls its rarity and affixes for 3 levels (a command-only
   port cost), keeping the piece and the gems in its sockets; the work is done
@@ -161,11 +162,7 @@ In-game test plan (French): [`TEST-EN-JEU.md`](TEST-EN-JEU.md); results of the
   the piece in hand (`use_item_on`, API 13): the reforging table charges the
   Java row for every rarity, the simple table only Common/Uncommon/Rare, the
   salvaging table what `/apoth salvage` does (or gem dust for a held gem), and
-  the gem cutting table spends the Java purity-upgrade cost (gem dust and
-  rarity materials) from the inventory to raise the held gem's purity one step
-  (`Host::take_items`, everything refunded if any ingredient is short). The
-  click is always claimed, so a misclick shows the table's hint instead of
-  opening something else.
+  the gem cutting table opens its Java menu (`menus.rs`, see *Purity*).
 - **The four new Java items**: `gem_fused_slate` (8 from deepslate and gem
   dust), the iron, gold and diamond smithing templates (7 diamonds around a
   template, 7 gold, 7 iron), `sigil_of_unnaming` and

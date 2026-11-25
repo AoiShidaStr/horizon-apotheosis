@@ -9,9 +9,9 @@ Source inspectée : `java-ref`
 - blocs avec blockstate Java : 33
 - objets avec modèle Java : 52
 - modèles copiés : 119
-- textures copiées : 131
-- clés lang en_us : 1742
-- clés lang fr_fr : 1621
+- textures copiées : 132
+- clés lang en_us : 1738
+- clés lang fr_fr : 1617
 
 Les ids sans équivalent Java gardent nos définitions et nos textures originales de `content/`. Les gemmes viennent de Java : une seule gemme (`apotheosis:gem`) dont le modèle choisit la texture du type qu'elle porte, ci-dessous en liste à part.
 

@@ -62,7 +62,7 @@ JAVA_ALIASES: dict[str, tuple[str, str]] = {
 # own texture id.  They live at `textures/items/gems/<name>.png` in the jar.
 # The tables' screens (`menus.rs` draws `apotheosis:gui/<name>`, with a panel of
 # its own when the texture is missing, as in the `--no-java` pack).
-GUI_TEXTURES = ("reforge", "salvage")
+GUI_TEXTURES = ("reforge", "salvage", "gem_cutting")
 
 GEM_TEXTURES = (
     "ballast",
