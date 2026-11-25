@@ -904,6 +904,13 @@ mod tests {
         for gem in &java_gems::GEMS {
             let stack = gems::stack(gem, crate::sockets::Purity::Normal);
             assert_eq!(gems::id_of(&stack), Some(gem.id));
+            // A gem item's name is a default component of its declaration
+            // (`tools/test_content.py` checks it); only the generic gem, below
+            // a purity floor, carries it in its patch.
+            if &*stack.item != gems::ITEM {
+                assert!(stack.data().is_none(), "{}", stack.item);
+                continue;
+            }
             // A gem's name is an item name, never an anvil-style custom name:
             // custom_name is what renders italics like a player-given name.
             assert!(stack

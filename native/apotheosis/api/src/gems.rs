@@ -1,6 +1,13 @@
-//! The Java gems as items: one `apotheosis:gem` item, whose gem type and
-//! purity live in its `minecraft:custom_data` (`apotheosis:gem`,
-//! `apotheosis:gem_purity`), as Apotheosis stores them.
+//! The Java gems as items.  Apotheosis lists every gem at every purity it
+//! allows in its creative tab; a Horizon tab only lists item ids, so each
+//! (gem, purity) pair is its own declared item, `apotheosis:gem_<name>_<purity>`
+//! (`tools/gen_java_gems.py`), whose default components carry the type and
+//! purity in `minecraft:custom_data` (`apotheosis:gem`, `apotheosis:gem_purity`),
+//! the translated name and the model.  Default components are not part of a
+//! stack's patch (`ItemStack::data` only holds the patch), so the native side
+//! reads the type and purity from the item id.  The single `apotheosis:gem`
+//! item of earlier versions, whose identity lives in its custom data, is still
+//! recognised.
 //!
 //! A gem does nothing on its own, exactly as in Apotheosis: its bonuses apply
 //! once it is socketed into a piece of gear, and only to the gear classes its
@@ -14,7 +21,9 @@ use crate::attributes::Attr;
 use crate::java_gems::{Gem, Kind, GEMS};
 use crate::sockets::Purity;
 
-/// The single item every gem is, as in Apotheosis 1.21.
+/// The single gem item of earlier versions, whose type and purity live in its
+/// custom data; still recognised, and used for a purity below a gem's floor,
+/// which has no item of its own.
 pub const ITEM: &str = "apotheosis:gem";
 /// The custom-data key holding the gem's type id.
 pub const GEM_KEY: &str = "apotheosis:gem";
@@ -142,10 +151,45 @@ pub fn get(id: &str) -> Option<&'static Gem> {
     GEMS.iter().find(|gem| gem.id == id)
 }
 
+/// The purity's word in a gem item id (`cracked`... `perfect`).
+fn purity_word(purity: Purity) -> &'static str {
+    match purity {
+        Purity::Cracked => "cracked",
+        Purity::Chipped => "chipped",
+        Purity::Flawed => "flawed",
+        Purity::Normal => "normal",
+        Purity::Flawless => "flawless",
+        Purity::Perfect => "perfect",
+    }
+}
+
+/// The last segment of a gem type id: `ballast` for `apotheosis:core/ballast`.
+fn short_name(gem: &Gem) -> &'static str {
+    gem.id.rsplit(['/', ':']).next().unwrap_or(gem.id)
+}
+
+/// The declared item of a gem at a purity, `apotheosis:gem_ballast_cracked`;
+/// none below the gem's purity floor, where Java lists no stack either.
+pub fn item_id(gem: &Gem, purity: Purity) -> Option<String> {
+    (purity >= gem.min_purity)
+        .then(|| format!("apotheosis:gem_{}_{}", short_name(gem), purity_word(purity)))
+}
+
+/// The gem and purity a per-purity gem item id names.
+pub fn from_item(item: &str) -> Option<(&'static Gem, Purity)> {
+    let rest = item.strip_prefix("apotheosis:gem_")?;
+    let (name, word) = rest.rsplit_once('_')?;
+    let purity = Purity::ALL
+        .into_iter()
+        .find(|purity| purity_word(*purity) == word)?;
+    let gem = GEMS.iter().find(|gem| short_name(gem) == name)?;
+    (purity >= gem.min_purity).then_some((gem, purity))
+}
+
 /// The gem type id a stack is, if it is a gem.
 pub fn id_of(stack: &ItemStack) -> Option<&'static str> {
     if &*stack.item != ITEM {
-        return None;
+        return from_item(&stack.item).map(|(gem, _)| gem.id);
     }
     match stack
         .data()
@@ -166,7 +210,8 @@ pub fn of_stack(stack: &ItemStack) -> Option<(&'static Gem, Purity)> {
     Some((gem, purity_of(stack)))
 }
 
-/// A stack's purity, defaulting to Normal when it carries none.
+/// A stack's purity: the one its custom data names, else the one its item id
+/// names, defaulting to Normal when it carries none.
 pub fn purity_of(stack: &ItemStack) -> Purity {
     match stack
         .data()
@@ -174,8 +219,41 @@ pub fn purity_of(stack: &ItemStack) -> Purity {
         .and_then(|data| data.get(PURITY_KEY))
     {
         Some(Tag::Int(index)) => Purity::from_index(*index as u8),
-        _ => Purity::Normal,
+        _ => from_item(&stack.item).map_or(Purity::Normal, |(_, purity)| purity),
     }
+}
+
+/// Turns a gem stack into the item of `purity`, keeping its count and any
+/// component it carries besides the gem identity; false when the stack is no
+/// gem, or the gem has no item at that purity.  The identity patch of an
+/// `apotheosis:gem` stack is dropped: the declaration's defaults carry it, and
+/// a bare stack stacks with the ones the creative tab and the loot give.
+pub fn change_purity(stack: &mut ItemStack, purity: Purity) -> bool {
+    let Some((gem, _)) = of_stack(stack) else {
+        return false;
+    };
+    let Some(item) = item_id(gem, purity) else {
+        return false;
+    };
+    stack.item = item.as_str().into();
+    if stack.data().is_some() {
+        let custom = match stack.data().and_then(|data| data.other(CUSTOM_DATA)) {
+            Some(Tag::Compound(compound)) => {
+                let mut compound = compound.clone();
+                compound.remove(&GEM_KEY.into());
+                compound.remove(&PURITY_KEY.into());
+                (!compound.is_empty()).then_some(Tag::Compound(compound))
+            }
+            other => other.cloned(),
+        };
+        let data = stack.data_mut();
+        data.set_other(CUSTOM_DATA, custom);
+        for key in [MODEL_KEY, "minecraft:item_name", "minecraft:rarity"] {
+            data.set_other(key, Option::<Tag>::None);
+        }
+        stack.tidy();
+    }
+    true
 }
 
 /// Writes the gem type and purity (and the model selector) into a stack.
@@ -194,12 +272,18 @@ pub fn set_identity(stack: &mut ItemStack, gem: &Gem, purity: Purity) {
     data.set_other(MODEL_KEY, Some(Tag::String(gem.id.into())));
 }
 
-/// A gem stack: the item, its type, its purity, and the name Java gives it.
+/// A gem stack: the declared item of that gem and purity, bare, since its
+/// default components already carry the type, purity, name and model.
 ///
-/// The name is `minecraft:item_name`, not `minecraft:custom_name`: Java gives
-/// a gem its normal item name (translated with the purity's colour), and only
+/// Below the gem's purity floor there is no such item, and the stack is the
+/// generic `apotheosis:gem` with its identity in custom data, as before.  Its
+/// name is `minecraft:item_name`, not `minecraft:custom_name`: Java gives a
+/// gem its normal item name (translated with the purity's colour), and only
 /// `custom_name` carries the player-given italics of an anvil rename.
 pub fn stack(gem: &Gem, purity: Purity) -> ItemStack {
+    if let Some(item) = item_id(gem, purity) {
+        return ItemStack::new(item.as_str(), 1);
+    }
     let mut stack = ItemStack::new(ITEM, 1);
     set_identity(&mut stack, gem, purity);
     let name = Tag::compound([
@@ -481,9 +565,55 @@ mod tests {
     }
 
     #[test]
-    fn a_gem_stack_carries_its_type_purity_and_model() {
+    fn a_gem_stack_is_the_bare_item_of_its_gem_and_purity() {
         let gem = get("apotheosis:core/solar").unwrap();
         let stack = stack(gem, Purity::Flawless);
+        assert_eq!(&*stack.item, "apotheosis:gem_solar_flawless");
+        assert!(stack.data().is_none(), "the declaration's defaults carry it");
+        assert_eq!(id_of(&stack), Some("apotheosis:core/solar"));
+        assert_eq!(purity_of(&stack), Purity::Flawless);
+        assert_eq!(of_stack(&stack).map(|(gem, _)| gem.id), Some(gem.id));
+    }
+
+    #[test]
+    fn every_gem_item_is_recognised_by_its_id_alone() {
+        let mut seen = std::collections::HashSet::new();
+        for gem in &GEMS {
+            for purity in Purity::ALL {
+                let Some(item) = item_id(gem, purity) else {
+                    assert!(purity < gem.min_purity, "{} has no {purity:?} item", gem.id);
+                    continue;
+                };
+                assert!(seen.insert(item.clone()), "{item} names two gems");
+                let (found, read) = from_item(&item).expect(&item);
+                assert_eq!((found.id, read), (gem.id, purity), "{item}");
+                let bare = ItemStack::new(item.as_str(), 1);
+                assert_eq!(of_stack(&bare).map(|(g, p)| (g.id, p)), Some((gem.id, purity)));
+            }
+        }
+        assert_eq!(seen.len(), 107, "the Java tab's gem count changed");
+        // Below its Flawless floor, Endersurge has no item.
+        assert!(from_item("apotheosis:gem_endersurge_cracked").is_none());
+        let end = get("apotheosis:the_end/endersurge").unwrap();
+        assert_eq!(item_id(end, Purity::Normal), None);
+        for other in [
+            "apotheosis:gem_dust",
+            "apotheosis:gem_cutting_table",
+            "apotheosis:gem_fused_slate",
+            "apotheosis:gem_ballast",
+            "apotheosis:gem_ballast_shiny",
+            "minecraft:gem_ballast_cracked",
+        ] {
+            assert!(from_item(other).is_none(), "{other}");
+            assert!(of_stack(&ItemStack::new(other, 1)).is_none(), "{other}");
+        }
+    }
+
+    #[test]
+    fn a_generic_gem_is_still_recognised_by_its_data() {
+        let gem = get("apotheosis:core/solar").unwrap();
+        let mut stack = ItemStack::new(ITEM, 1);
+        set_identity(&mut stack, gem, Purity::Flawless);
         assert_eq!(&*stack.item, ITEM);
         assert_eq!(id_of(&stack), Some("apotheosis:core/solar"));
         assert_eq!(purity_of(&stack), Purity::Flawless);
@@ -493,6 +623,64 @@ mod tests {
         );
         assert!(of_stack(&stack).is_some());
         assert!(of_stack(&ItemStack::new("minecraft:stick", 1)).is_none());
+    }
+
+    #[test]
+    fn a_purity_upgrade_gives_the_item_of_the_next_purity() {
+        let gem = get("apotheosis:core/ballast").unwrap();
+        let mut stack = stack(gem, Purity::Cracked);
+        stack.count = 3;
+        assert!(change_purity(&mut stack, Purity::Cracked.next()));
+        assert_eq!(&*stack.item, "apotheosis:gem_ballast_chipped");
+        assert_eq!(stack.count, 3);
+        assert!(stack.data().is_none());
+        assert_eq!(purity_of(&stack), Purity::Chipped);
+
+        // A generic gem becomes its gem item, and loses only its identity patch.
+        let mut legacy = ItemStack::new(ITEM, 1);
+        set_identity(&mut legacy, gem, Purity::Normal);
+        let mut custom = match legacy.data().and_then(|d| d.other(CUSTOM_DATA)) {
+            Some(Tag::Compound(c)) => c.clone(),
+            _ => panic!("no custom data"),
+        };
+        custom.insert("other:key".into(), Tag::Int(1));
+        legacy
+            .data_mut()
+            .set_other(CUSTOM_DATA, Some(Tag::Compound(custom)));
+        assert!(change_purity(&mut legacy, Purity::Flawless));
+        assert_eq!(&*legacy.item, "apotheosis:gem_ballast_flawless");
+        assert_eq!(legacy.data().and_then(|d| d.other(MODEL_KEY)), None);
+        match legacy.data().and_then(|d| d.other(CUSTOM_DATA)) {
+            Some(Tag::Compound(c)) => {
+                assert!(c.get(&GEM_KEY.into()).is_none() && c.get(&PURITY_KEY.into()).is_none());
+                assert_eq!(c.get(&"other:key".into()), Some(&Tag::Int(1)));
+            }
+            other => panic!("the other custom data was lost: {other:?}"),
+        }
+        assert_eq!(of_stack(&legacy).map(|(_, p)| p), Some(Purity::Flawless));
+
+        // No item below the floor, and nothing for a non-gem.
+        let end = get("apotheosis:the_end/endersurge").unwrap();
+        let mut low = ItemStack::new(ITEM, 1);
+        set_identity(&mut low, end, Purity::Cracked);
+        assert!(!change_purity(&mut low, Purity::Chipped));
+        assert_eq!(&*low.item, ITEM);
+        assert!(!change_purity(&mut ItemStack::new("minecraft:stick", 1), Purity::Normal));
+    }
+
+    #[test]
+    fn a_rolled_drop_is_the_item_of_its_gem_and_purity() {
+        let mut rng = crate::Rng::new(3);
+        for dimension in ["minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"] {
+            for boss in [false, true] {
+                for _ in 0..100 {
+                    let (gem, purity) = roll(dimension, boss, &mut rng);
+                    let drop = stack(gem, purity);
+                    assert_eq!(Some(drop.item.to_string()), item_id(gem, purity));
+                    assert_eq!(of_stack(&drop).map(|(g, p)| (g.id, p)), Some((gem.id, purity)));
+                }
+            }
+        }
     }
 
     #[test]

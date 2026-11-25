@@ -9,6 +9,14 @@ script reads that data read-only and writes:
   content/assets/apotheosis/models/item/gem_<name>.json
                                             one model per gem, on the imported
                                             Java texture (git-ignored layer)
+  content/data/apotheosis/horizon/item/gem_<name>_<purity>.json
+  content/assets/apotheosis/items/gem_<name>_<purity>.json
+                                            one item per gem and purity at or
+                                            above its floor, as Apotheosis lists
+                                            them in its creative tab; its default
+                                            components carry the type, purity
+                                            and coloured name
+  the creative tab and the `apotheosis:gems` tag, with those items
 
 The generated Rust is a data table, not code copied from Apotheosis: only the
 ids, names, weights, purity floors, dimension constraints and per-purity bonus
@@ -31,6 +39,13 @@ RUST = ROOT / "native" / "apotheosis" / "api" / "src" / "java_gems.rs"
 MODELS = ROOT / "content" / "assets" / "apotheosis" / "models" / "item"
 
 PURITIES = ("cracked", "chipped", "flawed", "normal", "flawless", "perfect")
+# `Purity::colour` and the rarity `gems::stack` gave the generic gem.
+PURITY_COLOURS = ("#808080", "#A0A0A0", "#C8C8C8", "#55FF55", "#55AAFF", "#FFD700")
+PURITY_RARITIES = ("common", "uncommon", "uncommon", "rare", "epic", "epic")
+ITEM_DECLS = ROOT / "content" / "data" / "apotheosis" / "horizon" / "item"
+ITEM_MODELS = ROOT / "content" / "assets" / "apotheosis" / "items"
+TAB = ROOT / "content" / "data" / "apotheosis" / "horizon" / "creative_tab" / "apotheosis.json"
+GEMS_TAG = ROOT / "content" / "data" / "apotheosis" / "tags" / "item" / "gems.json"
 
 # Gem classes, as Apotheosis names them, mapped to this port's item ids.  A gem
 # bonus applies to a piece whose id matches one of the class's suffixes.
@@ -310,8 +325,74 @@ def rust_gem(
     return "\n".join(rust), {
         "texture": texture,
         "gem_id": gem_id,
+        "name": name,
+        "min_purity": min_purity,
         "bonus_lang": bonus_lang,
     }
+
+
+def write_json(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+
+def gem_items(models: list[dict]) -> list[str]:
+    """Writes one item per gem and allowed purity; returns their ids in the
+    Java creative tab's order (gems by id, then purity)."""
+    wanted: list[str] = []
+    for info in models:
+        floor = PURITIES.index(info["min_purity"])
+        for index, purity in enumerate(PURITIES):
+            if index < floor:
+                continue
+            name = f"gem_{info['texture']}_{purity}"
+            wanted.append(name)
+            write_json(ITEM_DECLS / f"{name}.json", {
+                "template": "minecraft:amethyst_shard",
+                "max_stack_size": 64,
+                "rarity": PURITY_RARITIES[index],
+                "components": {
+                    "minecraft:custom_data": {
+                        "apotheosis:gem": info["gem_id"],
+                        "apotheosis:gem_purity": index,
+                    },
+                    "minecraft:item_name": {
+                        "translate": f"item.apotheosis.gem.{info['gem_id']}",
+                        "fallback": info["name"],
+                        "color": PURITY_COLOURS[index],
+                        "italic": False,
+                    },
+                },
+            })
+            write_json(ITEM_MODELS / f"{name}.json", {
+                "model": {
+                    "type": "minecraft:model",
+                    "model": f"apotheosis:item/gem_{info['texture']}",
+                }
+            })
+    # A gem item a previous catalogue had (a floor that rose) is removed.
+    every = {
+        f"gem_{info['texture']}_{purity}" for info in models for purity in PURITIES
+    }
+    for folder in (ITEM_DECLS, ITEM_MODELS):
+        for path in folder.glob("gem_*.json"):
+            if path.stem in every and path.stem not in wanted:
+                path.unlink()
+    ids = [f"apotheosis:{name}" for name in wanted]
+    every_ids = {f"apotheosis:{name}" for name in every}
+
+    # The tab: the gem items right after the generic gem, in Java's order.
+    tab = json.loads(TAB.read_text(encoding="utf-8"))
+    items = [item for item in tab["items"] if item not in every_ids]
+    at = items.index("apotheosis:gem") + 1 if "apotheosis:gem" in items else 0
+    tab["items"] = items[:at] + ids + items[at:]
+    write_json(TAB, tab)
+    write_json(GEMS_TAG, {"values": ["apotheosis:gem", *ids]})
+    return ids
 
 
 def main() -> None:
@@ -408,6 +489,8 @@ pub const GEMS: [Gem; %d] = [
             encoding="utf-8",
             newline="\n",
         )
+    ids = gem_items(models)
+    print(f"wrote {len(ids)} gem items, the creative tab and the gems tag")
     # Add every bonus line's translation key to our own lang files.  Existing
     # keys are kept as they are, so a hand-written translation is never
     # overwritten by a later run.

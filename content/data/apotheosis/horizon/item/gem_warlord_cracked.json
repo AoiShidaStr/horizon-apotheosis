@@ -1,0 +1,17 @@
+{
+  "template": "minecraft:amethyst_shard",
+  "max_stack_size": 64,
+  "rarity": "common",
+  "components": {
+    "minecraft:custom_data": {
+      "apotheosis:gem": "apotheosis:core/warlord",
+      "apotheosis:gem_purity": 0
+    },
+    "minecraft:item_name": {
+      "translate": "item.apotheosis.gem.apotheosis:core/warlord",
+      "fallback": "Gem of the Warlord",
+      "color": "#808080",
+      "italic": false
+    }
+  }
+}

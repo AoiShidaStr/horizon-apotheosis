@@ -1,0 +1,17 @@
+{
+  "template": "minecraft:amethyst_shard",
+  "max_stack_size": 64,
+  "rarity": "epic",
+  "components": {
+    "minecraft:custom_data": {
+      "apotheosis:gem": "apotheosis:the_nether/blood_lord",
+      "apotheosis:gem_purity": 4
+    },
+    "minecraft:item_name": {
+      "translate": "item.apotheosis.gem.apotheosis:the_nether/blood_lord",
+      "fallback": "Gem of the Ravenous Blood Lord",
+      "color": "#55AAFF",
+      "italic": false
+    }
+  }
+}
