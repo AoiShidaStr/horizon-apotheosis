@@ -9,7 +9,7 @@ Source inspectée : `java-ref`
 - blocs avec blockstate Java : 33
 - objets avec modèle Java : 52
 - modèles copiés : 119
-- textures copiées : 130
+- textures copiées : 131
 - clés lang en_us : 1742
 - clés lang fr_fr : 1621
 

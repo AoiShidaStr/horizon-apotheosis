@@ -992,7 +992,6 @@ pub enum Action {
     Rebirth,
     Enhance,
     Unnaming,
-    SalvageGem,
 }
 
 /// What a delayed action was validated on: the stacks' item ids and counts,
@@ -1159,7 +1158,7 @@ pub fn begin_salvage(host: &mut dyn Host, player: u128, slot: i32) {
 
 /// The counter this module's rolls draw from, mixed with the tick they run on:
 /// the hook API has no random source, so this is the port's own stream.
-fn next_roll() -> u64 {
+pub(crate) fn next_roll() -> u64 {
     static ROLLS: AtomicU64 = AtomicU64::new(0);
     let n = ROLLS.fetch_add(1, Ordering::Relaxed) + 1;
     seed_mix(n, &[])
@@ -1241,7 +1240,6 @@ pub fn inventory_tick(host: &mut dyn Host, event: &mut InventoryTickEvent) {
     match pending.action {
         Action::Salvage => salvage(host, pending.slot, &main, player.uuid, &pending.main),
         Action::Cut => cut(host, pending.slot, &main, player.uuid),
-        Action::SalvageGem => salvage_gem(host, pending.slot, &main, player.uuid),
         other => {
             let Some(off) = target else {
                 return;
@@ -1313,32 +1311,8 @@ pub fn use_item_on(host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow 
     // The click belongs to the table, never to the block under it: a table
     // that opened a crafting grid on a misclick would hide its own use.
     match table {
-        // The reforging tables open their own menu (`menus`).
-        Table::SimpleReforging | Table::Reforging => Flow::Continue,
-        Table::Salvaging => {
-            if gems::of_stack(&event.stack).is_some() {
-                set_pending(
-                    player.uuid,
-                    Pending::new(
-                        Action::SalvageGem,
-                        i32::from(player.selected_slot),
-                        &event.stack,
-                        None,
-                    ),
-                );
-                return Flow::Cancel;
-            }
-            if !has_affixes(&event.stack) {
-                say(host, player.uuid, Text::translate_with_fallback(
-                    "apotheosis.table.salvage.hint",
-                    "The salvaging table breaks down the affixed piece in your hand.",
-                    &[],
-                ));
-                return Flow::Cancel;
-            }
-            begin_salvage(host, player.uuid, i32::from(player.selected_slot));
-            Flow::Cancel
-        }
+        // The reforging and salvaging tables open their own menu (`menus`).
+        Table::SimpleReforging | Table::Reforging | Table::Salvaging => Flow::Continue,
         Table::Cutting => {
             if gems::of_stack(&event.stack).is_none() || purity_of(&event.stack) >= Purity::Perfect {
                 say(host, player.uuid, Text::translate_with_fallback(
@@ -1550,37 +1524,6 @@ fn unname(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemSta
         "apotheosis.unnaming.done",
         "The affix name was removed.",
         &[],
-    ));
-}
-
-/// Java's gem salvaging recipes: a gem breaks into gem dust and is consumed.
-/// If the dust cannot fit, the gem is kept.
-fn salvage_gem(host: &mut dyn Host, slot: i32, gem_stack: &ItemStack, player: u128) {
-    if gems::of_stack(gem_stack).is_none() {
-        return;
-    }
-    let purity = purity_of(gem_stack);
-    let mut rng = Rng::new(next_roll());
-    let dust = gem_salvage_yield(purity, &mut rng);
-    let given = host.give_items("apotheosis:gem_dust", dust);
-    if given < dust {
-        if given > 0 {
-            let _ = host.take_items("apotheosis:gem_dust", given);
-        }
-        say(host, player, Text::translate_with_fallback(
-            "apotheosis.salvage.no_room",
-            "Some of it did not fit in your inventory.",
-            &[],
-        ));
-        return;
-    }
-    let mut left = gem_stack.clone();
-    left.count = left.count.saturating_sub(1);
-    write_slot(host, slot, left);
-    say(host, player, Text::translate_with_fallback(
-        "apotheosis.salvage.gem",
-        "Salvaged into %s gem dust.",
-        &[Text::literal(dust.to_string())],
     ));
 }
 

@@ -15,7 +15,11 @@
 //!   the server to the block entity's slots;
 //! - `menu_slot_rules` says what each slot takes.
 //!
-//! A salvaging or gem cutting screen adds its table to `menu_of`, its layout
+//! The salvaging table (Java's `SalvagingMenu`) follows the same frame: its
+//! results go into output slots the player can take from but not place into,
+//! and only after the salvage button destroyed the inputs.
+//!
+//! A gem cutting screen adds its table to `menu_of`, its layout
 //! to `screen`, its data to `block_entity_tick` and its buttons to
 //! `menu_button`.
 //!
@@ -27,14 +31,15 @@
 
 use horizon_client::mod_api::{
     BlockEntityContainerEvent, BlockEntityEvent, BlockEntityTickEvent, BlockEntityTicksEvent,
-    Compound, Host, ItemStack, MenuButtonEvent, MenuSlotRulesEvent, ModContainer, NativeScreen,
+    Compound, Host, HudBatch, ItemStack, MenuButtonEvent, MenuSlotRulesEvent, ModContainer, NativeScreen,
     ScreenClickEvent, ScreenDrawEvent, ScreenEvent, ScreenTooltipEvent,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
+use crate::gems;
 use crate::sockets::{self, Table, REFORGE_COSTS};
-use crate::{is_equipment, Tier};
+use crate::{is_equipment, Rng, Tier};
 
 /// The reforging menu type, shared by both reforging tables.
 pub const REFORGING: &str = "apotheosis:reforging";
@@ -55,7 +60,11 @@ fn reforge_table(block: &str) -> Option<Table> {
 
 /// The menu type a block opens.
 fn menu_of(block: &str) -> Option<&'static str> {
-    reforge_table(block).map(|_| REFORGING)
+    match sockets::table(block)? {
+        Table::SimpleReforging | Table::Reforging => Some(REFORGING),
+        Table::Salvaging => Some(SALVAGING),
+        Table::Cutting => None,
+    }
 }
 
 /// The rarity a material names (Java's `RarityRegistry.getMaterialRarity`).
@@ -187,7 +196,7 @@ pub fn on_block_entity_ticks(event: &mut BlockEntityTicksEvent<'_>) {
 pub fn on_block_entity_container(event: &BlockEntityContainerEvent<'_>) -> Option<ModContainer> {
     let menu = menu_of(event.block)?;
     Some(ModContainer {
-        slots: 3,
+        slots: if menu == SALVAGING { SALVAGE_SLOTS } else { 3 },
         faces: Default::default(),
         inputs: Vec::new(),
         outputs: Vec::new(),
@@ -197,6 +206,13 @@ pub fn on_block_entity_container(event: &BlockEntityContainerEvent<'_>) -> Optio
 
 /// True when the entity was one of ours.
 pub fn on_block_entity_tick(event: &mut BlockEntityTickEvent<'_>) -> bool {
+    if menu_of(&event.entity.id) == Some(SALVAGING) {
+        let data = salvage_data(&event.entity.items);
+        if event.entity.data[..] != data[..] {
+            event.entity.data = data.to_vec();
+        }
+        return true;
+    }
     let Some(table) = reforge_table(&event.entity.id) else {
         return false;
     };
@@ -208,6 +224,9 @@ pub fn on_block_entity_tick(event: &mut BlockEntityTickEvent<'_>) -> bool {
 }
 
 pub fn on_menu_button(host: &mut dyn Host, event: &mut MenuButtonEvent<'_>) {
+    if menu_of(&event.entity.id) == Some(SALVAGING) {
+        return salvage_button(host, event);
+    }
     let Some(table) = reforge_table(&event.entity.id) else {
         return;
     };
@@ -236,10 +255,12 @@ pub fn on_menu_button(host: &mut dyn Host, event: &mut MenuButtonEvent<'_>) {
 
 /// Java's slot rules: one piece of gear, a rarity material, sigils of rebirth.
 pub fn on_menu_slot_rules(event: &mut MenuSlotRulesEvent<'_>) {
-    if event.menu != REFORGING {
-        return;
-    }
-    if let Some((may_place, max_stack)) = slot_rule(event.slot, &event.stack.item) {
+    let rule = match event.menu {
+        REFORGING => slot_rule(event.slot, &event.stack.item),
+        SALVAGING => salvage_slot_rule(event.slot, event.stack),
+        _ => return,
+    };
+    if let Some((may_place, max_stack)) = rule {
         event.may_place = may_place;
         event.max_stack = max_stack.unwrap_or(event.max_stack);
     }
@@ -281,7 +302,9 @@ fn get(data: &[i32], i: usize) -> i32 {
 }
 
 pub fn on_screen(event: &ScreenEvent<'_>) -> Option<NativeScreen> {
-    menu_of(event.block)?;
+    if menu_of(event.block)? == SALVAGING {
+        return Some(salvage_screen());
+    }
     Some(NativeScreen {
         width: WIDTH,
         height: HEIGHT,
@@ -294,8 +317,10 @@ pub fn on_screen(event: &ScreenEvent<'_>) -> Option<NativeScreen> {
 }
 
 pub fn on_screen_draw(host: &dyn Host, event: &mut ScreenDrawEvent<'_>) {
-    if menu_of(event.block).is_none() {
-        return;
+    match menu_of(event.block) {
+        Some(REFORGING) => {}
+        Some(SALVAGING) => return salvage_draw(host, event),
+        _ => return,
     }
     let [ox, oy] = event.origin;
     let java = host.sprite(event.batch, TEXTURE, [0.0, 0.0, WIDTH, HEIGHT], [ox, oy, WIDTH, HEIGHT]);
@@ -344,7 +369,10 @@ pub fn on_screen_draw(host: &dyn Host, event: &mut ScreenDrawEvent<'_>) {
 }
 
 pub fn on_screen_click(event: &ScreenClickEvent<'_>) -> Option<i32> {
-    menu_of(event.block)?;
+    if menu_of(event.block)? == SALVAGING {
+        let ready = !event.right && get(event.data, 0) & VALID != 0;
+        return (ready && on_salvage_button(event.at)).then_some(0);
+    }
     if event.right || get(event.data, 3) & VALID == 0 {
         return None;
     }
@@ -352,6 +380,9 @@ pub fn on_screen_click(event: &ScreenClickEvent<'_>) -> Option<i32> {
 }
 
 pub fn on_screen_tooltip(event: &mut ScreenTooltipEvent<'_>) {
+    if menu_of(event.block) == Some(SALVAGING) {
+        return salvage_tooltip(event);
+    }
     if menu_of(event.block).is_none() || get(event.data, 3) & VALID == 0 {
         return;
     }
@@ -371,6 +402,253 @@ pub fn on_screen_tooltip(event: &mut ScreenTooltipEvent<'_>) {
     event.lines.push(format!("§7{} x {}", get(event.data, 1) * n, "rarity material"));
     event.lines.push(format!("§7{n} level(s) / niveau(x)"));
     event.lines.push(format!("§8Requires level {} / Niveau requis {}", get(event.data, 2) * n, get(event.data, 2) * n));
+}
+
+// --- Salvaging table -----------------------------------------------------------
+
+/// The salvaging menu type: Java's `SalvagingMenu`.
+pub const SALVAGING: &str = "apotheosis:salvaging";
+/// Twelve inputs (one piece each), then six outputs.
+const SALVAGE_INPUTS: usize = 12;
+const SALVAGE_SLOTS: usize = 18;
+/// What a salvage can give, in the data slots' order: the five rarity
+/// materials (Java's `recipe/salvaging/affix_item`), then gem dust
+/// (`recipe/salvaging/gem`).
+const SALVAGE_OUTPUTS: [&str; 6] = [
+    "apotheosis:mysterious_scrap_metal",
+    "apotheosis:timeworn_fabric",
+    "apotheosis:luminous_crystal_shard",
+    "apotheosis:arcane_sands",
+    "apotheosis:godforged_pearl",
+    "apotheosis:gem_dust",
+];
+/// Its data slots: flags (`VALID` when an input salvages), then the least and
+/// the most of each output, summed over the inputs (Java's results tooltip).
+const SALVAGE_DATA: usize = 1 + 2 * SALVAGE_OUTPUTS.len();
+
+/// What salvaging `stack` can give: `(output, least, most)`, by
+/// `SALVAGE_OUTPUTS` index. Empty when nothing salvages it.
+pub fn salvage_ranges(stack: &ItemStack) -> Vec<(usize, u32, u32)> {
+    if let Some((_, purity)) = gems::of_stack(stack) {
+        return sockets::GEM_SALVAGE
+            .iter()
+            .find(|(p, ..)| *p == purity)
+            .map(|(_, low, high)| vec![(5, *low, *high)])
+            .unwrap_or_default();
+    }
+    if !sockets::has_affixes(stack) {
+        return Vec::new();
+    }
+    let (material, max) = sockets::salvage_material(sockets::tier_of(stack).unwrap_or(Tier::Common));
+    SALVAGE_OUTPUTS
+        .iter()
+        .position(|o| *o == material)
+        .map(|i| vec![(i, 1, max as u32)])
+        .unwrap_or_default()
+}
+
+/// The data slots, from the inputs.
+pub fn salvage_data(items: &[Option<ItemStack>]) -> [i32; SALVAGE_DATA] {
+    let mut data = [0; SALVAGE_DATA];
+    for stack in items.iter().take(SALVAGE_INPUTS).flatten() {
+        for (i, low, high) in salvage_ranges(stack) {
+            data[0] |= VALID;
+            data[1 + 2 * i] += low as i32;
+            data[2 + 2 * i] += high as i32;
+        }
+    }
+    data
+}
+
+/// What one input breaks into: the roll of `sockets::salvage_yield` or
+/// `gem_salvage_yield`, and, as `/apoth salvage` does, the gems socketed in it.
+pub fn salvage_results(stack: &ItemStack, rng: &mut Rng) -> Vec<ItemStack> {
+    if let Some((_, purity)) = gems::of_stack(stack) {
+        let dust = sockets::gem_salvage_yield(purity, rng) * stack.count.max(1);
+        return vec![ItemStack::new(SALVAGE_OUTPUTS[5], dust)];
+    }
+    if !sockets::has_affixes(stack) {
+        return Vec::new();
+    }
+    let (material, count) = sockets::salvage_yield(sockets::tier_of(stack).unwrap_or(Tier::Common), rng);
+    let mut out = vec![ItemStack::new(material.as_str(), count)];
+    for socket in sockets::socketed(stack) {
+        if let Some(gem) = gems::get(&socket.gem) {
+            out.push(gems::stack(gem, socket.purity));
+        }
+    }
+    out
+}
+
+fn same_kind(a: &ItemStack, b: &ItemStack) -> bool {
+    a.item == b.item && a.damage == b.damage && a.extra == b.extra
+}
+
+/// Puts `stack` into `slots`, topping up its own kind first, then the empty
+/// ones. False (with `slots` partly filled) when it does not all fit.
+fn insert(slots: &mut [Option<ItemStack>], mut stack: ItemStack, max_stack: &dyn Fn(&str) -> u32) -> bool {
+    let max = max_stack(&stack.item).max(1);
+    for slot in slots.iter_mut().flatten() {
+        if stack.count > 0 && same_kind(slot, &stack) && slot.count < max {
+            let moved = (max - slot.count).min(stack.count);
+            slot.count += moved;
+            stack.count -= moved;
+        }
+    }
+    for slot in slots.iter_mut().filter(|s| s.is_none()) {
+        if stack.count == 0 {
+            break;
+        }
+        let moved = max.min(stack.count);
+        let mut part = stack.clone();
+        part.count = moved;
+        *slot = Some(part);
+        stack.count -= moved;
+    }
+    stack.count == 0
+}
+
+/// The salvage button (Java's `salvageAll`): each input that salvages is
+/// destroyed and its results go into the output slots. Deviation: Java hands
+/// what does not fit to the player; here an input whose results do not fit
+/// stays whole, so nothing is ever lost. Returns how many inputs salvaged.
+pub fn salvage_all(items: &mut [Option<ItemStack>], rng: &mut Rng, max_stack: &dyn Fn(&str) -> u32) -> usize {
+    if items.len() < SALVAGE_SLOTS {
+        return 0;
+    }
+    let mut done = 0;
+    for i in 0..SALVAGE_INPUTS {
+        let Some(stack) = items[i].clone() else {
+            continue;
+        };
+        let results = salvage_results(&stack, rng);
+        if results.is_empty() {
+            continue;
+        }
+        let mut outputs = items[SALVAGE_INPUTS..SALVAGE_SLOTS].to_vec();
+        if results.into_iter().all(|r| insert(&mut outputs, r, max_stack)) {
+            items[SALVAGE_INPUTS..SALVAGE_SLOTS].clone_from_slice(&outputs);
+            items[i] = None;
+            done += 1;
+        }
+    }
+    done
+}
+
+fn salvage_button(host: &mut dyn Host, event: &mut MenuButtonEvent<'_>) {
+    if event.id != 0 || host.acting_player().is_none() {
+        return;
+    }
+    let mut rng = Rng::new(sockets::next_roll());
+    let sizes: HashMap<String, u32> = event
+        .entity
+        .items
+        .iter()
+        .flatten()
+        .map(|s| s.item.to_string())
+        .chain(SALVAGE_OUTPUTS.iter().map(|s| s.to_string()))
+        .map(|item| {
+            let max = host.max_stack_size(&item).unwrap_or(64);
+            (item, max)
+        })
+        .collect();
+    let max_stack = |item: &str| sizes.get(item).copied().unwrap_or(64);
+    salvage_all(&mut event.entity.items, &mut rng, &max_stack);
+    event.entity.data = salvage_data(&event.entity.items).to_vec();
+}
+
+/// Java's slots: an input takes one piece that salvages; an output takes
+/// nothing (it is only taken from).
+pub fn salvage_slot_rule(slot: usize, stack: &ItemStack) -> Option<(bool, Option<u32>)> {
+    match slot {
+        s if s < SALVAGE_INPUTS => Some((!salvage_ranges(stack).is_empty(), Some(1))),
+        s if s < SALVAGE_SLOTS => Some((false, None)),
+        _ => None,
+    }
+}
+
+const SALVAGE_TEXTURE: &str = "apotheosis:gui/salvage";
+const SALVAGE_HEIGHT: f32 = 174.0;
+/// Java's salvage button, at (98, 34), 18 square; its sprite at (238, 0),
+/// the inactive one 18 below.
+const SALVAGE_BUTTON: [f32; 2] = [98.0, 34.0];
+
+fn salvage_slot(i: usize) -> [f32; 2] {
+    if i < SALVAGE_INPUTS {
+        [17.0 + (i % 4) as f32 * 19.0, 17.0 + (i / 4) as f32 * 19.0]
+    } else {
+        let j = i - SALVAGE_INPUTS;
+        [124.0 + (j % 2) as f32 * 19.0, 17.0 + (j / 2) as f32 * 19.0]
+    }
+}
+
+pub fn on_salvage_button(at: [f32; 2]) -> bool {
+    let [x, y] = SALVAGE_BUTTON;
+    at[0] >= x && at[0] < x + 18.0 && at[1] >= y && at[1] < y + 18.0
+}
+
+fn salvage_screen() -> NativeScreen {
+    NativeScreen {
+        width: WIDTH,
+        height: SALVAGE_HEIGHT,
+        slots: (0..SALVAGE_SLOTS).map(|i| Some(salvage_slot(i))).collect(),
+        inventory_y: 92.0,
+        inventory_x: 8.0,
+        own_labels: false,
+        own_background: true,
+    }
+}
+
+/// The port's own panel for the `--no-java` pack: the background, the slot
+/// frames and the player's inventory frames.
+fn draw_panel(host: &dyn Host, batch: &mut HudBatch, origin: [f32; 2], height: f32, slots: &[[f32; 2]], inventory_y: f32) {
+    let [ox, oy] = origin;
+    host.fill(batch, [ox, oy, WIDTH, height], 0xFF2E_2A33);
+    host.fill(batch, [ox + 4.0, oy + 4.0, WIDTH - 8.0, inventory_y - 14.0], 0xFF3B_3542);
+    let mut frame = |x: f32, y: f32| host.fill(batch, [ox + x - 1.0, oy + y - 1.0, 18.0, 18.0], 0xFF1A_181D);
+    for [x, y] in slots {
+        frame(*x, *y);
+    }
+    for row in 0..4 {
+        let y = if row == 3 { inventory_y + 58.0 } else { inventory_y + 18.0 * row as f32 };
+        for col in 0..9 {
+            frame(8.0 + 18.0 * col as f32, y);
+        }
+    }
+}
+
+fn salvage_draw(host: &dyn Host, event: &mut ScreenDrawEvent<'_>) {
+    let [ox, oy] = event.origin;
+    let java = host.sprite(event.batch, SALVAGE_TEXTURE, [0.0, 0.0, WIDTH, SALVAGE_HEIGHT], [ox, oy, WIDTH, SALVAGE_HEIGHT]);
+    if !java {
+        let slots: Vec<[f32; 2]> = (0..SALVAGE_SLOTS).map(salvage_slot).collect();
+        draw_panel(host, event.batch, event.origin, SALVAGE_HEIGHT, &slots, 92.0);
+    }
+    let ready = get(event.data, 0) & VALID != 0;
+    let [bx, by] = SALVAGE_BUTTON;
+    let src = [238.0, if ready { 0.0 } else { 18.0 }, 18.0, 18.0];
+    if !(java && host.sprite(event.batch, SALVAGE_TEXTURE, src, [ox + bx, oy + by, 18.0, 18.0])) {
+        host.fill(event.batch, [ox + bx, oy + by, 18.0, 18.0], if ready { 0xFF6A_6070 } else { 0xFF1A_181D });
+        host.text(event.batch, ">", [ox + bx + 6.0, oy + by + 5.0], if ready { 0xFFFFFF } else { 0x606060 }, true);
+    }
+}
+
+fn salvage_tooltip(event: &mut ScreenTooltipEvent<'_>) {
+    if !on_salvage_button(event.at) {
+        return;
+    }
+    if get(event.data, 0) & VALID == 0 {
+        event.lines.push("§cNothing to salvage / Rien à recycler".to_owned());
+        return;
+    }
+    event.lines.push("§e§nSalvage results / Résultats du recyclage".to_owned());
+    for (i, item) in SALVAGE_OUTPUTS.iter().enumerate() {
+        let (low, high) = (get(event.data, 1 + 2 * i), get(event.data, 2 + 2 * i));
+        if high > 0 {
+            let name = item.rsplit(':').next().unwrap_or(item).replace('_', " ");
+            event.lines.push(format!("§7{low}-{high} {name}"));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -478,5 +756,91 @@ mod tests {
         assert_eq!(choice_at([138.0, 140.0]), Some(2));
         assert_eq!(choice_at([60.0, 140.0]), None);
         assert_eq!(choice_at([30.0, 100.0]), None);
+    }
+
+    fn affixed_sword(tier: Tier) -> ItemStack {
+        sockets::reforged(&ItemStack::new("minecraft:diamond_sword", 1), tier, 7)
+    }
+
+    fn gem(purity: sockets::Purity) -> ItemStack {
+        gems::stack(gems::get("apotheosis:core/ballast").unwrap(), purity)
+    }
+
+    fn salvage_table(inputs: &[ItemStack]) -> Vec<Option<ItemStack>> {
+        let mut items = vec![None; SALVAGE_SLOTS];
+        for (i, s) in inputs.iter().enumerate() {
+            items[i] = Some(s.clone());
+        }
+        items
+    }
+
+    #[test]
+    fn salvaging_reads_the_java_recipes_ranges() {
+        assert_eq!(salvage_ranges(&affixed_sword(Tier::Rare)), vec![(2, 1, 4)]);
+        assert_eq!(salvage_ranges(&gem(sockets::Purity::Cracked)), vec![(5, 1, 2)]);
+        assert!(salvage_ranges(&ItemStack::new("minecraft:diamond_sword", 1)).is_empty());
+        assert!(salvage_ranges(&ItemStack::new("minecraft:stone", 1)).is_empty());
+    }
+
+    #[test]
+    fn the_salvage_data_sums_every_input() {
+        let items = salvage_table(&[affixed_sword(Tier::Rare), affixed_sword(Tier::Rare), gem(sockets::Purity::Normal)]);
+        let data = salvage_data(&items);
+        assert_eq!(data[0] & VALID, VALID);
+        assert_eq!(&data[5..7], &[2, 8], "two rare pieces: 2-8 shards");
+        assert_eq!(&data[11..13], &[3, 5], "a normal gem: 3-5 dust");
+        assert_eq!(salvage_data(&salvage_table(&[])), [0; SALVAGE_DATA]);
+    }
+
+    #[test]
+    fn the_salvage_button_destroys_the_inputs_and_fills_the_outputs() {
+        let mut items = salvage_table(&[affixed_sword(Tier::Rare), gem(sockets::Purity::Cracked), ItemStack::new("minecraft:stone", 1)]);
+        let mut rng = Rng::new(3);
+        assert_eq!(salvage_all(&mut items, &mut rng, &|_| 64), 2);
+        assert!(items[0].is_none() && items[1].is_none());
+        assert!(items[2].is_some(), "what does not salvage stays");
+        let outputs: Vec<&ItemStack> = items[SALVAGE_INPUTS..].iter().flatten().collect();
+        let shards = outputs.iter().find(|s| &*s.item == "apotheosis:luminous_crystal_shard").unwrap();
+        assert!((1..=4).contains(&shards.count));
+        let dust = outputs.iter().find(|s| &*s.item == "apotheosis:gem_dust").unwrap();
+        assert!((1..=2).contains(&dust.count));
+    }
+
+    #[test]
+    fn a_piece_whose_results_do_not_fit_stays_whole() {
+        let mut items = salvage_table(&[affixed_sword(Tier::Rare)]);
+        for slot in &mut items[SALVAGE_INPUTS..] {
+            *slot = Some(ItemStack::new("minecraft:stone", 64));
+        }
+        assert_eq!(salvage_all(&mut items, &mut Rng::new(1), &|_| 64), 0);
+        assert!(items[0].is_some());
+        assert!(items[SALVAGE_INPUTS..].iter().flatten().all(|s| &*s.item == "minecraft:stone" && s.count == 64));
+    }
+
+    #[test]
+    fn salvage_outputs_stack_up_to_their_size() {
+        let mut slots = vec![Some(ItemStack::new("apotheosis:gem_dust", 62)), None];
+        assert!(insert(&mut slots, ItemStack::new("apotheosis:gem_dust", 5), &|_| 64));
+        assert_eq!(slots[0].as_ref().unwrap().count, 64);
+        assert_eq!(slots[1].as_ref().unwrap().count, 3);
+        assert!(!insert(&mut slots, ItemStack::new("apotheosis:arcane_sands", 1), &|_| 64));
+    }
+
+    #[test]
+    fn salvage_slots_take_one_salvageable_piece_and_outputs_take_nothing() {
+        assert_eq!(salvage_slot_rule(0, &affixed_sword(Tier::Common)), Some((true, Some(1))));
+        assert_eq!(salvage_slot_rule(11, &gem(sockets::Purity::Flawed)), Some((true, Some(1))));
+        assert_eq!(salvage_slot_rule(3, &ItemStack::new("minecraft:stone", 1)), Some((false, Some(1))));
+        assert_eq!(salvage_slot_rule(12, &gem(sockets::Purity::Flawed)), Some((false, None)));
+        assert_eq!(salvage_slot_rule(18, &gem(sockets::Purity::Flawed)), None);
+    }
+
+    #[test]
+    fn the_salvage_layout_and_button_follow_java() {
+        assert_eq!(salvage_slot(5), [36.0, 36.0]);
+        assert_eq!(salvage_slot(17), [143.0, 55.0]);
+        assert!(on_salvage_button([100.0, 40.0]));
+        assert!(!on_salvage_button([90.0, 40.0]));
+        assert_eq!(menu_of("apotheosis:salvaging_table"), Some(SALVAGING));
     }
 }
