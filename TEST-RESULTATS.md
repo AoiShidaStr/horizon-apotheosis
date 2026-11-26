@@ -66,3 +66,8 @@ Différences avec le Java qui restent (limites de Horizon a85af177, API 415) :
 ### Infobulle des gemmes (2026-11-26)
 
 Au survol, une gemme affiche l'infobulle de Java : nom dans la couleur de sa pureté, « S'adapte à : » et les types d'équipement, « Lorsqu'emboîté dans : » et le bonus par type (vérifié sur la Gemme Tyrannique : +2 recul d'attaque, +3 robustesse, +30 % robustesse sur bouclier, +17,5 % vie maximale, −10 % vol de vie), plus une ligne propre au port qui rappelle que le sertissage se fait au clic droit. Défauts trouvés et corrigés : le client ignore le lore et la couleur déclarés sur un objet (l'infobulle est donc écrite par le crochet natif) ; toutes les lignes d'infobulle du mod étaient invisibles (couleur sans alpha, Horizon attend de l'ABGR opaque) ; un bonus multiplicateur s'affichait « +0.30 » au lieu de « +30 % ».
+
+### Étagères et invaders (2026-11-26)
+
+- Au survol, une étagère affiche ses statistiques d'enchantement comme Apothic Enchanting (vérifié : Bibliothèque Profonde, Éterna +5.00 (Max 70.00), Quanta +5.00 %, Arcana +5.00 %). La table compte maintenant aussi les bibliothèques et crânes vanilla, comme l'annonce leur infobulle.
+- Taux de butin : un monstre ordinaire tué par un joueur a 4 % de chance de gemme et 4 % d'équipement affixé, comme en Java. Mais 2 % des apparitions nocturnes devenaient des boss sans aucun délai : corrigé aux taux Java (1,8 % surface et End, 2,5 % Nether) avec le délai de 3 minutes entre deux boss (par dimension).
