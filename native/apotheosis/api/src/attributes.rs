@@ -1284,7 +1284,7 @@ pub fn tooltip(event: &mut TooltipEvent<'_>) {
         let line = Text::translate_with_fallback(&key, attr.name(), &[])
             .append(Text::literal(format!(" {}", attr.format(value))))
             .with_color(0x55_55FF);
-        event.lines.push((line, 0x55_55FF));
+        event.lines.push((line, crate::tip_colour(0x55_55FF)));
     }
 }
 

@@ -810,7 +810,7 @@ pub fn tooltip(event: &mut TooltipEvent<'_>) {
     if let Some(seal) = seal(&event.stack.item) {
         event.lines.push((
             Text::translate_with_fallback(seal.desc_key(), seal.desc(), &[]).with_color(0x80_8080),
-            0x80_8080,
+            crate::tip_colour(0x80_8080),
         ));
         return;
     }
@@ -825,7 +825,7 @@ pub fn tooltip(event: &mut TooltipEvent<'_>) {
                 &[],
             )
             .with_color(0x55_55FF),
-            0x55_55FF,
+            crate::tip_colour(0x55_55FF),
         ));
         return;
     }
@@ -845,7 +845,7 @@ pub fn tooltip(event: &mut TooltipEvent<'_>) {
             ],
         )
         .with_color(0x80_8080),
-        0x80_8080,
+        crate::tip_colour(0x80_8080),
     ));
     for socket in sockets {
         let Some(entry) = gems::get(&socket.gem) else {
@@ -873,7 +873,7 @@ pub fn tooltip(event: &mut TooltipEvent<'_>) {
                 &[gem_text(), purity_text()],
             )
             .with_color(colour),
-            colour,
+            crate::tip_colour(colour),
         ));
         for line in gems::description_for(entry, socket.purity, &event.stack.item) {
             event.lines.push((
@@ -883,7 +883,7 @@ pub fn tooltip(event: &mut TooltipEvent<'_>) {
                     &[Text::literal(line.value)],
                 )
                 .with_color(colour),
-                colour,
+                crate::tip_colour(colour),
             ));
         }
     }

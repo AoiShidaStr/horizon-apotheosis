@@ -914,7 +914,7 @@ pub fn tooltip(stats: &Stats) -> Vec<(Text, u32)> {
     let mut lines = Vec::with_capacity(7);
     let mut line = |key: &str, fallback: &str, args: &[Text], colour: u32| {
         let text = Text::translate_with_fallback(key, fallback, args);
-        lines.push((text.with_color(colour), colour));
+        lines.push((text.with_color(colour), crate::tip_colour(colour)));
     };
     line(
         "apotheosis.spawner.tooltip.mob",
@@ -1940,8 +1940,8 @@ mod tests {
         stats.set(Stat::MinDelay, 60.0);
         stats.set_flag(Flag::Burning, true);
         let lines = tooltip(&stats);
-        assert_eq!(lines[0].1, MOB_COLOUR);
-        assert_eq!(lines[1].1, STAT_COLOUR);
+        assert_eq!(lines[0].1, crate::tip_colour(MOB_COLOUR));
+        assert_eq!(lines[1].1, crate::tip_colour(STAT_COLOUR));
         let rendered = lines
             .iter()
             .map(|(text, _)| format!("{:?}", text.spans))
@@ -1954,7 +1954,7 @@ mod tests {
         // Neither line appears while health and echo are the vanilla ones.
         assert!(!rendered.contains("Echo"), "{rendered}");
         assert!(!rendered.contains("health"), "{rendered}");
-        assert_eq!(lines.last().expect("a flag line").1, FLAG_COLOUR);
+        assert_eq!(lines.last().expect("a flag line").1, crate::tip_colour(FLAG_COLOUR));
     }
 
     #[test]

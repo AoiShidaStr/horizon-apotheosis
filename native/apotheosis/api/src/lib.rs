@@ -30,6 +30,24 @@
 //! resolves what a gem gives a piece at its purity.
 //! `affix_effects` holds the effect affixes (poison, execution, cleaving,
 //! spectral arrows, telepathy...) and the Apothic Invader boss.
+/// A tooltip line's colour as Horizon draws it: opaque ABGR (`hud::rgba`), from
+/// the 0xRRGGBB this crate writes. A bare 0xRRGGBB has no alpha and draws
+/// nothing.
+pub(crate) const fn tip_colour(rgb: u32) -> u32 {
+    let (r, g, b) = ((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+    0xFF00_0000 | b << 16 | g << 8 | r
+}
+
+#[cfg(test)]
+mod tip_colour_tests {
+    #[test]
+    fn tooltip_colours_are_opaque_abgr() {
+        assert_eq!(super::tip_colour(0x0AFF0A), 0xFF0A_FF0A);
+        assert_eq!(super::tip_colour(0xFFAA00), 0xFF00_AAFF);
+        assert_eq!(super::tip_colour(0x55_55FF), 0xFFFF_5555);
+    }
+}
+
 mod affix_effects;
 mod affixes;
 mod attributes;
@@ -574,12 +592,12 @@ impl Hooks for Apotheosis {
             let colour = purity.colour();
             if let Some((name, line_colour)) = event.lines.first_mut() {
                 *name = std::mem::take(name).with_color(colour);
-                *line_colour = colour;
+                *line_colour = tip_colour(colour);
             }
             for line in gems::tooltip_lines(gem, purity) {
                 event
                     .lines
-                    .push((line.piece.text().with_color(line.colour), line.colour));
+                    .push((line.piece.text().with_color(line.colour), tip_colour(line.colour)));
             }
         }
         sockets::tooltip(event);
