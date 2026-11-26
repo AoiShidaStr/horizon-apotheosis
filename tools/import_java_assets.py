@@ -100,6 +100,7 @@ PORT_GEM_ITEMS = {
 # Enchanting, or whose Apotheosis copy is the canonical one.
 APOTHEOSIS_ITEMS = {
     "arcane_sands",
+    "boss_summoner",
     "gem_dust",
     "godforged_pearl",
     "luminous_crystal_shard",

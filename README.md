@@ -343,6 +343,13 @@ In-game test plan (French): [`TEST-EN-JEU.md`](TEST-EN-JEU.md); results of the
   persistent `apotheosis:boss` tag, and a broadcast announcement.
 - Its death is recognised by the tag: the existing `loot_drops` boss path
   drops a high gem and rolls boss-tier affixes on its gear.
+- **The boss summoner** (`apotheosis:boss_summoner`, creative or `/give` only,
+  as Java has no recipe) uses `use_item_on`: the Java registry's Overworld,
+  Nether and End invaders pick the base mob (a wolf is no monster here), the
+  clicked face and the cell above it are tried against `block_collision` for a
+  two-block mob, and the item is taken once, only after the summon succeeded.
+  `affix_effects::become_invader` gives it the rarity the player's world tier
+  rolls, exactly as a natural invader; no cooldown applies.
 - Names and descriptions for the 14 effect affixes, the boss words, titles
   and 24 base mob names are merged into `en_us.json` and `fr_fr.json` by
   `python tools/gen_attributes.py` (idempotent, shared files untouched).
@@ -374,6 +381,10 @@ In-game test plan (French): [`TEST-EN-JEU.md`](TEST-EN-JEU.md); results of the
   ascent / summit / pinnacle chances are collapsed to 2 % for this slice.
 - Invader names are generated server-side from translated components; there
   is no name-preserving save/load beyond the `CustomName` NBT.
+- The summoner cannot give its invader the player as target as Java's
+  `setTarget` does: Horizon API 415 has no target setter, so the mob's own
+  goals choose one. A mod's dimension has no invader registry entry here, so
+  the summoner fails without consuming there, as Java does.
 
 ### Missing
 

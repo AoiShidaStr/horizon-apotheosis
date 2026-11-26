@@ -680,5 +680,7 @@
   "info.apothic_enchanting.clues": " - Enchanting clues: %s",
   "info.apothic_enchanting.clues.p": " - Enchanting clues: +%s",
   "info.apothic_enchanting.allows_treasure": " - Allows treasure enchantments",
-  "info.apothic_enchanting.provides_stability": " - Provides quantic stability"
+  "info.apothic_enchanting.provides_stability": " - Provides quantic stability",
+  "item.apotheosis.boss_summoner": "Apothic Invader Summoner",
+  "item.apotheosis.boss_summoner.desc": "Summons an Apothic Invader on the block you click"
 }

@@ -161,9 +161,11 @@ MESSAGES = {
     ),
     "apotheosis.command.help": (
         "Apotheosis: /apoth reforge — roll affixes onto the gear you hold (3 levels); "
-        "/apoth salvage — break an affixed piece into rarity materials.",
+        "/apoth salvage — break an affixed piece into rarity materials; "
+        "/apoth world_tier — show or change your world tier.",
         "Apothéose : /apoth reforge — relance les affixes de l'équipement tenu "
-        "(3 niveaux) ; /apoth salvage — recycle un objet affixé en matériaux de rareté.",
+        "(3 niveaux) ; /apoth salvage — recycle un objet affixé en matériaux de rareté ; "
+        "/apoth world_tier — affiche ou change votre palier de monde.",
     ),
 }
 
@@ -186,6 +188,16 @@ SEALS = [
      "Sceau d'effacement", "Removes the affix name from an item",
      "Retire le nom d'affixe d'un objet", 0x627A8B, "cross"),
 ]
+
+# Java's boss summoner: no recipe (it comes from creative or a command), a
+# stack of 64, the vanilla default item. Its texture is Java's when the local
+# asset layer is imported; this port draws a stand-in for the --no-java pack.
+SUMMONER = (
+    "boss_summoner", "Apothic Invader Summoner", "Invocateur de Boss Apothéotique",
+    "Summons an Apothic Invader on the block you click",
+    "Invoque un Invader Apothéotique sur le bloc cliqué",
+    0x4B2A6E, "eye",
+)
 
 SEAL_RECIPES = {
     "sigil_of_socketing": {
@@ -356,6 +368,15 @@ SEAL_GLYPHS = {
         "..x.x..",
         ".x...x.",
         "x.....x",
+    ],
+    "eye": [
+        ".......",
+        "..xxx..",
+        ".x...x.",
+        "x..x..x",
+        ".x...x.",
+        "..xxx..",
+        ".......",
     ],
 }
 
@@ -733,6 +754,8 @@ TEXTURES = {
 for (_seal, _rarity, _en, _fr, _den, _dfr, _colour, _glyph) in SEALS:
     TEXTURES[_seal] = (lambda c=_colour, g=_glyph: seal_pixels(c, g))
 
+TEXTURES[SUMMONER[0]] = (lambda c=SUMMONER[5], g=SUMMONER[6]: seal_pixels(c, g))
+
 for (_table, _en, _fr, _base, _emblem) in TABLES:
     TEXTURES[_table] = (
         lambda b=_base, e=_emblem, s=TABLE_EMBLEMS[_table]: table_pixels(b, e, s)
@@ -823,6 +846,30 @@ def main():
         fr["item.%s.%s" % (ID, seal)] = name_fr
         en["item.%s.%s.desc" % (ID, seal)] = desc_en
         fr["item.%s.%s.desc" % (ID, seal)] = desc_fr
+
+    (summoner, name_en, name_fr, desc_en, desc_fr, _colour, _glyph) = SUMMONER
+    write_json(os.path.join(CONTENT, "data", ID, "horizon", "item", summoner + ".json"), {
+        "template": "minecraft:paper",
+        "max_stack_size": 64,
+        "rarity": "common",
+    })
+    write_json(os.path.join(CONTENT, "assets", ID, "items", summoner + ".json"), {
+        "model": {"type": "minecraft:model", "model": "%s:item/%s" % (ID, summoner)}
+    })
+    write_json(os.path.join(CONTENT, "assets", ID, "models", "item", summoner + ".json"), {
+        "parent": "minecraft:item/generated",
+        "textures": {"layer0": "%s:item/%s" % (ID, summoner)},
+    })
+    png(os.path.join(CONTENT, "assets", ID, "textures", "item", summoner + ".png"),
+        TEXTURES[summoner]())
+    # No recipe, as in Java: creative mode or a command is the only source.
+    stale = os.path.join(CONTENT, "data", ID, "recipe", summoner + ".json")
+    if os.path.exists(stale):
+        os.remove(stale)
+    en["item.%s.%s" % (ID, summoner)] = name_en
+    fr["item.%s.%s" % (ID, summoner)] = name_fr
+    en["item.%s.%s.desc" % (ID, summoner)] = desc_en
+    fr["item.%s.%s.desc" % (ID, summoner)] = desc_fr
 
     # Vanilla-shaped recipes and their Java item ids; generated here so repeated
     # runs do not depend on the local asset importer. The item models point at
@@ -915,6 +962,9 @@ def main():
         item = "%s:%s" % (ID, seal)
         if item not in items:
             items.append(item)
+    item = "%s:%s" % (ID, SUMMONER[0])
+    if item not in items:
+        items.append(item)
     for (table, *_rest) in TABLES:
         item = "%s:%s" % (ID, table)
         if item not in items:

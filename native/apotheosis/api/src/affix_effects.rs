@@ -1164,7 +1164,12 @@ pub fn mob_spawned(host: &mut dyn Host, event: &MobSpawnedEvent<'_>, entity: Opt
     {
         return;
     }
-    become_boss(host, event.dimension, entity, event.kind, world, &mut rng);
+    // The player's tier decides the invader's rarity, as Java's `GenContext`
+    // does; the summoner (`boss_summoner`) rolls it the same way, but without
+    // the natural spawn's cooldown.
+    let luck = crate::augments::player_luck(world);
+    let tier = tiers::roll_rarity(world, luck, &mut rng);
+    become_invader(host, event.dimension, entity, event.kind, world, tier, &mut rng);
 }
 
 /// Extra health by rarity, so an invader is a fight.
@@ -1276,21 +1281,24 @@ fn generated_name(rng: &mut Rng, kind: &str) -> (String, Text) {
     (json.to_string(), text)
 }
 
-/// Converts the freshly spawned mob into an invader whose own rarity and gear
-/// roll from the nearby player's world tier.
-fn become_boss(
+/// Turns a freshly spawned mob into an Apothic Invader of `tier`, for a player
+/// of `world`: a generated name, more health, affixed gear in every empty slot,
+/// the boss tag and an announcement. The natural spawn and the boss summoner
+/// share it; only the rarity's roll and the summoner's missing cooldown tell
+/// them apart.
+pub(crate) fn become_invader(
     host: &mut dyn Host,
     dimension: &str,
     entity: u32,
     kind: &str,
     world: WorldTier,
+    tier: Tier,
     rng: &mut Rng,
 ) {
     let Some(reference) = host.entity(entity) else {
         return;
     };
     let luck = crate::augments::player_luck(world);
-    let tier = tiers::roll_rarity(world, luck, rng);
     let (name, name_text) = generated_name(rng, kind);
     let health = 20.0 + bonus_health(tier);
     let _ = host.entity_set_attribute_base(reference, "minecraft:max_health", health);

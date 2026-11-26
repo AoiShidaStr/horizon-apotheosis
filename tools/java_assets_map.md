@@ -7,11 +7,11 @@ Source inspectée : `java-ref`
 ## Résumé
 
 - blocs avec blockstate Java : 33
-- objets avec modèle Java : 52
-- modèles copiés : 119
-- textures copiées : 132
-- clés lang en_us : 1862
-- clés lang fr_fr : 1757
+- objets avec modèle Java : 53
+- modèles copiés : 120
+- textures copiées : 133
+- clés lang en_us : 1863
+- clés lang fr_fr : 1758
 
 Les ids sans équivalent Java gardent nos définitions et nos textures originales de `content/`. Les gemmes viennent de Java : une seule gemme (`apotheosis:gem`) dont le modèle choisit la texture du type qu'elle porte, ci-dessous en liste à part.
 
@@ -62,6 +62,7 @@ Les ids sans équivalent Java gardent nos définitions et nos textures originale
 | `basic_bookshelf` | `apothic_enchanting:basic_bookshelf` | `items/basic_bookshelf.json` → `apothic_enchanting:item/basic_bookshelf` |
 | `beeshelf` | `apothic_enchanting:beeshelf` | `items/beeshelf.json` → `apothic_enchanting:item/beeshelf` |
 | `blazing_hellshelf` | `apothic_enchanting:blazing_hellshelf` | `items/blazing_hellshelf.json` → `apothic_enchanting:item/blazing_hellshelf` |
+| `boss_summoner` | `apotheosis:boss_summoner` | `items/boss_summoner.json` → `apotheosis:item/boss_summoner` |
 | `crystal_seashelf` | `apothic_enchanting:crystal_seashelf` | `items/crystal_seashelf.json` → `apothic_enchanting:item/crystal_seashelf` |
 | `deepshelf` | `apothic_enchanting:deepshelf` | `items/deepshelf.json` → `apothic_enchanting:item/deepshelf` |
 | `diamond_upgrade_smithing_template` | `apotheosis:diamond_upgrade_smithing_template` | `items/diamond_upgrade_smithing_template.json` → `apotheosis:item/diamond_upgrade_smithing_template` |

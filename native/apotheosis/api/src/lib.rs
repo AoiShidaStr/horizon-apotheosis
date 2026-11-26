@@ -33,6 +33,8 @@
 //! resolves what a gem gives a piece at its purity.
 //! `affix_effects` holds the effect affixes (poison, execution, cleaving,
 //! spectral arrows, telepathy...) and the Apothic Invader boss.
+//! `boss_summoner` is the creative-only item that summons one on a clicked
+//! block.
 //! `augments` holds step 3 of the world tiers: the augments a monster takes
 //! from the nearest player's tier when it spawns, and the experience and luck
 //! bonuses a player of that tier has.
@@ -56,6 +58,7 @@ mod tip_colour_tests {
 
 mod affix_effects;
 mod affixes;
+mod boss_summoner;
 mod attributes;
 mod augments;
 mod enchanting;
@@ -604,6 +607,7 @@ impl Hooks for Apotheosis {
             }
         }
         sockets::tooltip(event);
+        boss_summoner::tooltip(event);
     }
 
     fn use_item(&self, host: &mut dyn Host, event: &mut horizon_client::mod_api::UseItemEvent<'_>) -> Flow {
@@ -893,10 +897,14 @@ impl Hooks for Apotheosis {
     }
 
     fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
-        // A spawner modifier on a spawner block, then an infusion on the
-        // apothic enchanting table. The Apotheosis tables open their menus.
+        // A spawner modifier on a spawner block, an infusion on the apothic
+        // enchanting table, then the boss summoner on any block. The
+        // Apotheosis tables open their menus.
         match spawners::on_use_item_on(host, event) {
-            Flow::Continue => enchanting::on_use_item_on(host, event),
+            Flow::Continue => match enchanting::on_use_item_on(host, event) {
+                Flow::Continue => boss_summoner::on_use_item_on(host, event),
+                Flow::Cancel => Flow::Cancel,
+            },
             Flow::Cancel => Flow::Cancel,
         }
     }
