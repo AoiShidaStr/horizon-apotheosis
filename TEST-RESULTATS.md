@@ -43,3 +43,22 @@ localement depuis les jars de la saison 1. Plan suivi : `TEST-EN-JEU.md`.
 - Le butin des monstres (gemmes et équipement affixé) et des coffres.
 - Les affixes à effet en combat (poison, exécution, foudre…), les attributs Apothic en combat (critiques, vol de vie, esquive).
 - Le jeu à plusieurs joueurs.
+
+## Second test en jeu (2026-11-26) : les tables d'Apotheosis avec leurs vrais écrans
+
+Même installation (serveur dédié Docker, client de test en français).
+
+| Fonction | Vérifié |
+| --- | --- |
+| Table de reforge | un clic ouvre l'écran Java (texture `reforge.png`) : objet, matériau de rareté, sceaux de renaissance, trois choix avec leur coût. En survie le premier choix « Rare » a pris 2 éclats de cristal lumineux, 2 sceaux et 1 niveau et rendu une épée rare avec ses affixes ; gratuit en créatif comme en Java |
+| Table de recyclage | écran Java : une épée rare a donné des éclats de cristal lumineux dans les cases de sortie |
+| Table de taille | écran Java : gemme de ballast fêlée + deuxième gemme identique + 1 poussière + 3 ferrailles → gemme ébréchée (coûts Java) |
+| Gemmes | 107 objets (une gemme × chaque pureté autorisée) dans l'onglet créatif, nommés dans la langue du joueur |
+| Infobulles des tables | dans la langue du joueur seulement, avec le nom réel des matériaux |
+
+Défauts trouvés et corrigés pendant ce test : le serveur refusait tout le contenu du mod (`minecraft:custom_data` n'est pas accepté dans les composants par défaut d'une déclaration d'objet) ; infobulles bilingues ; nom `block.apotheosis.gem_…` dans le chat.
+
+Différences avec le Java qui restent (limites de Horizon a85af177, API 415) :
+- les trois choix de reforge montrent la rareté et le coût, pas l'aperçu de l'objet ; le recyclage n'a pas d'aperçu grisé (l'infobulle donne les fourchettes) ;
+- les objets posés restent dans la table quand on ferme l'écran, comme dans un four ;
+- le sertissage, les sceaux d'emplacement, de retrait et de dé-nommage se font encore au clic droit et non dans la table de forgeron : le crochet de forge de Horizon ne transmet pas le contenu des cases et n'a pas d'événement à la prise du résultat.
