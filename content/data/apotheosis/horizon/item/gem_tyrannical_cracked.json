@@ -3,10 +3,6 @@
   "max_stack_size": 64,
   "rarity": "common",
   "components": {
-    "minecraft:custom_data": {
-      "apotheosis:gem": "apotheosis:core/tyrannical",
-      "apotheosis:gem_purity": 0
-    },
     "minecraft:item_name": {
       "translate": "item.apotheosis.gem.apotheosis:core/tyrannical",
       "fallback": "Tyrannical Gem",

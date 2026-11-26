@@ -3,10 +3,6 @@
   "max_stack_size": 64,
   "rarity": "rare",
   "components": {
-    "minecraft:custom_data": {
-      "apotheosis:gem": "apotheosis:overworld/royalty",
-      "apotheosis:gem_purity": 3
-    },
     "minecraft:item_name": {
       "translate": "item.apotheosis.gem.apotheosis:overworld/royalty",
       "fallback": "Gem of the Royal Family",

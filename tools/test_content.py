@@ -36,7 +36,7 @@ class ContentTests(unittest.TestCase):
         self.assertEqual(sorted(ids - items), [], "declared but missing from the tab")
         self.assertEqual(sorted(items - ids), [], "in the tab but not declared")
 
-    def test_every_gem_item_carries_its_identity_and_is_a_gem(self):
+    def test_every_gem_item_is_named_and_is_a_gem(self):
         folder = os.path.join(DATA, "item")
         names = sorted(name[:-5] for name in os.listdir(folder)
                        if re.fullmatch(r"gem_[a-z_]+_(%s)\.json" % "|".join(PURITIES), name))
@@ -48,12 +48,11 @@ class ContentTests(unittest.TestCase):
         for name in names:
             with open(os.path.join(folder, name + ".json"), encoding="utf-8") as handle:
                 components = json.load(handle)["components"]
-            custom = components["minecraft:custom_data"]
+            # Type and purity come from the item id (the native code parses it).
             purity = name.rsplit("_", 1)[1]
-            self.assertEqual(custom["apotheosis:gem_purity"], PURITIES.index(purity), name)
-            self.assertTrue(custom["apotheosis:gem"].endswith("/" + name[4:-len(purity) - 1]))
             label = components["minecraft:item_name"]
-            self.assertEqual(label["translate"], "item.apotheosis.gem." + custom["apotheosis:gem"])
+            self.assertTrue(label["translate"].startswith("item.apotheosis.gem."), name)
+            self.assertTrue(label["translate"].endswith("/" + name[4:-len(purity) - 1]), name)
             self.assertIs(label["italic"], False)
             self.assertIn("apotheosis:" + name, tag)
             self.assertTrue(os.path.exists(os.path.join(
@@ -67,6 +66,15 @@ class ContentTests(unittest.TestCase):
                 self.assertLess(PURITIES.index(before.rsplit("_", 1)[1]),
                                 PURITIES.index(after.rsplit("_", 1)[1]))
 
+
+    def test_declarations_only_use_loadable_components(self):
+        # Horizon refuses a whole mod's content when a declaration's default components contain
+        # minecraft:custom_data ("not a known component type"), seen on a dedicated server.
+        folder = os.path.join(ROOT, "content", "data", "apotheosis", "horizon", "item")
+        for file in os.listdir(folder):
+            with open(os.path.join(folder, file), encoding="utf-8") as f:
+                components = json.load(f).get("components", {})
+            self.assertNotIn("minecraft:custom_data", components, file)
 
 if __name__ == "__main__":
     unittest.main()

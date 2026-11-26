@@ -356,10 +356,6 @@ def gem_items(models: list[dict]) -> list[str]:
                 "max_stack_size": 64,
                 "rarity": PURITY_RARITIES[index],
                 "components": {
-                    "minecraft:custom_data": {
-                        "apotheosis:gem": info["gem_id"],
-                        "apotheosis:gem_purity": index,
-                    },
                     "minecraft:item_name": {
                         "translate": f"item.apotheosis.gem.{info['gem_id']}",
                         "fallback": info["name"],

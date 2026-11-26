@@ -3,10 +3,6 @@
   "max_stack_size": 64,
   "rarity": "rare",
   "components": {
-    "minecraft:custom_data": {
-      "apotheosis:gem": "apotheosis:the_nether/molten_breach",
-      "apotheosis:gem_purity": 3
-    },
     "minecraft:item_name": {
       "translate": "item.apotheosis.gem.apotheosis:the_nether/molten_breach",
       "fallback": "Gem of the Molten Breach",

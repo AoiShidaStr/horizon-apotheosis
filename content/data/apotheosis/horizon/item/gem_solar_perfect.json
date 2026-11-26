@@ -3,10 +3,6 @@
   "max_stack_size": 64,
   "rarity": "epic",
   "components": {
-    "minecraft:custom_data": {
-      "apotheosis:gem": "apotheosis:core/solar",
-      "apotheosis:gem_purity": 5
-    },
     "minecraft:item_name": {
       "translate": "item.apotheosis.gem.apotheosis:core/solar",
       "fallback": "Solar Gem",

@@ -3,10 +3,6 @@
   "max_stack_size": 64,
   "rarity": "uncommon",
   "components": {
-    "minecraft:custom_data": {
-      "apotheosis:gem": "apotheosis:the_nether/blood_lord",
-      "apotheosis:gem_purity": 2
-    },
     "minecraft:item_name": {
       "translate": "item.apotheosis.gem.apotheosis:the_nether/blood_lord",
       "fallback": "Gem of the Ravenous Blood Lord",
