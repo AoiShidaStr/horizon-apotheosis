@@ -808,6 +808,17 @@ pub fn tooltip(event: &mut TooltipEvent<'_>) {
             Text::translate_with_fallback(seal.desc_key(), seal.desc(), &[]).with_color(0x80_8080),
             crate::tip_colour(0x80_8080),
         ));
+        // Java uses these sigils from a smithing table; this port's right-click
+        // gesture needs saying, as the gem hint does.
+        event.lines.push((
+            Text::translate_with_fallback(
+                "apotheosis.seal.hint",
+                "Right-click with this sigil in hand and the affixed piece in your off hand.",
+                &[],
+            )
+            .with_color(0x55_55FF),
+            crate::tip_colour(0x55_55FF),
+        ));
         return;
     }
     if gems::of_stack(event.stack).is_some() {
@@ -899,6 +910,10 @@ pub enum Seal {
     Enhancement,
     /// Removes the affix name this port wrote, never a player's own name.
     Unnaming,
+    /// Overcharges one affix and resets another to level 0.
+    Malice,
+    /// Raises every level-dependent affix to at least level 1.5.
+    Supremacy,
 }
 
 impl Seal {
@@ -909,6 +924,8 @@ impl Seal {
             Seal::Rebirth => "item.apotheosis.sigil_of_rebirth.desc",
             Seal::Enhancement => "item.apotheosis.sigil_of_enhancement.desc",
             Seal::Unnaming => "item.apotheosis.sigil_of_unnaming.desc",
+            Seal::Malice => "item.apotheosis.sigil_of_malice.desc",
+            Seal::Supremacy => "item.apotheosis.sigil_of_supremacy.desc",
         }
     }
 
@@ -919,6 +936,8 @@ impl Seal {
             Seal::Rebirth => "Rerolls an affixed item's rarity and affixes",
             Seal::Enhancement => "Raises an affixed item's rarity by one step",
             Seal::Unnaming => "Removes the affix name from an item",
+            Seal::Malice => "Overcharges one affix and resets another",
+            Seal::Supremacy => "Overcharges every affix on an affixed item",
         }
     }
 }
@@ -931,6 +950,8 @@ pub fn seal(item: &str) -> Option<Seal> {
         "apotheosis:sigil_of_rebirth" => Some(Seal::Rebirth),
         "apotheosis:sigil_of_enhancement" => Some(Seal::Enhancement),
         "apotheosis:sigil_of_unnaming" => Some(Seal::Unnaming),
+        "apotheosis:sigil_of_malice" => Some(Seal::Malice),
+        "apotheosis:sigil_of_supremacy" => Some(Seal::Supremacy),
         _ => None,
     }
 }
@@ -966,6 +987,8 @@ pub enum Action {
     Rebirth,
     Enhance,
     Unnaming,
+    Malice,
+    Supremacy,
 }
 
 /// What a delayed action was validated on: the stacks' item ids and counts,
@@ -1217,6 +1240,8 @@ pub fn inventory_tick(host: &mut dyn Host, event: &mut InventoryTickEvent) {
                 Action::Rebirth => rebirth(host, pending.slot, &main, &off, player.uuid),
                 Action::Enhance => enhance(host, pending.slot, &main, &off, player.uuid),
                 Action::Unnaming => unname(host, pending.slot, &main, &off, player.uuid),
+                Action::Malice => malice(host, pending.slot, &main, &off, player.uuid),
+                Action::Supremacy => supremacy(host, pending.slot, &main, &off, player.uuid),
                 _ => {}
             }
         }
@@ -1246,6 +1271,31 @@ pub fn use_seal(host: &mut dyn Host, event: &UseItemEvent<'_>, kind: Seal) -> Fl
         ));
         return Flow::Cancel;
     }
+    // Java's Malice recipe only matches a piece with at least two
+    // level-dependent affixes, not all of them already at the maximum.
+    if kind == Seal::Malice {
+        let levels = malice_levels(&off);
+        if !affixes::can_apply_malice(&levels) {
+            say(
+                host,
+                player.uuid,
+                if levels.len() < 2 {
+                    Text::translate_with_fallback(
+                        "apotheosis.malice.no_affixes",
+                        "Malice needs an affixed piece with at least two level-dependent affixes.",
+                        &[],
+                    )
+                } else {
+                    Text::translate_with_fallback(
+                        "apotheosis.malice.maxed",
+                        "Every affix on that piece is already at 2.0.",
+                        &[],
+                    )
+                },
+            );
+            return Flow::Cancel;
+        }
+    }
     set_pending(
         player.uuid,
         Pending::new(
@@ -1255,6 +1305,8 @@ pub fn use_seal(host: &mut dyn Host, event: &UseItemEvent<'_>, kind: Seal) -> Fl
                 Seal::Rebirth => Action::Rebirth,
                 Seal::Enhancement => Action::Enhance,
                 Seal::Unnaming => Action::Unnaming,
+                Seal::Malice => Action::Malice,
+                Seal::Supremacy => Action::Supremacy,
             },
             i32::from(player.selected_slot),
             &main,
@@ -1451,6 +1503,121 @@ fn unname(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemSta
     say(host, player, Text::translate_with_fallback(
         "apotheosis.unnaming.done",
         "The affix name was removed.",
+        &[],
+    ));
+}
+
+/// The levels of a piece's level-dependent affixes, in modifier order: what a
+/// Sigil of Malice acts on. Empty for a piece this port did not affix.
+fn malice_levels(stack: &ItemStack) -> Vec<f64> {
+    let Some(tier) = tier_of(stack) else {
+        return Vec::new();
+    };
+    let instances = affixes::instances(stack);
+    let targets = affixes::level_targets(&instances, tier);
+    affixes::levels_of(&instances, &targets, tier)
+}
+
+/// An affix's name in Java's prefix key, for a sigil's message.
+fn affix_text(affix: &'static crate::java_affixes::Affix) -> Text {
+    Text::translate_with_fallback(affix.name_key, affix.name, &[])
+}
+
+/// Java's `Components.TOUCHED_BY_MALICE`: the counter of how often a Sigil of
+/// Malice has reshaped the piece.
+fn bump_touched_by_malice(stack: &mut ItemStack) {
+    const KEY: &str = "apotheosis:touched_by_malice";
+    let mut map = match custom(stack) {
+        Tag::Compound(map) => map,
+        _ => Compound::default(),
+    };
+    let count = match map.get(&KEY.into()) {
+        Some(Tag::Int(count)) => *count,
+        _ => 0,
+    };
+    map.insert(KEY.into(), Tag::Int(count.saturating_add(1)));
+    stack
+        .data_mut()
+        .set_other(CUSTOM, Some(Tag::Compound(map)));
+}
+
+/// Java's Sigil of Malice: one affix to the maximum level and, unless the final
+/// 3.3% comes up, another back to level 0. The sigil is only spent when the
+/// effect applied.
+fn malice(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemStack, player: u128) {
+    let Some(tier) = tier_of(gear) else {
+        return;
+    };
+    let mut instances = affixes::instances(gear);
+    let targets = affixes::level_targets(&instances, tier);
+    let levels = affixes::levels_of(&instances, &targets, tier);
+    // The reforge seed doubles as the sigil's stream: drawing one renews the
+    // per-player seed Java renews after every reforge.
+    let mut rng = Rng::new(reforge_seed(player, &gear.item));
+    let Some(outcome) = affixes::malice(&levels, &mut rng) else {
+        say(host, player, Text::translate_with_fallback(
+            "apotheosis.malice.maxed",
+            "Every affix on that piece is already at 2.0.",
+            &[],
+        ));
+        return;
+    };
+    let up = instances[targets[outcome.up]].affix;
+    let reset = outcome
+        .reset
+        .map(|index| instances[targets[index]].affix);
+    instances[targets[outcome.up]].set_level(tier, affixes::MAX_LEVEL);
+    if let Some(index) = outcome.reset {
+        instances[targets[index]].set_level(tier, 0.0);
+    }
+    let mut piece = gear.clone();
+    affixes::rewrite(&mut piece, tier, &instances);
+    bump_touched_by_malice(&mut piece);
+    write_slot(host, OFFHAND, piece);
+    consume_seal(host, slot, seal_stack);
+    let message = match reset {
+        Some(reset) => Text::translate_with_fallback(
+            "apotheosis.malice.done",
+            "Malice: %s overcharged, %s reset.",
+            &[affix_text(up), affix_text(reset)],
+        ),
+        None => Text::translate_with_fallback(
+            "apotheosis.malice.final",
+            "Malice: %s overcharged; nothing else was reset.",
+            &[affix_text(up)],
+        ),
+    };
+    say(host, player, message);
+}
+
+/// Java's Sigil of Supremacy: every level-dependent affix rises to at least 1.5,
+/// and one already above it keeps its level. The sigil is spent only when the
+/// piece has an affix to raise.
+fn supremacy(host: &mut dyn Host, slot: i32, seal_stack: &ItemStack, gear: &ItemStack, player: u128) {
+    let Some(tier) = tier_of(gear) else {
+        return;
+    };
+    let mut instances = affixes::instances(gear);
+    let targets = affixes::level_targets(&instances, tier);
+    let levels = affixes::levels_of(&instances, &targets, tier);
+    let Some(raised) = affixes::supremacy(&levels) else {
+        say(host, player, Text::translate_with_fallback(
+            "apotheosis.supremacy.no_affixes",
+            "Supremacy needs an affixed piece.",
+            &[],
+        ));
+        return;
+    };
+    for (index, level) in targets.iter().zip(raised) {
+        instances[*index].set_level(tier, level);
+    }
+    let mut piece = gear.clone();
+    affixes::rewrite(&mut piece, tier, &instances);
+    write_slot(host, OFFHAND, piece);
+    consume_seal(host, slot, seal_stack);
+    say(host, player, Text::translate_with_fallback(
+        "apotheosis.supremacy.done",
+        "Supremacy: every affix is at least 1.5.",
         &[],
     ));
 }
@@ -1847,7 +2014,7 @@ mod tests {
         else {
             panic!("no modifiers");
         };
-        for entry in modifiers.iter().filter(|entry| crate::is_affix_modifier(entry)) {
+        for entry in modifiers.iter().filter(|entry| affixes::is_affix_modifier(entry)) {
             assert_eq!(entry.get("slot"), Some(&Tag::String("mainhand".into())));
         }
         let chest = affixed("minecraft:diamond_chestplate", Tier::Mythic, 4);
@@ -1857,7 +2024,7 @@ mod tests {
         else {
             panic!("no modifiers");
         };
-        for entry in modifiers.iter().filter(|entry| crate::is_affix_modifier(entry)) {
+        for entry in modifiers.iter().filter(|entry| affixes::is_affix_modifier(entry)) {
             assert_eq!(entry.get("slot"), Some(&Tag::String("chest".into())));
         }
     }
@@ -2059,7 +2226,7 @@ mod tests {
     }
 
     #[test]
-    fn the_four_sigils_and_three_tables_are_recognised() {
+    fn the_six_sigils_and_four_tables_are_recognised() {
         assert_eq!(seal("apotheosis:sigil_of_socketing"), Some(Seal::Socketing));
         assert_eq!(seal("apotheosis:sigil_of_withdrawal"), Some(Seal::Withdrawal));
         assert_eq!(seal("apotheosis:sigil_of_rebirth"), Some(Seal::Rebirth));
@@ -2067,6 +2234,9 @@ mod tests {
             seal("apotheosis:sigil_of_enhancement"),
             Some(Seal::Enhancement)
         );
+        assert_eq!(seal("apotheosis:sigil_of_unnaming"), Some(Seal::Unnaming));
+        assert_eq!(seal("apotheosis:sigil_of_malice"), Some(Seal::Malice));
+        assert_eq!(seal("apotheosis:sigil_of_supremacy"), Some(Seal::Supremacy));
         assert_eq!(seal("apotheosis:gem_opal"), None);
 
         assert_eq!(table("apotheosis:reforging_table"), Some(Table::Reforging));
@@ -2240,6 +2410,91 @@ mod tests {
         assert!(
             !pending.accepts(0, &cut, None),
             "a gem whose purity changed was salvaged"
+        );
+    }
+
+    fn sigil_action(
+        action: fn(&mut dyn Host, i32, &ItemStack, &ItemStack, u128),
+        gear: &ItemStack,
+        sigil: &ItemStack,
+    ) -> Fake {
+        let mut host = Fake::default();
+        host.slots.insert(1, sigil.clone());
+        host.slots.insert(OFFHAND, gear.clone());
+        action(&mut host, 1, sigil, gear, PLAYER);
+        host
+    }
+
+    #[test]
+    fn malice_overcharges_an_affix_and_consumes_the_sigil() {
+        let gear = affixed("minecraft:diamond_sword", Tier::Mythic, 5);
+        let sigil = ItemStack::new("apotheosis:sigil_of_malice", 2);
+        let host = sigil_action(malice, &gear, &sigil);
+
+        assert_eq!(host.slots.get(&1).unwrap().count, 1, "the sigil was not spent");
+        let piece = host.slots.get(&OFFHAND).expect("the piece vanished");
+        let after = affixes::instances(piece);
+        assert!(
+            after
+                .iter()
+                .any(|instance| instance.level == Some(affixes::MAX_LEVEL)),
+            "no affix was overcharged"
+        );
+        // Java's counter of Malice uses lives in the piece.
+        let Some(Tag::Compound(custom)) = piece
+            .data()
+            .and_then(|data| data.other("minecraft:custom_data"))
+        else {
+            panic!("no custom data");
+        };
+        assert!(custom.contains_key(&"apotheosis:touched_by_malice".into()));
+    }
+
+    #[test]
+    fn a_sigil_of_malice_is_not_spent_when_every_affix_is_at_the_maximum() {
+        let mut gear = affixed("minecraft:diamond_sword", Tier::Mythic, 6);
+        let tier = tier_of(&gear).expect("a tier");
+        let mut instances = affixes::instances(&gear);
+        for instance in &mut instances {
+            instance.set_level(tier, affixes::MAX_LEVEL);
+        }
+        affixes::rewrite(&mut gear, tier, &instances);
+        let sigil = ItemStack::new("apotheosis:sigil_of_malice", 2);
+        let host = sigil_action(malice, &gear, &sigil);
+
+        assert_eq!(host.slots.get(&1).unwrap().count, 2, "the sigil was spent");
+        assert_eq!(*host.slots.get(&OFFHAND).unwrap(), gear, "the piece changed");
+        assert!(!host.told.is_empty(), "the player was not told why");
+    }
+
+    #[test]
+    fn supremacy_raises_every_affix_and_keeps_a_higher_one() {
+        let mut gear = affixed("minecraft:diamond_chestplate", Tier::Mythic, 8);
+        let tier = tier_of(&gear).expect("a tier");
+        let mut instances = affixes::instances(&gear);
+        let higher = instances
+            .iter()
+            .position(|instance| instance.level_dependent(tier))
+            .expect("a level-dependent affix");
+        instances[higher].set_level(tier, 1.9);
+        affixes::rewrite(&mut gear, tier, &instances);
+
+        let sigil = ItemStack::new("apotheosis:sigil_of_supremacy", 2);
+        let host = sigil_action(supremacy, &gear, &sigil);
+        assert_eq!(host.slots.get(&1).unwrap().count, 1, "the sigil was not spent");
+        let piece = host.slots.get(&OFFHAND).expect("the piece vanished");
+        let after = affixes::instances(piece);
+        for instance in after.iter().filter(|instance| instance.level_dependent(tier)) {
+            assert!(
+                instance.level.unwrap() >= affixes::SUPREMACY_LEVEL - 1e-9,
+                "{} stayed below 1.5",
+                instance.affix.id
+            );
+        }
+        assert_eq!(
+            after[higher].level,
+            Some(1.9),
+            "an affix above 1.5 was lowered"
         );
     }
 

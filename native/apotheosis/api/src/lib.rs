@@ -223,6 +223,49 @@ const BOSSES: [&str; 4] = [
     "minecraft:elder_guardian",
 ];
 
+/// What a boss's bonus loot table rolls: one of these, never more.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BossDrop {
+    Gem,
+    Malice,
+    Nothing,
+}
+
+/// Java's two invader bonus tables (`entity/boss_drops`, `entity/rare_boss_drops`)
+/// as weights for a gem, a Sigil of Malice and nothing. A happy entry's quality
+/// is 1, so the killer's luck adds its floor to the weight, as Java's loot
+/// entries do. The rare table's music disc entry is folded into "nothing".
+fn boss_drop_weights(rare: bool, luck: f32) -> [u64; 3] {
+    let (gem, malice, nothing) = if rare {
+        (45u32, 30u32, 25u32)
+    } else {
+        (30u32, 25u32, 45u32)
+    };
+    let weighed = |weight: u32| {
+        (f64::from(weight) + f64::from(luck.max(0.0)))
+            .floor()
+            .max(0.0) as u64
+    };
+    [weighed(gem), weighed(malice), u64::from(nothing)]
+}
+
+/// One roll of a boss's bonus table, with `luck` the killer's.
+fn boss_drop(rare: bool, luck: f32, rng: &mut Rng) -> BossDrop {
+    let weights = boss_drop_weights(rare, luck);
+    let total: u64 = weights.iter().sum();
+    let mut roll = rng.below(total.max(1));
+    for (drop, weight) in [BossDrop::Gem, BossDrop::Malice, BossDrop::Nothing]
+        .into_iter()
+        .zip(weights)
+    {
+        if roll < weight {
+            return drop;
+        }
+        roll -= weight;
+    }
+    BossDrop::Nothing
+}
+
 /// The gem chance for a kill, in 1000: Java's 4% for a real player kill and
 /// 0.5% otherwise, but never for a passive entity.  Horizon API 415 has no
 /// fake-player distinction, so every player kill is the 4% branch.
@@ -587,11 +630,23 @@ impl Hooks for Apotheosis {
         let n = DROPS.fetch_add(1, Ordering::Relaxed);
         let mut rng = Rng::new(seed_of(&event.context, n));
 
-        // A gem of the level's dimension, at the world tier's purity above its
-        // Java floor: a boss may reach a step an ordinary drop cannot.
+        // Java's invader bonus table: one roll of a gem, a Sigil of Malice or
+        // nothing, never the guaranteed gem this port used to give. A rare
+        // invader (and one of the game's own bosses) uses the rare table.
         if boss {
-            let (gem, purity) = gems::roll(event.context.dimension, world, true, &mut rng);
-            event.drops.push(gems::stack(gem, purity));
+            let rare = BOSSES.contains(&kind) || affix_effects::is_rare_boss(host, id);
+            match boss_drop(rare, luck, &mut rng) {
+                // A gem of the level's dimension, at the world tier's purity
+                // above its Java floor: a boss may reach a step an ordinary
+                // drop cannot.
+                BossDrop::Gem => {
+                    let (gem, purity) =
+                        gems::roll(event.context.dimension, world, true, &mut rng);
+                    event.drops.push(gems::stack(gem, purity));
+                }
+                BossDrop::Malice => event.drops.push(one("apotheosis:sigil_of_malice")),
+                BossDrop::Nothing => {}
+            }
         }
         // The gear this mob dropped, upgraded in place: a zombie's sword, a
         // skeleton's bow.
@@ -1249,6 +1304,33 @@ mod tests {
         // A boss tagged by the other module still counts even if its id is
         // outside the vanilla monster list.
         assert_eq!(gem_kill_chance("mymod:boss", true, true), Some(40));
+    }
+
+    #[test]
+    fn boss_bonus_loot_is_java_single_draw_and_luck_only_weighs_gem_and_malice() {
+        assert_eq!(boss_drop_weights(false, 0.0), [30, 25, 45]);
+        assert_eq!(boss_drop_weights(true, 0.0), [45, 30, 25]);
+        // Each entry's quality is 1: the killer's luck adds its floor to the
+        // gem and Malice weights, never to "nothing".
+        assert_eq!(boss_drop_weights(false, 0.5), [30, 25, 45]);
+        assert_eq!(boss_drop_weights(false, 1.0), [31, 26, 45]);
+        assert_eq!(boss_drop_weights(true, 1.0), [46, 31, 25]);
+
+        let mut rng = Rng::new(0xC0FFEE);
+        let mut counts = [0u32; 3];
+        for _ in 0..4_000 {
+            match boss_drop(false, 0.0, &mut rng) {
+                BossDrop::Gem => counts[0] += 1,
+                BossDrop::Malice => counts[1] += 1,
+                BossDrop::Nothing => counts[2] += 1,
+            }
+        }
+        for (count, expected) in counts.iter().zip([1_200.0, 1_000.0, 1_800.0]) {
+            assert!(
+                (f64::from(*count) - expected).abs() < 180.0,
+                "weights drifted: {counts:?}"
+            );
+        }
     }
 
     /// `seed_of` over a bare context, for the test above.

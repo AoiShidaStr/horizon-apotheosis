@@ -536,10 +536,12 @@ fn custom_data(stack: &ItemStack) -> Compound {
     }
 }
 
-/// Drops the effect rolls a previous affix pass wrote, and the enchantment
-/// levels that pass added.
+/// Drops the effect rolls and lore lines a previous affix pass wrote, and the
+/// enchantment levels that pass added. A level rewrite (`affixes::rewrite`)
+/// keeps the effect lines, so a reroll has to take them back here.
 fn clear_effects(stack: &mut ItemStack) {
     remove_effect_enchantments(stack);
+    remove_effect_lore(stack);
     let mut custom = custom_data(stack);
     if custom.remove(&EFFECTS_KEY.into()).is_some() {
         stack
@@ -603,6 +605,32 @@ fn add_enchantment(stack: &mut ItemStack, id: &str, levels: f64) {
     stack
         .data_mut()
         .set_other("minecraft:custom_data", Some(Tag::Compound(custom)));
+}
+
+/// Removes this module's effect lore lines, leaving the stat lines and any
+/// foreign line in place.
+fn remove_effect_lore(stack: &mut ItemStack) {
+    let mut lore = match stack
+        .data()
+        .and_then(|data| data.other("minecraft:lore"))
+    {
+        Some(Tag::List(lines)) => lines.clone(),
+        _ => return,
+    };
+    let before = lore.len();
+    lore.retain(|line| {
+        !matches!(
+            line.get("translate"),
+            Some(Tag::String(key))
+                if key.to_string_lossy().starts_with("apotheosis.affix.effect.")
+        )
+    });
+    if lore.len() != before {
+        stack.data_mut().set_other(
+            "minecraft:lore",
+            (!lore.is_empty()).then_some(Tag::List(lore)),
+        );
+    }
 }
 
 /// Takes back the enchantment levels the last effect affix added, leaving the
@@ -1309,6 +1337,11 @@ pub(crate) fn become_invader(
     boss_nbt.insert("Health".into(), Tag::Float((health as f32).to_bits()));
     let _ = host.entity_merge_nbt(reference, boss_nbt);
     let _ = host.entity_add_tag(reference, BOSS_TAG);
+    // Java's rare invader stat blocks start at the rare rarity; their bonus
+    // loot uses the rare table (`entity/rare_boss_drops`).
+    if tier >= Tier::Rare {
+        let _ = host.entity_add_tag(reference, RARE_BOSS_TAG);
+    }
 
     // Gear: a high-rarity affixed piece in every empty equipment slot.
     if let Some(living) = host.living(reference) {
@@ -1354,12 +1387,23 @@ fn boss_gear(kind: &str, slot: EquipmentSlot, rng: &mut Rng) -> &'static str {
     }
 }
 
+/// The tag a rare invader carries: its awaited rarity is rare or above.
+pub const RARE_BOSS_TAG: &str = "apotheosis:rare_boss";
+
 /// Whether a mob carries the boss tag, read from the entity the loot hook
 /// names.
 pub fn is_boss(host: &mut dyn Host, entity: u32) -> bool {
     host.entity(entity)
         .and_then(|reference| host.entity_tags(reference))
         .is_some_and(|tags| tags.iter().any(|tag| tag == BOSS_TAG))
+}
+
+/// Whether an invader was rolled at the rare rarity or above, so its death uses
+/// Java's rare bonus table.
+pub fn is_rare_boss(host: &mut dyn Host, entity: u32) -> bool {
+    host.entity(entity)
+        .and_then(|reference| host.entity_tags(reference))
+        .is_some_and(|tags| tags.iter().any(|tag| tag == RARE_BOSS_TAG))
 }
 
 #[cfg(test)]

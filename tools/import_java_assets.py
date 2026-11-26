@@ -111,8 +111,10 @@ APOTHEOSIS_ITEMS = {
     "gold_upgrade_smithing_template",
     "diamond_upgrade_smithing_template",
     "sigil_of_enhancement",
+    "sigil_of_malice",
     "sigil_of_rebirth",
     "sigil_of_socketing",
+    "sigil_of_supremacy",
     "sigil_of_unnaming",
     "sigil_of_withdrawal",
 }

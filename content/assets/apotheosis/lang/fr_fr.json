@@ -682,5 +682,16 @@
   "info.apothic_enchanting.allows_treasure": " - Autorise les enchantements de trésor",
   "info.apothic_enchanting.provides_stability": " - Apporte la stabilité quantique",
   "item.apotheosis.boss_summoner": "Invocateur de Boss Apothéotique",
-  "item.apotheosis.boss_summoner.desc": "Invoque un Invader Apothéotique sur le bloc cliqué"
+  "item.apotheosis.boss_summoner.desc": "Invoque un Invader Apothéotique sur le bloc cliqué",
+  "item.apotheosis.sigil_of_malice": "Sceau de malice",
+  "item.apotheosis.sigil_of_malice.desc": "Suralimente un affixe et en remet un autre à zéro",
+  "item.apotheosis.sigil_of_supremacy": "Sceau de suprématie",
+  "item.apotheosis.sigil_of_supremacy.desc": "Suralimente tous les affixes d'un objet affixé",
+  "apotheosis.seal.hint": "Clic droit avec ce sceau en main et l'objet affixé en main secondaire.",
+  "apotheosis.malice.no_affixes": "Malice demande un objet affixé portant au moins deux affixes dépendants du niveau.",
+  "apotheosis.malice.maxed": "Tous les affixes de cet objet sont déjà à 2,0.",
+  "apotheosis.malice.done": "Malice : %s suralimenté, %s remis à zéro.",
+  "apotheosis.malice.final": "Malice : %s suralimenté ; rien d'autre n'a été remis à zéro.",
+  "apotheosis.supremacy.no_affixes": "Suprématie demande un objet affixé.",
+  "apotheosis.supremacy.done": "Suprématie : tous les affixes sont à 1,5 au moins."
 }

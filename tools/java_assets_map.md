@@ -7,11 +7,11 @@ Source inspectée : `java-ref`
 ## Résumé
 
 - blocs avec blockstate Java : 33
-- objets avec modèle Java : 53
-- modèles copiés : 120
-- textures copiées : 133
-- clés lang en_us : 1863
-- clés lang fr_fr : 1758
+- objets avec modèle Java : 55
+- modèles copiés : 122
+- textures copiées : 135
+- clés lang en_us : 1870
+- clés lang fr_fr : 1769
 
 Les ids sans équivalent Java gardent nos définitions et nos textures originales de `content/`. Les gemmes viennent de Java : une seule gemme (`apotheosis:gem`) dont le modèle choisit la texture du type qu'elle porte, ci-dessous en liste à part.
 
@@ -208,8 +208,10 @@ Les ids sans équivalent Java gardent nos définitions et nos textures originale
 | `sightshelf` | `apothic_enchanting:sightshelf` | `items/sightshelf.json` → `apothic_enchanting:item/sightshelf` |
 | `sightshelf_t2` | `apothic_enchanting:sightshelf_t2` | `items/sightshelf_t2.json` → `apothic_enchanting:item/sightshelf_t2` |
 | `sigil_of_enhancement` | `apotheosis:sigil_of_enhancement` | `items/sigil_of_enhancement.json` → `apotheosis:item/sigil_of_enhancement` |
+| `sigil_of_malice` | `apotheosis:sigil_of_malice` | `items/sigil_of_malice.json` → `apotheosis:item/sigil_of_malice` |
 | `sigil_of_rebirth` | `apotheosis:sigil_of_rebirth` | `items/sigil_of_rebirth.json` → `apotheosis:item/sigil_of_rebirth` |
 | `sigil_of_socketing` | `apotheosis:sigil_of_socketing` | `items/sigil_of_socketing.json` → `apotheosis:item/sigil_of_socketing` |
+| `sigil_of_supremacy` | `apotheosis:sigil_of_supremacy` | `items/sigil_of_supremacy.json` → `apotheosis:item/sigil_of_supremacy` |
 | `sigil_of_unnaming` | `apotheosis:sigil_of_unnaming` | `items/sigil_of_unnaming.json` → `apotheosis:item/sigil_of_unnaming` |
 | `sigil_of_withdrawal` | `apotheosis:sigil_of_withdrawal` | `items/sigil_of_withdrawal.json` → `apotheosis:item/sigil_of_withdrawal` |
 | `simple_reforging_table` | `apotheosis:simple_reforging_table` | `items/simple_reforging_table.json` → `apotheosis:item/simple_reforging_table` |

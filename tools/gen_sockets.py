@@ -138,6 +138,34 @@ MESSAGES = {
         "Hold an affixed piece in your off hand to use a sigil on it.",
         "Tenez un objet affixé en main secondaire pour y utiliser un sceau.",
     ),
+    "apotheosis.seal.hint": (
+        "Right-click with this sigil in hand and the affixed piece in your off hand.",
+        "Clic droit avec ce sceau en main et l'objet affixé en main secondaire.",
+    ),
+    "apotheosis.malice.no_affixes": (
+        "Malice needs an affixed piece with at least two level-dependent affixes.",
+        "Malice demande un objet affixé portant au moins deux affixes dépendants du niveau.",
+    ),
+    "apotheosis.malice.maxed": (
+        "Every affix on that piece is already at 2.0.",
+        "Tous les affixes de cet objet sont déjà à 2,0.",
+    ),
+    "apotheosis.malice.done": (
+        "Malice: %s overcharged, %s reset.",
+        "Malice : %s suralimenté, %s remis à zéro.",
+    ),
+    "apotheosis.malice.final": (
+        "Malice: %s overcharged; nothing else was reset.",
+        "Malice : %s suralimenté ; rien d'autre n'a été remis à zéro.",
+    ),
+    "apotheosis.supremacy.no_affixes": (
+        "Supremacy needs an affixed piece.",
+        "Suprématie demande un objet affixé.",
+    ),
+    "apotheosis.supremacy.done": (
+        "Supremacy: every affix is at least 1.5.",
+        "Suprématie : tous les affixes sont à 1,5 au moins.",
+    ),
     "apotheosis.enhance.done": ("Enhanced: %s.", "Amélioré : %s."),
     "apotheosis.enhance.max": (
         "That piece is already ancient.",
@@ -187,6 +215,15 @@ SEALS = [
     ("sigil_of_unnaming", "rare", "Sigil of Unnaming",
      "Sceau d'effacement", "Removes the affix name from an item",
      "Retire le nom d'affixe d'un objet", 0x627A8B, "cross"),
+    # Overcharge affixes: no recipe, as in Java, where the Malice sigil comes
+    # from invader bonus loot and Supremacy from the endless gateway (not yet
+    # ported), so creative mode or a command is its only source.
+    ("sigil_of_malice", "rare", "Sigil of Malice",
+     "Sceau de malice", "Overcharges one affix and resets another",
+     "Suralimente un affixe et en remet un autre à zéro", 0x9B1C1C, "flame"),
+    ("sigil_of_supremacy", "epic", "Sigil of Supremacy",
+     "Sceau de suprématie", "Overcharges every affix on an affixed item",
+     "Suralimente tous les affixes d'un objet affixé", 0xC9A227, "crown"),
 ]
 
 # Java's boss summoner: no recipe (it comes from creative or a command), a
@@ -376,6 +413,24 @@ SEAL_GLYPHS = {
         "x..x..x",
         ".x...x.",
         "..xxx..",
+        ".......",
+    ],
+    "flame": [
+        "...x...",
+        "..xxx..",
+        ".xxxxx.",
+        ".xx.xx.",
+        ".xxxxx.",
+        "..xxx..",
+        "...x...",
+    ],
+    "crown": [
+        "x..x..x",
+        "xx.x.xx",
+        "xxxxxxx",
+        ".xxxxx.",
+        ".xxxxx.",
+        ".......",
         ".......",
     ],
 }
@@ -840,8 +895,17 @@ def main():
         })
         png(os.path.join(CONTENT, "assets", ID, "textures", "item", seal + ".png"),
             TEXTURES[seal]())
-        write_json(os.path.join(CONTENT, "data", ID, "recipe", seal + ".json"),
-                   SEAL_RECIPES[seal])
+        # Java has no recipe for Malice or Supremacy: Malice comes from invader
+        # bonus loot, Supremacy from the endless gateway (not ported yet).
+        # Creative mode or a command is their only source for now.
+        recipe = SEAL_RECIPES.get(seal)
+        if recipe is None:
+            stale = os.path.join(CONTENT, "data", ID, "recipe", seal + ".json")
+            if os.path.exists(stale):
+                os.remove(stale)
+        else:
+            write_json(os.path.join(CONTENT, "data", ID, "recipe", seal + ".json"),
+                       recipe)
         en["item.%s.%s" % (ID, seal)] = name_en
         fr["item.%s.%s" % (ID, seal)] = name_fr
         en["item.%s.%s.desc" % (ID, seal)] = desc_en
