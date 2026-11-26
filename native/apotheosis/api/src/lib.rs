@@ -33,6 +33,9 @@
 //! resolves what a gem gives a piece at its purity.
 //! `affix_effects` holds the effect affixes (poison, execution, cleaving,
 //! spectral arrows, telepathy...) and the Apothic Invader boss.
+//! `augments` holds step 3 of the world tiers: the augments a monster takes
+//! from the nearest player's tier when it spawns, and the experience and luck
+//! bonuses a player of that tier has.
 /// A tooltip line's colour as Horizon draws it: opaque ABGR (`hud::rgba`), from
 /// the 0xRRGGBB this crate writes. A bare 0xRRGGBB has no alpha and draws
 /// nothing.
@@ -54,6 +57,7 @@ mod tip_colour_tests {
 mod affix_effects;
 mod affixes;
 mod attributes;
+mod augments;
 mod enchanting;
 mod gems;
 mod java_affixes;
@@ -65,8 +69,8 @@ use horizon_client::mod_api::{
     Host, ItemDamagedEvent, ItemStack, LeftClickBlockEvent, LivingEquipmentChangeEvent,
     LivingHealEvent, LivingIncomingDamageEvent, LivingIncomingDamageV2Event, LootDropsEvent,
     MobKilledEvent, MobSpawnedEvent, ModifyDefaultComponentsEvent, NativeCommand, OnEquipEvent,
-    PerformCommandEvent,
-    PlaceBlockEvent, PlayerTickEvent, ProjectileLaunchEvent, RegisterCommandsEvent,
+    PerformCommandEvent, PlaceBlockEvent, PlayerTickEvent, PlayerXpChangeEvent,
+    ProjectileLaunchEvent, RegisterCommandsEvent,
     RightClickBlockEvent, Tag, Text, TickEvent, TooltipEvent, UseItemOnEvent, serde_json,
 };
 
@@ -643,15 +647,16 @@ impl Hooks for Apotheosis {
             return;
         };
         // The killer's tier, or the nearest player's when the mob names none:
-        // it decides the rarity, the gem's purity and the gear. Horizon's Host
-        // reads no attribute, so `minecraft:luck` is 0 here.
+        // it decides the rarity, the gem's purity, the gear and the luck its
+        // player has. A hook reads no `minecraft:luck`, so the tier's own
+        // bonus is the luck the rolls take (see `augments`).
         let world = tiers::tier_for_drop(
             host,
             event.context.player,
             event.context.dimension,
             event.context.origin,
         );
-        let luck = 0.0;
+        let luck = augments::player_luck(world);
         let n = DROPS.fetch_add(1, Ordering::Relaxed);
         let mut rng = Rng::new(seed_of(&event.context, n));
 
@@ -741,7 +746,11 @@ impl Hooks for Apotheosis {
     }
 
     fn mob_spawned(&self, host: &mut dyn Host, event: &mut MobSpawnedEvent<'_>) {
-        affix_effects::mob_spawned(host, event);
+        // One join per spawn: the tier's augments (any monster) and the invader
+        // roll (a natural one) both need the entity id the event omits.
+        let entity = affix_effects::take_spawn(event);
+        augments::monster_spawned(host, event, entity);
+        affix_effects::mob_spawned(host, event, entity);
     }
 
     fn mob_killed(&self, host: &mut dyn Host, event: &mut MobKilledEvent<'_>) {
@@ -767,6 +776,15 @@ impl Hooks for Apotheosis {
         event: &mut ExperienceOrbPickupEvent<'_>,
     ) -> Flow {
         attributes::orb(host, event);
+        Flow::Continue
+    }
+
+    fn player_xp_change(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerXpChangeEvent<'_>,
+    ) -> Flow {
+        augments::xp_change(host, event);
         Flow::Continue
     }
 

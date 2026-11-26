@@ -17,7 +17,8 @@
 //! rarity and gem-purity tables and its invader spawn chances are Java's data
 //! (`rarities/*.json`, `purity_weights/weights.json`,
 //! `data_maps/dimension_type/invader_spawn_rules.json`), rolled by the loot,
-//! gem and invader hooks. The monsters' augments are a later step.
+//! gem and invader hooks. The monsters' augments and the players' experience
+//! and luck bonuses are step 3, in `augments`.
 
 use horizon_client::mod_api::{
     AttachmentCodec, AttachmentError, AttachmentType, Compound, EquipmentSlot, Flow, Holder, Host,
@@ -794,10 +795,13 @@ pub fn player_tick(host: &mut dyn Host) {
     let Some(player) = host.acting_player() else {
         return;
     };
-    if STATE
-        .get(host, Holder::Player(player.uuid))
-        .is_ok_and(|state| state.progress.unlocked.iter().all(|unlocked| *unlocked))
-    {
+    let Ok(state) = STATE.get(host, Holder::Player(player.uuid)) else {
+        return;
+    };
+    // The tier's own bonuses follow the active tier whether or not every tier
+    // is unlocked yet.
+    crate::augments::player_tick(host, player.uuid, state.tier);
+    if state.progress.unlocked.iter().all(|unlocked| *unlocked) {
         return;
     }
     let mut seen = [None; 5];
@@ -861,6 +865,9 @@ pub fn mob_killed(host: &mut dyn Host, event: &MobKilledEvent<'_>) {
 /// here. A death the hook gives no player for (a mob's arrow, the void, a
 /// single-player player's arrow) unlocks nothing.
 pub fn living_death(host: &mut dyn Host, event: &LivingDeathEvent<'_>) -> Flow {
+    if event.entity > 0 {
+        crate::augments::forget(event.entity as u32);
+    }
     if event.kind == PLAYER {
         return Flow::Continue;
     }

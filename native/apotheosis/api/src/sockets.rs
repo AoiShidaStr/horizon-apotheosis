@@ -286,13 +286,15 @@ pub fn purity_of(stack: &ItemStack) -> Purity {
 
 /// Gives a freshly dropped gem its purity from the world `tier`'s table, never
 /// below the floor its Java data sets for it, nor above the ceiling a boss or
-/// an ordinary drop allows.  Horizon's Host reads no attribute, so luck is 0.
+/// an ordinary drop allows.  A hook reads no `minecraft:luck`, so the tier's
+/// own bonus is the luck the roll takes (see `augments`).
 pub fn roll_dropped_purity(stack: &mut ItemStack, tier: WorldTier, rng: &mut Rng, boss: bool) {
     let Some(gem) = gems::of_stack(stack).map(|(gem, _)| gem) else {
         return;
     };
     let ceiling = if boss { Purity::Perfect } else { Purity::Flawless };
-    let purity = crate::tiers::roll_gem_purity(tier, 0.0, gem.min_purity, ceiling, rng);
+    let luck = crate::augments::player_luck(tier);
+    let purity = crate::tiers::roll_gem_purity(tier, luck, gem.min_purity, ceiling, rng);
     set_purity(stack, purity);
 }
 

@@ -1076,8 +1076,9 @@ pub fn entity_join_level(event: &mut EntityJoinLevelEvent<'_>) -> Flow {
     Flow::Continue
 }
 
-/// Takes the fresh join matching `event`, if one is waiting.
-fn take_join(event: &MobSpawnedEvent<'_>) -> Option<u32> {
+/// Takes the fresh join matching `event`, if one is waiting. The spawn's
+/// augments (`augments::monster_spawned`) take it first and hand it on.
+pub fn take_spawn(event: &MobSpawnedEvent<'_>) -> Option<u32> {
     let mut joins = joins().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     joins.retain(|join| join.at.elapsed().as_secs() < 5);
     let mut found = None;
@@ -1136,12 +1137,13 @@ fn on_surface(host: &mut dyn Host, dimension: &str, pos: [f64; 3]) -> bool {
 }
 
 /// `mob_spawned`: a fresh natural mob on the surface, at night in the
-/// overworld, may become an Apothic Invader.
-pub fn mob_spawned(host: &mut dyn Host, event: &MobSpawnedEvent<'_>) {
+/// overworld, may become an Apothic Invader. `entity` is the id `take_spawn`
+/// matched to the event.
+pub fn mob_spawned(host: &mut dyn Host, event: &MobSpawnedEvent<'_>, entity: Option<u32>) {
     if !event.natural {
         return;
     }
-    let Some(entity) = take_join(event) else {
+    let Some(entity) = entity else {
         return;
     };
     let night = (host.day_time().rem_euclid(24_000) >= 13_000)
@@ -1287,7 +1289,8 @@ fn become_boss(
     let Some(reference) = host.entity(entity) else {
         return;
     };
-    let tier = tiers::roll_rarity(world, 0.0, rng);
+    let luck = crate::augments::player_luck(world);
+    let tier = tiers::roll_rarity(world, luck, rng);
     let (name, name_text) = generated_name(rng, kind);
     let health = 20.0 + bonus_health(tier);
     let _ = host.entity_set_attribute_base(reference, "minecraft:max_health", health);
@@ -1310,7 +1313,7 @@ fn become_boss(
         ];
         for slot in slots {
             let mut stack = one(boss_gear(kind, slot, rng));
-            let rarity = tiers::roll_rarity(world, 0.0, rng);
+            let rarity = tiers::roll_rarity(world, luck, rng);
             apply_affixes(&mut stack, rarity, rng);
             let _ = host.living_set_equipment(living, slot, Some(stack));
         }

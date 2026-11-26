@@ -695,7 +695,8 @@ pub fn roll_type(dimension: &str, rng: &mut crate::Rng) -> &'static Gem {
 /// purity drawn from the world `tier`'s table, between the gem's own floor and
 /// the drop's ceiling.  The floor clamps the roll afterwards, as Java's
 /// `Gem.toStack` does, so a Flawless-only End gem can still drop in the End.
-/// Horizon's Host reads no attribute, so the player's luck is 0 here.
+/// A hook reads no `minecraft:luck`, so the tier's own bonus is the luck the
+/// roll takes (see `augments`).
 pub fn roll(
     dimension: &str,
     tier: crate::tiers::WorldTier,
@@ -704,7 +705,8 @@ pub fn roll(
 ) -> (&'static Gem, Purity) {
     let chosen = roll_type(dimension, rng);
     let ceiling = if boss { Purity::Perfect } else { Purity::Flawless };
-    let purity = crate::tiers::roll_gem_purity(tier, 0.0, chosen.min_purity, ceiling, rng);
+    let luck = crate::augments::player_luck(tier);
+    let purity = crate::tiers::roll_gem_purity(tier, luck, chosen.min_purity, ceiling, rng);
     (chosen, purity)
 }
 
