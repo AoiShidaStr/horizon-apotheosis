@@ -51,8 +51,8 @@ class ContentTests(unittest.TestCase):
             # Type and purity come from the item id (the native code parses it).
             purity = name.rsplit("_", 1)[1]
             label = components["minecraft:item_name"]
-            self.assertTrue(label["translate"].startswith("item.apotheosis.gem."), name)
-            self.assertTrue(label["translate"].endswith("/" + name[4:-len(purity) - 1]), name)
+            # Its own name key, worded with its purity in each lang file.
+            self.assertEqual(label["translate"], "item.apotheosis." + name)
             self.assertIs(label["italic"], False)
             self.assertIn("apotheosis:" + name, tag)
             self.assertTrue(os.path.exists(os.path.join(
@@ -66,6 +66,23 @@ class ContentTests(unittest.TestCase):
                 self.assertLess(PURITIES.index(before.rsplit("_", 1)[1]),
                                 PURITIES.index(after.rsplit("_", 1)[1]))
 
+
+    def test_every_gem_item_carries_its_lore(self):
+        # Java's tooltip (gear it fits, then its bonuses) is the item's own lore, so the
+        # declaration carries only the name and the lore: no custom_data, which fails to load.
+        folder = os.path.join(DATA, "item")
+        names = [name for name in os.listdir(folder)
+                 if re.fullmatch(r"gem_[a-z_]+_(%s)\.json" % "|".join(PURITIES), name)]
+        self.assertEqual(len(names), 107)
+        for name in names:
+            with open(os.path.join(folder, name), encoding="utf-8") as handle:
+                components = json.load(handle)["components"]
+            self.assertEqual(sorted(components), ["minecraft:item_name", "minecraft:lore"], name)
+            lore = components["minecraft:lore"]
+            self.assertEqual(lore[0]["translate"], "text.apotheosis.socketable_into", name)
+            self.assertIn({"text": "", "italic": False}, lore, name)
+            for line in lore:
+                self.assertIs(line["italic"], False, name)
 
     def test_declarations_only_use_loadable_components(self):
         # Horizon refuses a whole mod's content when a declaration's default components contain

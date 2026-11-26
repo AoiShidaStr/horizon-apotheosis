@@ -157,10 +157,35 @@ def remove_old_gems():
             os.remove(path)
 
 
+# The gems' French names: the port's own wording, one per Java gem.
+FRENCH_GEM_NAMES = {
+    "ballast": "Gemme de lest",
+    "blood_lord": "Gemme du seigneur de sang",
+    "brawlers": "Gemme du bagarreur",
+    "breach": "Gemme de brèche",
+    "combatant": "Gemme du combattant",
+    "earth": "Gemme tellurique",
+    "endersurge": "Gemme de la déferlante de l'End",
+    "guardian": "Gemme du gardien",
+    "inferno": "Gemme infernale",
+    "lightning": "Gemme de foudre",
+    "lunar": "Gemme lunaire",
+    "mageslayer": "Gemme du tueur de mages",
+    "molten_breach": "Gemme de brèche en fusion",
+    "royalty": "Gemme royale",
+    "samurai": "Gemme du samouraï",
+    "slipstream": "Gemme de sillage",
+    "solar": "Gemme solaire",
+    "splendor": "Gemme de splendeur",
+    "tyrannical": "Gemme tyrannique",
+    "verdant_ruin": "Gemme de ruine verdoyante",
+    "warlord": "Gemme du seigneur de guerre",
+}
+
+
 def french_gem_name(gem_id):
-    """`Gem of the Molten Breach` -> `Gemme de brèche en fusion`, roughly."""
-    word = gem_id.split("/")[-1].replace("_", " ")
-    return "Gemme de %s" % word
+    """`core/solar` -> `Gemme solaire`."""
+    return FRENCH_GEM_NAMES[gem_id.split("/")[-1]]
 
 
 def english_gem_name(gem_id):

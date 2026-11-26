@@ -4,10 +4,172 @@
   "rarity": "epic",
   "components": {
     "minecraft:item_name": {
-      "translate": "item.apotheosis.gem.apotheosis:overworld/verdant_ruin",
-      "fallback": "Gem of the Verdant Ruin",
+      "translate": "item.apotheosis.gem_verdant_ruin_flawless",
+      "fallback": "Flawless Gem of the Verdant Ruin",
       "color": "#55AAFF",
       "italic": false
-    }
+    },
+    "minecraft:lore": [
+      {
+        "translate": "text.apotheosis.socketable_into",
+        "fallback": "Can be set into:",
+        "color": "#0AFF0A",
+        "italic": false
+      },
+      {
+        "translate": "gem_class.weapons",
+        "fallback": "Weapons",
+        "color": "#0AFF0A",
+        "italic": false
+      },
+      {
+        "translate": "gem_class.boots",
+        "fallback": "Boots",
+        "color": "#0AFF0A",
+        "italic": false
+      },
+      {
+        "text": "",
+        "italic": false
+      },
+      {
+        "translate": "text.apotheosis.when_socketed_in",
+        "fallback": "Once set into:",
+        "color": "#FFAA00",
+        "italic": false
+      },
+      {
+        "translate": "text.apotheosis.dot_prefix",
+        "fallback": "• %s",
+        "color": "#FFAA00",
+        "with": [
+          {
+            "translate": "text.apotheosis.gem_bonus",
+            "fallback": "%s: %s",
+            "with": [
+              {
+                "translate": "gem_class.weapons",
+                "fallback": "Weapons"
+              },
+              {
+                "text": "",
+                "extra": [
+                  {
+                    "text": "+25%"
+                  },
+                  {
+                    "text": " "
+                  },
+                  {
+                    "translate": "apotheosis.attribute.armor_shred",
+                    "fallback": "Armor Shred"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "italic": false
+      },
+      {
+        "translate": "text.apotheosis.dot_prefix",
+        "fallback": "• %s",
+        "color": "#FFAA00",
+        "with": [
+          {
+            "translate": "text.apotheosis.gem_bonus",
+            "fallback": "%s: %s",
+            "with": [
+              {
+                "translate": "gem_class.weapons",
+                "fallback": "Weapons"
+              },
+              {
+                "text": "",
+                "extra": [
+                  {
+                    "text": "-0.07"
+                  },
+                  {
+                    "text": " "
+                  },
+                  {
+                    "translate": "attribute.name.armor",
+                    "fallback": "Armor"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "italic": false
+      },
+      {
+        "translate": "text.apotheosis.dot_prefix",
+        "fallback": "• %s",
+        "color": "#FFAA00",
+        "with": [
+          {
+            "translate": "text.apotheosis.gem_bonus",
+            "fallback": "%s: %s",
+            "with": [
+              {
+                "translate": "gem_class.boots",
+                "fallback": "Boots"
+              },
+              {
+                "text": "",
+                "extra": [
+                  {
+                    "text": "+0.15"
+                  },
+                  {
+                    "text": " "
+                  },
+                  {
+                    "translate": "attribute.name.knockback_resistance",
+                    "fallback": "Knockback Resistance"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "italic": false
+      },
+      {
+        "translate": "text.apotheosis.dot_prefix",
+        "fallback": "• %s",
+        "color": "#FFAA00",
+        "with": [
+          {
+            "translate": "text.apotheosis.gem_bonus",
+            "fallback": "%s: %s",
+            "with": [
+              {
+                "translate": "gem_class.boots",
+                "fallback": "Boots"
+              },
+              {
+                "text": "",
+                "extra": [
+                  {
+                    "text": "-0.12"
+                  },
+                  {
+                    "text": " "
+                  },
+                  {
+                    "translate": "attribute.name.attack_knockback",
+                    "fallback": "Attack Knockback"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "italic": false
+      }
+    ]
   }
 }

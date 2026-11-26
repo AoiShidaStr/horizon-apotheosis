@@ -4,10 +4,106 @@
   "rarity": "uncommon",
   "components": {
     "minecraft:item_name": {
-      "translate": "item.apotheosis.gem.apotheosis:core/splendor",
-      "fallback": "Splendor Gem",
+      "translate": "item.apotheosis.gem_splendor_flawed",
+      "fallback": "Flawed Splendor Gem",
       "color": "#C8C8C8",
       "italic": false
-    }
+    },
+    "minecraft:lore": [
+      {
+        "translate": "text.apotheosis.socketable_into",
+        "fallback": "Can be set into:",
+        "color": "#0AFF0A",
+        "italic": false
+      },
+      {
+        "translate": "gem_class.armor",
+        "fallback": "Armor",
+        "color": "#0AFF0A",
+        "italic": false
+      },
+      {
+        "translate": "gem_class.weapon_or_tool",
+        "fallback": "Weapons and tools",
+        "color": "#0AFF0A",
+        "italic": false
+      },
+      {
+        "text": "",
+        "italic": false
+      },
+      {
+        "translate": "text.apotheosis.when_socketed_in",
+        "fallback": "Once set into:",
+        "color": "#FFAA00",
+        "italic": false
+      },
+      {
+        "translate": "text.apotheosis.dot_prefix",
+        "fallback": "• %s",
+        "color": "#FFAA00",
+        "with": [
+          {
+            "translate": "text.apotheosis.gem_bonus",
+            "fallback": "%s: %s",
+            "with": [
+              {
+                "translate": "gem_class.armor",
+                "fallback": "Armor"
+              },
+              {
+                "text": "",
+                "extra": [
+                  {
+                    "text": "+2"
+                  },
+                  {
+                    "text": " "
+                  },
+                  {
+                    "translate": "attribute.name.luck",
+                    "fallback": "Luck"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "italic": false
+      },
+      {
+        "translate": "text.apotheosis.dot_prefix",
+        "fallback": "• %s",
+        "color": "#FFAA00",
+        "with": [
+          {
+            "translate": "text.apotheosis.gem_bonus",
+            "fallback": "%s: %s",
+            "with": [
+              {
+                "translate": "gem_class.weapon_or_tool",
+                "fallback": "Weapons and tools"
+              },
+              {
+                "text": "",
+                "extra": [
+                  {
+                    "text": "+22.5%"
+                  },
+                  {
+                    "text": " "
+                  },
+                  {
+                    "translate": "apotheosis.attribute.experience_gained",
+                    "fallback": "Experience Gained"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "italic": false
+      }
+    ]
   }
 }

@@ -4,10 +4,67 @@
   "rarity": "epic",
   "components": {
     "minecraft:item_name": {
-      "translate": "item.apotheosis.gem.apotheosis:the_end/endersurge",
-      "fallback": "Endersurge Gem",
+      "translate": "item.apotheosis.gem_endersurge_perfect",
+      "fallback": "Perfect Endersurge Gem",
       "color": "#FFD700",
       "italic": false
-    }
+    },
+    "minecraft:lore": [
+      {
+        "translate": "text.apotheosis.socketable_into",
+        "fallback": "Can be set into:",
+        "color": "#0AFF0A",
+        "italic": false
+      },
+      {
+        "translate": "gem_class.anything",
+        "fallback": "Any gear",
+        "color": "#0AFF0A",
+        "italic": false
+      },
+      {
+        "text": "",
+        "italic": false
+      },
+      {
+        "translate": "text.apotheosis.when_socketed_in",
+        "fallback": "Once set into:",
+        "color": "#FFAA00",
+        "italic": false
+      },
+      {
+        "translate": "text.apotheosis.dot_prefix",
+        "fallback": "• %s",
+        "color": "#FFAA00",
+        "with": [
+          {
+            "translate": "text.apotheosis.gem_bonus",
+            "fallback": "%s: %s",
+            "with": [
+              {
+                "translate": "gem_class.anything",
+                "fallback": "Any gear"
+              },
+              {
+                "text": "",
+                "extra": [
+                  {
+                    "text": "+2"
+                  },
+                  {
+                    "text": " "
+                  },
+                  {
+                    "translate": "enchantment.minecraft.sharpness",
+                    "fallback": "Sharpness"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "italic": false
+      }
+    ]
   }
 }

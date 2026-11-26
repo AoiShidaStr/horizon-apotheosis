@@ -4,10 +4,172 @@
   "rarity": "rare",
   "components": {
     "minecraft:item_name": {
-      "translate": "item.apotheosis.gem.apotheosis:overworld/royalty",
+      "translate": "item.apotheosis.gem_royalty_normal",
       "fallback": "Gem of the Royal Family",
       "color": "#55FF55",
       "italic": false
-    }
+    },
+    "minecraft:lore": [
+      {
+        "translate": "text.apotheosis.socketable_into",
+        "fallback": "Can be set into:",
+        "color": "#0AFF0A",
+        "italic": false
+      },
+      {
+        "translate": "gem_class.bow",
+        "fallback": "Bows and crossbows",
+        "color": "#0AFF0A",
+        "italic": false
+      },
+      {
+        "translate": "gem_class.shield",
+        "fallback": "Shields",
+        "color": "#0AFF0A",
+        "italic": false
+      },
+      {
+        "text": "",
+        "italic": false
+      },
+      {
+        "translate": "text.apotheosis.when_socketed_in",
+        "fallback": "Once set into:",
+        "color": "#FFAA00",
+        "italic": false
+      },
+      {
+        "translate": "text.apotheosis.dot_prefix",
+        "fallback": "• %s",
+        "color": "#FFAA00",
+        "with": [
+          {
+            "translate": "text.apotheosis.gem_bonus",
+            "fallback": "%s: %s",
+            "with": [
+              {
+                "translate": "gem_class.bow",
+                "fallback": "Bows and crossbows"
+              },
+              {
+                "text": "",
+                "extra": [
+                  {
+                    "text": "-45%"
+                  },
+                  {
+                    "text": " "
+                  },
+                  {
+                    "translate": "apotheosis.attribute.draw_speed",
+                    "fallback": "Draw Speed"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "italic": false
+      },
+      {
+        "translate": "text.apotheosis.dot_prefix",
+        "fallback": "• %s",
+        "color": "#FFAA00",
+        "with": [
+          {
+            "translate": "text.apotheosis.gem_bonus",
+            "fallback": "%s: %s",
+            "with": [
+              {
+                "translate": "gem_class.shield",
+                "fallback": "Shields"
+              },
+              {
+                "text": "",
+                "extra": [
+                  {
+                    "text": "+0.25"
+                  },
+                  {
+                    "text": " "
+                  },
+                  {
+                    "translate": "attribute.name.armor",
+                    "fallback": "Armor"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "italic": false
+      },
+      {
+        "translate": "text.apotheosis.dot_prefix",
+        "fallback": "• %s",
+        "color": "#FFAA00",
+        "with": [
+          {
+            "translate": "text.apotheosis.gem_bonus",
+            "fallback": "%s: %s",
+            "with": [
+              {
+                "translate": "gem_class.shield",
+                "fallback": "Shields"
+              },
+              {
+                "text": "",
+                "extra": [
+                  {
+                    "text": "+0.12"
+                  },
+                  {
+                    "text": " "
+                  },
+                  {
+                    "translate": "attribute.name.armor_toughness",
+                    "fallback": "Armor Toughness"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "italic": false
+      },
+      {
+        "translate": "text.apotheosis.dot_prefix",
+        "fallback": "• %s",
+        "color": "#FFAA00",
+        "with": [
+          {
+            "translate": "text.apotheosis.gem_bonus",
+            "fallback": "%s: %s",
+            "with": [
+              {
+                "translate": "gem_class.shield",
+                "fallback": "Shields"
+              },
+              {
+                "text": "",
+                "extra": [
+                  {
+                    "text": "-30%"
+                  },
+                  {
+                    "text": " "
+                  },
+                  {
+                    "translate": "attribute.name.movement_speed",
+                    "fallback": "Movement Speed"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "italic": false
+      }
+    ]
   }
 }
