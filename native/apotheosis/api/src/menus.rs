@@ -32,7 +32,7 @@
 use horizon_client::mod_api::{
     BlockEntityContainerEvent, BlockEntityEvent, BlockEntityTickEvent, BlockEntityTicksEvent,
     Compound, Host, HudBatch, ItemStack, MenuButtonEvent, MenuSlotRulesEvent, ModContainer, NativeScreen,
-    ScreenClickEvent, ScreenDrawEvent, ScreenEvent, ScreenTooltipEvent,
+    ScreenClickEvent, ScreenDrawEvent, ScreenEvent, ScreenTooltipEvent, Text,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -417,19 +417,116 @@ pub fn on_screen_tooltip(event: &mut ScreenTooltipEvent<'_>) {
     let Some(i) = choice_at(event.at) else {
         return;
     };
+    push_lines(event.lines, &reforge_lines(event.data, i));
+}
+
+// --- Tooltip lines -------------------------------------------------------------
+
+/// An argument of a tooltip line: a number, or an item named in the player's
+/// language.
+#[derive(Clone, Debug, PartialEq)]
+enum Arg {
+    Num(i32),
+    Item(&'static str),
+    Key(&'static str, &'static str),
+}
+
+/// One tooltip line: a legacy colour prefix (and any text before the
+/// translation), then a translation key with its English fallback and its
+/// arguments. Resolved on the client, in its language (`Text::translate`).
+#[derive(Clone, Debug, PartialEq)]
+struct Line {
+    prefix: String,
+    key: String,
+    fallback: String,
+    args: Vec<Arg>,
+}
+
+fn line(key: &str, fallback: &str, prefix: impl Into<String>, args: Vec<Arg>) -> Line {
+    Line { prefix: prefix.into(), key: key.to_owned(), fallback: fallback.to_owned(), args }
+}
+
+/// An item's English name from its id, when the language lacks its key.
+fn english(item: &str) -> String {
+    item.rsplit(':').next().unwrap_or(item).replace('_', " ")
+}
+
+/// The key `Item.getDescriptionId` gives an item id (`item.apotheosis.gem_dust`).
+fn item_key(item: &str) -> String {
+    let (namespace, path) = item.split_once(':').unwrap_or(("minecraft", item));
+    format!("item.{namespace}.{path}")
+}
+
+fn arg_text(arg: &Arg) -> Text {
+    match arg {
+        Arg::Num(n) => Text::literal(n.to_string()),
+        Arg::Item(item) => Text::translate_with_fallback(&item_key(item), &english(item), &[]),
+        Arg::Key(key, fallback) => Text::translate_with_fallback(key, fallback, &[]),
+    }
+}
+
+fn push_lines(out: &mut Vec<String>, lines: &[Line]) {
+    for l in lines {
+        let args: Vec<Text> = l.args.iter().map(arg_text).collect();
+        let text = Text::translate_with_fallback(&l.key, &l.fallback, &args);
+        out.push(format!("{}{}", l.prefix, text.plain()));
+    }
+}
+
+/// Reforge choice `i`'s tooltip (Java's `ReforgingScreen`): the rarity, then
+/// what it costs: sigils, the rarity's material, levels, the level required.
+fn reforge_lines(data: &[i32], i: usize) -> Vec<Line> {
     let n = i as i32 + 1;
-    let flags = get(event.data, 3);
-    if let Some((tier, ..)) = REFORGE_COSTS.get(((flags >> 4) - 1).max(0) as usize) {
-        event.lines.push(format!("§f{}", tier.name()));
+    let mut lines = Vec::new();
+    let tier = REFORGE_COSTS.get(((get(data, 3) >> 4) - 1).max(0) as usize).map(|(t, ..)| *t);
+    if let Some(tier) = tier {
+        lines.push(line(tier.name_key(), tier.name(), "§f", vec![]));
     }
-    event.lines.push("§7Reforge cost / Coût de reforge :".to_owned());
-    let sigils = get(event.data, 0) * n;
+    lines.push(line("text.apotheosis.reforge_cost", "Reforge Cost", "§7", vec![]));
+    let sigils = get(data, 0) * n;
     if sigils > 0 {
-        event.lines.push(format!("§7{sigils} x Sigil of Rebirth"));
+        lines.push(line("text.apotheosis.cost", "%sx %s", "§7", vec![Arg::Num(sigils), Arg::Item(SIGIL)]));
     }
-    event.lines.push(format!("§7{} x {}", get(event.data, 1) * n, "rarity material"));
-    event.lines.push(format!("§7{n} level(s) / niveau(x)"));
-    event.lines.push(format!("§8Requires level {} / Niveau requis {}", get(event.data, 2) * n, get(event.data, 2) * n));
+    if let Some(tier) = tier {
+        let material = Arg::Item(sockets::salvage_material(tier).0);
+        lines.push(line("text.apotheosis.cost", "%sx %s", "§7", vec![Arg::Num(get(data, 1) * n), material]));
+    }
+    let (key, fallback) = if n == 1 { ("misc.apotheosis.level", "level") } else { ("misc.apotheosis.level.many", "levels") };
+    lines.push(line(key, fallback, format!("§7{n} "), vec![]));
+    lines.push(line(
+        "container.enchant.level.requirement",
+        "Level Requirement: %s",
+        "§8",
+        vec![Arg::Num(get(data, 2) * n)],
+    ));
+    lines
+}
+
+/// The salvage button's tooltip: what the inputs can give, or why it is off.
+fn salvage_lines(data: &[i32]) -> Vec<Line> {
+    if get(data, 0) & VALID == 0 {
+        return vec![line("button.apotheosis.no_salvage", "No items selected", "§c", vec![])];
+    }
+    let mut lines = vec![line("text.apotheosis.salvage_results", "Salvage Results", "§e§n", vec![])];
+    for (i, item) in SALVAGE_OUTPUTS.iter().enumerate() {
+        let (low, high) = (get(data, 1 + 2 * i), get(data, 2 + 2 * i));
+        if high > 0 {
+            lines.push(line(&item_key(item), &english(item), format!("§7{low}-{high} "), vec![]));
+        }
+    }
+    lines
+}
+
+/// The upgrade button's tooltip: the purity reached and the dust it takes.
+fn cut_lines(data: &[i32]) -> Vec<Line> {
+    if get(data, 0) & VALID == 0 {
+        return vec![line("button.apotheosis.upgrade.no", "Missing Inputs", "§c", vec![])];
+    }
+    let purity = Purity::from_index(get(data, 2) as u8);
+    vec![
+        line("apotheosis.gem_cutting.upgrade_to", "Upgrade to %s", "§e§n", vec![Arg::Key(purity.name_key(), purity.name())]),
+        line("text.apotheosis.cost", "%sx %s", "§7", vec![Arg::Num(get(data, 1)), Arg::Item(GEM_DUST)]),
+    ]
 }
 
 // --- Salvaging table -----------------------------------------------------------
@@ -665,18 +762,7 @@ fn salvage_tooltip(event: &mut ScreenTooltipEvent<'_>) {
     if !on_salvage_button(event.at) {
         return;
     }
-    if get(event.data, 0) & VALID == 0 {
-        event.lines.push("§cNothing to salvage / Rien à recycler".to_owned());
-        return;
-    }
-    event.lines.push("§e§nSalvage results / Résultats du recyclage".to_owned());
-    for (i, item) in SALVAGE_OUTPUTS.iter().enumerate() {
-        let (low, high) = (get(event.data, 1 + 2 * i), get(event.data, 2 + 2 * i));
-        if high > 0 {
-            let name = item.rsplit(':').next().unwrap_or(item).replace('_', " ");
-            event.lines.push(format!("§7{low}-{high} {name}"));
-        }
-    }
+    push_lines(event.lines, &salvage_lines(event.data));
 }
 
 // --- Gem cutting table ---------------------------------------------------------
@@ -821,20 +907,57 @@ fn cut_tooltip(event: &mut ScreenTooltipEvent<'_>) {
     if !on_cut_button(event.at) {
         return;
     }
-    if get(event.data, 0) & VALID == 0 {
-        event
-            .lines
-            .push("§cTwo identical gems, gem dust and a material / Deux gemmes identiques, poussière et matériau".to_owned());
-        return;
-    }
-    let purity = Purity::from_index(get(event.data, 2) as u8);
-    event.lines.push(format!("§e§nUpgrade to {} / Améliorer en {}", purity.name(), purity.name()));
-    event.lines.push(format!("§7{} x gem dust / poussière de gemme", get(event.data, 1)));
+    push_lines(event.lines, &cut_lines(event.data));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn keys(lines: &[Line]) -> Vec<&str> {
+        lines.iter().map(|l| l.key.as_str()).collect()
+    }
+
+    #[test]
+    fn reforge_tooltip_is_translation_keys_with_the_rarity_material() {
+        // Rare row (index 2, + 1 in bits 4..), choice 1 (n = 2): 3 sigils, 2 material, 5 levels each.
+        let data = [3, 2, 5, VALID | (3 << 4)];
+        let lines = reforge_lines(&data, 1);
+        assert_eq!(
+            keys(&lines),
+            [
+                "apotheosis.tier.rare",
+                "text.apotheosis.reforge_cost",
+                "text.apotheosis.cost",
+                "text.apotheosis.cost",
+                "misc.apotheosis.level.many",
+                "container.enchant.level.requirement",
+            ]
+        );
+        assert_eq!(lines[2].args, [Arg::Num(6), Arg::Item(SIGIL)]);
+        assert_eq!(lines[3].args, [Arg::Num(4), Arg::Item(sockets::salvage_material(Tier::Rare).0)]);
+        assert_eq!(lines[4].prefix, "§72 ");
+        assert_eq!(lines[5].args, [Arg::Num(10)]);
+        assert_eq!(reforge_lines(&data, 0)[4].key, "misc.apotheosis.level");
+        assert!(lines.iter().all(|l| !l.prefix.contains('/') && !l.fallback.contains('/')));
+    }
+
+    #[test]
+    fn salvage_and_cut_tooltips_name_items_by_their_keys() {
+        assert_eq!(keys(&salvage_lines(&[0])), ["button.apotheosis.no_salvage"]);
+        let mut data = vec![0; SALVAGE_DATA];
+        data[0] = VALID;
+        (data[1], data[2]) = (1, 3);
+        let lines = salvage_lines(&data);
+        assert_eq!(keys(&lines), ["text.apotheosis.salvage_results", "item.apotheosis.mysterious_scrap_metal"]);
+        assert_eq!(lines[1].prefix, "§71-3 ");
+        assert_eq!(lines[1].fallback, "mysterious scrap metal");
+        assert_eq!(keys(&cut_lines(&[0])), ["button.apotheosis.upgrade.no"]);
+        let lines = cut_lines(&[VALID, 7, Purity::Flawed.index() as i32]);
+        assert_eq!(keys(&lines), ["apotheosis.gem_cutting.upgrade_to", "text.apotheosis.cost"]);
+        assert_eq!(lines[0].args, [Arg::Key("apotheosis.purity.flawed", "Flawed")]);
+        assert_eq!(lines[1].args, [Arg::Num(7), Arg::Item(GEM_DUST)]);
+    }
 
     fn stack(item: &str, count: u32) -> Option<ItemStack> {
         Some(ItemStack::new(item, count))

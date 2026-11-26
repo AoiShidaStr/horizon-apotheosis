@@ -391,6 +391,18 @@ def gem_items(models: list[dict]) -> list[str]:
     return ids
 
 
+def gem_item_keys(models: list[dict], ids: list[str]) -> list[tuple[str, str]]:
+    """`(item.apotheosis.gem_<texture>_<purity>, item.apotheosis.gem.<gem_id>)`
+    for each gem item id in `ids`."""
+    by_texture = {f"gem_{info['texture']}": info["gem_id"] for info in models}
+    pairs = []
+    for item in ids:
+        path = item.split(":", 1)[1]
+        gem_id = by_texture[path.rsplit("_", 1)[0]]
+        pairs.append((f"item.apotheosis.{path}", f"item.apotheosis.gem.{gem_id}"))
+    return pairs
+
+
 def main() -> None:
     ref = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_REF
     gems_dir = ref / "data" / "apotheosis" / "gems"
@@ -501,6 +513,15 @@ pub const GEMS: [Gem; %d] = [
                 if key not in data:
                     data[key] = text
                     added += 1
+        # Each gem item's own name key: Horizon names an item by
+        # `item.<namespace>.<path>` (`Item.getDescriptionId`) when the lang
+        # has it, else by `block.*`, in /give's message.  Same text as the
+        # gem's `item.apotheosis.gem.<gem_id>`, kept in step with it.
+        for item_id, gem_key in gem_item_keys(models, ids):
+            name = data.get(gem_key)
+            if name is not None and data.get(item_id) != name:
+                data[item_id] = name
+                added += 1
         path.write_text(
             json.dumps(data, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",

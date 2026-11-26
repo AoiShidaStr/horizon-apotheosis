@@ -13,6 +13,8 @@ LANG = ROOT / "content" / "assets" / "apotheosis" / "lang"
 JAVA_REF = Path("C:/Users/yello/horizon-work/java-ref/Apotheosis-1.21.1-8.9.0")
 
 TRANSLATE = re.compile(r'translate_with_fallback\(\s*"(apotheosis\.[^"]+)"')
+# The table screens' tooltip lines (menus.rs `line(key, ...)`); `container.*` keys are vanilla's.
+MENU_LINE = re.compile(r'\bline\(\s*"((?!container\.)[^"]+)"')
 
 # Legacy keys that no code reads any more (proof: grep over native/ and content/).
 LEGACY_FIXED = ["apotheosis.tooltip.tier", "apotheosis.affix.line", "apotheosis.reforge.not_affixed"]
@@ -41,6 +43,25 @@ class LangKeyTests(unittest.TestCase):
             lang = load_lang(name)
             missing += [f"{name}:{key}" for key in sorted(native_keys()) if key not in lang]
         self.assertEqual(missing, [])
+
+    def test_every_menu_tooltip_key_exists_in_both_lang_files(self):
+        menus = (NATIVE / "apotheosis" / "api" / "src" / "menus.rs").read_text(encoding="utf-8")
+        keys = set(MENU_LINE.findall(menus))
+        self.assertIn("text.apotheosis.reforge_cost", keys)
+        for name in ("en_us.json", "fr_fr.json"):
+            lang = load_lang(name)
+            self.assertEqual(sorted(k for k in keys if k not in lang), [], name)
+
+    def test_gem_items_have_their_item_name_key(self):
+        for name in ("en_us.json", "fr_fr.json"):
+            lang = load_lang(name)
+            purities = ("cracked", "chipped", "flawed", "normal", "flawless", "perfect")
+            decls = [d for d in sorted((ROOT / "content" / "data" / "apotheosis" / "horizon" / "item")
+                                       .glob("gem_*.json")) if d.stem.rsplit("_", 1)[-1] in purities]
+            self.assertEqual(len(decls), 107)
+            for decl in decls:
+                gem = json.loads(decl.read_text(encoding="utf-8"))["components"]["minecraft:item_name"]["translate"]
+                self.assertEqual(lang.get(f"item.apotheosis.{decl.stem}"), lang[gem], f"{name}:{decl.stem}")
 
     def test_legacy_keys_are_removed_from_both_files(self):
         for name in ("en_us.json", "fr_fr.json"):
