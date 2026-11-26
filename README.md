@@ -92,11 +92,10 @@ In-game test plan (French): [`TEST-EN-JEU.md`](TEST-EN-JEU.md); results of the
 - **Extra drops**: a boss always drops an affixed diamond piece (or a bow); an
   ordinary monster killed by a player has a 4% chance to drop an affixed iron
   piece. Passive entities drop neither gems nor affixed gear.
-- **`/apoth reforge`** (`register_commands`/`perform_command`, API 8): rolls
-  tier and affixes onto the plain piece of gear the player holds, for 3
-  experience levels; on an already-affixed piece it rerolls that piece instead.
-  `/apoth salvage` breaks an affixed piece into rarity materials; `/apoth`
-  alone explains both. Answers are translated.
+- **`/apoth salvage`** (`register_commands`/`perform_command`, API 8) breaks
+  the affixed piece held into rarity materials; `/apoth` alone explains it.
+  Reforging has no player command, as in Java: it is done at the reforging
+  tables. Answers are translated.
 
 ## Gemmes, sockets, reforge et recyclage
 
@@ -124,21 +123,23 @@ In-game test plan (French): [`TEST-EN-JEU.md`](TEST-EN-JEU.md); results of the
   materials for the gem's current purity (1 dust and 3 scrap or 1 fabric for
   a cracked gem, up to 9 dust and 27 crystal, 9 sands or 3 pearls for a
   flawless one, which becomes perfect).
-- **Reforging an affixed piece**: `/apoth reforge` on an affixed piece held in
-  the main hand rerolls its rarity and affixes for 3 levels (a command-only
-  port cost), keeping the piece and the gems in its sockets; the work is done
-  on the next inventory tick, so the stack the command saw is the stack that is
-  rewritten. The tables charge the five Java `recipe/reforging` rows instead:
-  levels 2/5/15/30/50, rarity material 1/2/2/2/3 and sigils of rebirth
-  0/1/2/4/5 for Common→Mythic, all taken from the inventory before the reroll
-  and given back in full if any part is short or the hand changes. Ancient is
-  this port's extension and uses the mythic row.
-- **Salvaging**: `/apoth salvage` on an affixed piece breaks it into 1–4 of its
-  rarity's material (no gem dust: the Java salvaging recipes name the material
-  alone) and gives back every socketed gem at the purity it had. The salvaging
-  table also breaks a gem into the Java gem-dust range for its purity
-  (1–2 cracked, 1–3 chipped, 2–4 flawed, 3–5 normal, 4–7 flawless, 5–10
-  perfect).
+- **Reforging** (`menus.rs`): the reforging table and the simple reforging
+  table open Java's screen: the piece, its rarity material, the sigils of
+  rebirth and three choices. Choice *i* needs the Java `recipe/reforging` row
+  for the material's rarity times *i*+1 (levels 2/5/15/30/50, material
+  1/2/2/2/3, sigils 0/1/2/4/5 for Common→Mythic) and charges *i*+1 levels;
+  free in creative, as in Java. The simple table stops at Rare. The piece
+  keeps its sockets and gems. Ancient is this port's extension and uses the
+  mythic row.
+- **Salvaging** (`menus.rs`): the salvaging table opens Java's screen; its
+  button breaks every affixed piece of its inputs into 1–4 of its rarity's
+  material and gives back each socketed gem at the purity it had (Java gives
+  the material only). A piece whose results would not fit the six outputs
+  stays whole. `/apoth salvage` does the same for the piece held.
+- **Gem cutting** (`menus.rs`): the gem cutting table opens Java's screen: a
+  gem, a second gem of the same type and purity, gem dust and one of the
+  recipe's materials; the button gives the gem of the next purity at the
+  Java cost of the current purity.
 - **Five sigils** (`sigil_of_socketing`, `sigil_of_withdrawal`,
   `sigil_of_rebirth`, `sigil_of_enhancement`, `sigil_of_unnaming`), each a
   stackable item with its own 16×16 wax-seal texture, en_us/fr_fr name and
@@ -152,17 +153,19 @@ In-game test plan (French): [`TEST-EN-JEU.md`](TEST-EN-JEU.md); results of the
   (Common→…→Ancient) and rerolls at the new tier, and unnaming removes the
   name the affix roll wrote — never a name the player typed, which leaves the
   sigil unspent. The sigil is used up on the next inventory tick, so a hand
-  that changed costs nothing.
+  that changed costs nothing. Java does socketing, the sockets sigil, withdrawal and
+  unnaming in the smithing table; Horizon a85's smithing hook passes neither
+  the slots' contents nor the taking of the result, so this port keeps the
+  right click.
 - **Four working tables as blocks**, with Apotheosis' ids
   (`gem_cutting_table`, `salvaging_table`, `reforging_table`,
-  `simple_reforging_table`): a real block declaration (oak planks template for
-  the three old ones, smooth stone for the simple table, own top and side
+  `simple_reforging_table`): a real block declaration (own top and side
   textures, `cube_bottom_top` model), item, blockstate, block loot table,
-  pickaxe tag, the Java shaped recipe, and the creative tab. Right click with
-  the piece in hand (`use_item_on`, API 13): the reforging table charges the
-  Java row for every rarity, the simple table only Common/Uncommon/Rare, the
-  salvaging table what `/apoth salvage` does (or gem dust for a held gem), and
-  the gem cutting table opens its Java menu (`menus.rs`, see *Purity*).
+  pickaxe tag, the Java shaped recipe, and the creative tab. Their template is
+  `minecraft:crafting_table`, because Horizon only opens a mod menu on a
+  block whose template opens one; a right click opens the table's own screen
+  (see above). Items left in a table stay there when the screen closes, like
+  a furnace (Java hands them back; that needs a hook above API 415).
 - **The four new Java items**: `gem_fused_slate` (8 from deepslate and gem
   dust), the iron, gold and diamond smithing templates (7 diamonds around a
   template, 7 gold, 7 iron), `sigil_of_unnaming` and
