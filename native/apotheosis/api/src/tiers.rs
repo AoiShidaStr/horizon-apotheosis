@@ -1,0 +1,1042 @@
+//! World tiers of Apotheosis: one per player, chosen among those they have
+//! unlocked.
+//!
+//! Java keeps the active tier in a player attachment with a codec, defaulting
+//! to Haven and copied on death (`Attachments.WORLD_TIER`). This module does
+//! the same through Horizon's server attachments on `Holder::Player`: the value
+//! is saved in the player's file and copied on respawn, so it survives a
+//! restart and a death.
+//!
+//! The unlock criteria are the Java advancements' conditions, memorised as they
+//! happen: a piece of affixed gear in each of the five equipment slots at a
+//! rarity, and one boss kill each (`invader`, Wither, Ender Dragon). A
+//! criterion once met stays met even after the gear is taken off, and the
+//! tiers it opens stay unlocked.
+//!
+//! Only the state, the unlocking and the commands live here: the loot, gem and
+//! invader rates of a tier and the monsters' augments are later steps.
+
+use horizon_client::mod_api::{
+    AttachmentCodec, AttachmentError, AttachmentType, Compound, EquipmentSlot, Flow, Holder, Host,
+    ItemStack, LivingDeathEvent, MobKilledEvent, NativeServerPlayer, Tag, Text,
+};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
+use crate::{sockets, Tier};
+
+/// The bits of `Progress::kills`.
+const KILLED_INVADER: i32 = 1;
+const KILLED_WITHER: i32 = 2;
+const KILLED_DRAGON: i32 = 4;
+
+const WITHER: &str = "minecraft:wither";
+const DRAGON: &str = "minecraft:ender_dragon";
+const PLAYER: &str = "minecraft:player";
+
+/// The colour of a tier's name in a message: Java's gold for an unlocked tier.
+const GOLD: u32 = 0xFF_AA00;
+
+/// The five world tiers, in Java's order: the first is active by default, each
+/// next one raises the world's difficulty and the loot's quality (later steps).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum WorldTier {
+    Haven,
+    Frontier,
+    Ascent,
+    Summit,
+    Pinnacle,
+}
+
+impl WorldTier {
+    pub const ALL: [WorldTier; 5] = [
+        WorldTier::Haven,
+        WorldTier::Frontier,
+        WorldTier::Ascent,
+        WorldTier::Summit,
+        WorldTier::Pinnacle,
+    ];
+
+    /// The name Java's codec and commands use (`haven`, `frontier`...).
+    pub fn id(self) -> &'static str {
+        match self {
+            WorldTier::Haven => "haven",
+            WorldTier::Frontier => "frontier",
+            WorldTier::Ascent => "ascent",
+            WorldTier::Summit => "summit",
+            WorldTier::Pinnacle => "pinnacle",
+        }
+    }
+
+    /// The tier's name in English, for a client without the translation key.
+    pub fn name(self) -> &'static str {
+        match self {
+            WorldTier::Haven => "Haven",
+            WorldTier::Frontier => "Frontier",
+            WorldTier::Ascent => "Ascent",
+            WorldTier::Summit => "Summit",
+            WorldTier::Pinnacle => "Pinnacle",
+        }
+    }
+
+    /// Java's translation key for the tier's name.
+    pub fn name_key(self) -> &'static str {
+        match self {
+            WorldTier::Haven => "text.apotheosis.world_tier.haven",
+            WorldTier::Frontier => "text.apotheosis.world_tier.frontier",
+            WorldTier::Ascent => "text.apotheosis.world_tier.ascent",
+            WorldTier::Summit => "text.apotheosis.world_tier.summit",
+            WorldTier::Pinnacle => "text.apotheosis.world_tier.pinnacle",
+        }
+    }
+
+    /// The tier's name as a translated component.
+    pub fn component(self) -> Text {
+        Text::translate_with_fallback(self.name_key(), self.name(), &[])
+    }
+
+    /// The tier's index, in Java's order.
+    pub fn index(self) -> usize {
+        match self {
+            WorldTier::Haven => 0,
+            WorldTier::Frontier => 1,
+            WorldTier::Ascent => 2,
+            WorldTier::Summit => 3,
+            WorldTier::Pinnacle => 4,
+        }
+    }
+
+    /// The tier a name names, its case ignored (a command's argument).
+    pub fn from_id(id: &str) -> Option<Self> {
+        WorldTier::ALL
+            .into_iter()
+            .find(|tier| tier.id().eq_ignore_ascii_case(id))
+    }
+
+    /// The rarity this tier needs in all five slots, none for Haven.
+    pub fn gear_rarity(self) -> Option<Tier> {
+        match self {
+            WorldTier::Haven => None,
+            WorldTier::Frontier => Some(Tier::Common),
+            WorldTier::Ascent => Some(Tier::Uncommon),
+            WorldTier::Summit => Some(Tier::Rare),
+            WorldTier::Pinnacle => Some(Tier::Epic),
+        }
+    }
+
+    /// The boss this tier needs killed as well, none for Haven and Frontier.
+    fn boss(self) -> Option<Kill> {
+        match self {
+            WorldTier::Haven | WorldTier::Frontier => None,
+            WorldTier::Ascent => Some(Kill::Invader),
+            WorldTier::Summit => Some(Kill::Wither),
+            WorldTier::Pinnacle => Some(Kill::Dragon),
+        }
+    }
+}
+
+/// The five equipment slots the gear criteria watch, as Java's advancements
+/// name them (`head`, `chest`, `legs`, `feet`, `hand`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GearSlot {
+    Head,
+    Chest,
+    Legs,
+    Feet,
+    Hand,
+}
+
+impl GearSlot {
+    const ALL: [GearSlot; 5] = [
+        GearSlot::Head,
+        GearSlot::Chest,
+        GearSlot::Legs,
+        GearSlot::Feet,
+        GearSlot::Hand,
+    ];
+
+    fn index(self) -> usize {
+        match self {
+            GearSlot::Head => 0,
+            GearSlot::Chest => 1,
+            GearSlot::Legs => 2,
+            GearSlot::Feet => 3,
+            GearSlot::Hand => 4,
+        }
+    }
+
+    fn equipment(self) -> EquipmentSlot {
+        match self {
+            GearSlot::Head => EquipmentSlot::Head,
+            GearSlot::Chest => EquipmentSlot::Chest,
+            GearSlot::Legs => EquipmentSlot::Legs,
+            GearSlot::Feet => EquipmentSlot::Feet,
+            GearSlot::Hand => EquipmentSlot::MainHand,
+        }
+    }
+}
+
+/// The three kills a tier asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kill {
+    Invader,
+    Wither,
+    Dragon,
+}
+
+impl Kill {
+    fn bit(self) -> i32 {
+        match self {
+            Kill::Invader => KILLED_INVADER,
+            Kill::Wither => KILLED_WITHER,
+            Kill::Dragon => KILLED_DRAGON,
+        }
+    }
+}
+
+/// What a player's unlocks have recorded so far. Every field only grows, so a
+/// criterion met once stays met; nothing here says which tier is active.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Progress {
+    /// The best rarity seen in each slot (`GearSlot::index`), none for a slot
+    /// that has never held an affixed piece.
+    best: [Option<Tier>; 5],
+    /// `KILLED_*` bits of the bosses killed.
+    kills: i32,
+    /// The tiers unlocked, by `WorldTier::index`; Haven is always there.
+    unlocked: [bool; 5],
+}
+
+impl Default for Progress {
+    fn default() -> Self {
+        let mut unlocked = [false; 5];
+        unlocked[WorldTier::Haven.index()] = true;
+        Self {
+            best: [None; 5],
+            kills: 0,
+            unlocked,
+        }
+    }
+}
+
+impl Progress {
+    /// Notes a piece's rarity in a slot; a lower one never takes a higher one
+    /// back.
+    fn note_gear(&mut self, slot: GearSlot, rarity: Option<Tier>) {
+        let Some(rarity) = rarity else {
+            return;
+        };
+        let best = &mut self.best[slot.index()];
+        if best.is_none_or(|seen| rarity > seen) {
+            *best = Some(rarity);
+        }
+    }
+
+    fn note_kill(&mut self, kill: Kill) {
+        self.kills |= kill.bit();
+    }
+
+    fn killed(&self, kill: Kill) -> bool {
+        self.kills & kill.bit() != 0
+    }
+
+    /// Whether all five slots have held a piece of at least `rarity`.
+    fn all_at_least(&self, rarity: Tier) -> bool {
+        self.best
+            .iter()
+            .all(|best| best.is_some_and(|seen| seen >= rarity))
+    }
+
+    /// Whether the criteria of `tier` are met, whether or not it was granted.
+    fn meets(&self, tier: WorldTier) -> bool {
+        if let Some(rarity) = tier.gear_rarity()
+            && !self.all_at_least(rarity)
+        {
+            return false;
+        }
+        match tier.boss() {
+            Some(kill) => self.killed(kill),
+            None => true,
+        }
+    }
+
+    /// Grants every tier whose criteria are met and that was not granted yet,
+    /// in tier order.
+    fn grant(&mut self) -> Vec<WorldTier> {
+        let mut newly = Vec::new();
+        for tier in WorldTier::ALL {
+            if !self.unlocked[tier.index()] && self.meets(tier) {
+                self.unlocked[tier.index()] = true;
+                newly.push(tier);
+            }
+        }
+        newly
+    }
+}
+
+/// A player's whole world-tier state, as the attachment holds it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct State {
+    tier: WorldTier,
+    progress: Progress,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            tier: WorldTier::Haven,
+            progress: Progress::default(),
+        }
+    }
+}
+
+impl State {
+    /// The active tier.
+    pub fn tier(&self) -> WorldTier {
+        self.tier
+    }
+
+    pub fn is_unlocked(&self, tier: WorldTier) -> bool {
+        self.progress.unlocked[tier.index()]
+    }
+
+    /// The unlocked tiers, in tier order.
+    pub fn unlocked(&self) -> Vec<WorldTier> {
+        WorldTier::ALL
+            .into_iter()
+            .filter(|tier| self.is_unlocked(*tier))
+            .collect()
+    }
+
+    /// Activates `tier` when the player has unlocked it. A locked tier is
+    /// refused and the active one is kept.
+    pub fn set_active(&mut self, tier: WorldTier) -> Change {
+        if !self.is_unlocked(tier) {
+            return Change::Locked(tier);
+        }
+        if self.tier == tier {
+            return Change::AlreadyActive;
+        }
+        self.tier = tier;
+        Change::Changed(tier)
+    }
+
+    /// Activates `tier` without the unlock check, as Java's `/apoth
+    /// set_world_tier` does. Returns whether the active tier changed.
+    pub fn force_active(&mut self, tier: WorldTier) -> bool {
+        let changed = self.tier != tier;
+        self.tier = tier;
+        changed
+    }
+
+    fn encode(&self) -> Compound {
+        let mut data = Compound::new();
+        data.insert("tier".into(), Tag::String(self.tier.id().into()));
+        data.insert(
+            "best".into(),
+            Tag::List(
+                self.progress
+                    .best
+                    .iter()
+                    .map(|best| Tag::Int(best.map_or(0, |tier| tier as i32 + 1)))
+                    .collect(),
+            ),
+        );
+        data.insert("kills".into(), Tag::Int(self.progress.kills));
+        let mut mask = 0;
+        for tier in WorldTier::ALL {
+            if self.is_unlocked(tier) {
+                mask |= 1 << tier.index();
+            }
+        }
+        data.insert("unlocked".into(), Tag::Int(mask));
+        data
+    }
+
+    fn decode(data: &Compound) -> Option<Self> {
+        let tier = match data.get(&"tier".into()) {
+            Some(Tag::String(id)) => WorldTier::from_id(&id.to_string_lossy())?,
+            _ => return None,
+        };
+        let mut best = [None; 5];
+        match data.get(&"best".into()) {
+            Some(Tag::List(items)) if items.len() == best.len() => {
+                for (slot, item) in best.iter_mut().zip(items) {
+                    let Tag::Int(rank) = item else {
+                        return None;
+                    };
+                    *slot = match *rank {
+                        0 => None,
+                        rank if rank > 0 => Some(tier_at(rank - 1)?),
+                        _ => return None,
+                    };
+                }
+            }
+            _ => return None,
+        }
+        let kills = match data.get(&"kills".into()) {
+            Some(Tag::Int(kills)) => *kills,
+            _ => return None,
+        };
+        let mask = match data.get(&"unlocked".into()) {
+            Some(Tag::Int(mask)) => *mask,
+            _ => return None,
+        };
+        let mut progress = Progress {
+            best,
+            kills,
+            unlocked: [false; 5],
+        };
+        for tier in WorldTier::ALL {
+            progress.unlocked[tier.index()] =
+                tier == WorldTier::Haven || mask & (1 << tier.index()) != 0;
+        }
+        Some(Self { tier, progress })
+    }
+}
+
+/// The rarity at index `0..=5` of the port's `Tier`, as `sockets` writes it.
+fn tier_at(index: i32) -> Option<Tier> {
+    Some(match index {
+        0 => Tier::Common,
+        1 => Tier::Uncommon,
+        2 => Tier::Rare,
+        3 => Tier::Epic,
+        4 => Tier::Mythic,
+        5 => Tier::Ancient,
+        _ => return None,
+    })
+}
+
+/// How a request to activate a tier went.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Change {
+    /// The tier is now active.
+    Changed(WorldTier),
+    /// It was already active.
+    AlreadyActive,
+    /// The player has not unlocked it; nothing changed.
+    Locked(WorldTier),
+}
+
+/// The player attachment holding the state: saved in the player's file and
+/// copied on death, like Java's `Attachments.WORLD_TIER`.
+static STATE: AttachmentType<State> = AttachmentType {
+    namespace: "apotheosis",
+    name: "world_tier",
+    default: || State::default(),
+    codec: Some(AttachmentCodec {
+        encode: |state| Ok(state.encode()),
+        decode: |data| State::decode(data).ok_or(AttachmentError::Decode),
+    }),
+    copy_on_death: true,
+    sync: false,
+};
+
+/// The active tiers last read, for `tier_of`, which the later steps call
+/// without a host (a loot roll, a spawn's augments).
+static ACTIVE: OnceLock<Mutex<HashMap<u128, WorldTier>>> = OnceLock::new();
+
+fn active() -> &'static Mutex<HashMap<u128, WorldTier>> {
+    ACTIVE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn remember(player: u128, tier: WorldTier) {
+    if let Ok(mut tiers) = active().lock() {
+        tiers.insert(player, tier);
+    }
+}
+
+/// The player's active tier as the last hook or command read it, Haven when
+/// nothing has read it yet. `tier_of_with` reads and refreshes it.
+#[allow(dead_code)] // the loot, gem and monster steps read it from `loot_drops`.
+pub fn tier_of(player: u128) -> WorldTier {
+    active()
+        .lock()
+        .ok()
+        .and_then(|tiers| tiers.get(&player).copied())
+        .unwrap_or(WorldTier::Haven)
+}
+
+/// The player's active tier, read from their attachment. Later steps that
+/// have a host should use this; it also refreshes `tier_of`'s copy.
+#[allow(dead_code)] // the loot and monster steps read it from a hook's host.
+pub fn tier_of_with(host: &mut dyn Host, player: u128) -> WorldTier {
+    state_of(host, player).tier
+}
+
+/// Reads a player's state, remembering its active tier.
+fn state_of(host: &mut dyn Host, player: u128) -> State {
+    let state = STATE.get(host, Holder::Player(player)).unwrap_or_default();
+    remember(player, state.tier);
+    state
+}
+
+/// Saves a player's state; false when the attachment refused it.
+fn store(host: &mut dyn Host, player: u128, state: &State) -> bool {
+    let stored = STATE
+        .set(host, Holder::Player(player), state.clone())
+        .is_ok();
+    if stored {
+        remember(player, state.tier);
+    }
+    stored
+}
+
+/// Reads a player's state, lets `note` record what happened, grants the tiers
+/// the criteria now meet, saves when anything changed and tells the player of
+/// each tier they just unlocked.
+fn observe(host: &mut dyn Host, player: u128, note: impl FnOnce(&mut State)) {
+    let mut state = match STATE.get(host, Holder::Player(player)) {
+        Ok(state) => state,
+        Err(_) => return,
+    };
+    let before = state.clone();
+    note(&mut state);
+    let newly = state.progress.grant();
+    if state != before {
+        if !store(host, player, &state) {
+            return;
+        }
+    } else {
+        remember(player, state.tier);
+    }
+    for tier in newly {
+        announce(host, player, tier);
+    }
+}
+
+fn announce(host: &mut dyn Host, player: u128, tier: WorldTier) {
+    let line = Text::translate_with_fallback(
+        "apotheosis.world_tier.unlocked",
+        "World tier unlocked: %s",
+        &[tier.component()],
+    )
+    .with_color(GOLD);
+    if host.acting_player().is_some_and(|actor| actor.uuid == player) {
+        host.feedback(line);
+    } else {
+        let _ = host.tell(player, line);
+    }
+}
+
+/// The rarity of an affixed piece, as `sockets` recorded it when it rolled
+/// the affixes. Plain gear is no criterion.
+fn rarity_of(stack: &ItemStack) -> Option<Tier> {
+    sockets::tier_of(stack)
+}
+
+/// The acting player's five slots, every tick: a piece already worn when the
+/// world opened counts too, unlike a hook that only sees a change.
+pub fn player_tick(host: &mut dyn Host) {
+    let Some(player) = host.acting_player() else {
+        return;
+    };
+    if STATE
+        .get(host, Holder::Player(player.uuid))
+        .is_ok_and(|state| state.progress.unlocked.iter().all(|unlocked| *unlocked))
+    {
+        return;
+    }
+    let mut seen = [None; 5];
+    for slot in GearSlot::ALL {
+        seen[slot.index()] = host
+            .player_equipment(player.uuid, slot.equipment())
+            .as_ref()
+            .and_then(rarity_of);
+    }
+    observe(host, player.uuid, |state| {
+        for slot in GearSlot::ALL {
+            state.progress.note_gear(slot, seen[slot.index()]);
+        }
+    });
+}
+
+/// The kill a death is, when the criteria watch it.
+fn kill_of(host: &mut dyn Host, kind: &str, entity: Option<u32>) -> Option<Kill> {
+    if kind == WITHER {
+        return Some(Kill::Wither);
+    }
+    if kind == DRAGON {
+        return Some(Kill::Dragon);
+    }
+    if entity.is_some_and(|id| crate::affix_effects::is_boss(host, id)) {
+        return Some(Kill::Invader);
+    }
+    None
+}
+
+/// The player who dealt a death's last blow, from the player entity id the
+/// hook gives (`0` when it was not a player).
+fn killer(host: &mut dyn Host, attacker: u32) -> Option<u128> {
+    if attacker == 0 {
+        return None;
+    }
+    let mut players = host.server_players();
+    if let Some(actor) = host.acting_player() {
+        players.push(actor);
+    }
+    players
+        .into_iter()
+        .find(|player| player.entity_id > 0 && player.entity_id as u32 == attacker)
+        .map(|player| player.uuid)
+}
+
+/// The acting player's blow killed a mob: credit the invader, Wither or dragon
+/// criteria to them.
+pub fn mob_killed(host: &mut dyn Host, event: &MobKilledEvent<'_>) {
+    if event.kind == PLAYER {
+        return;
+    }
+    let Some(kill) = kill_of(host, event.kind, Some(event.entity)) else {
+        return;
+    };
+    observe(host, event.player, |state| state.progress.note_kill(kill));
+}
+
+/// A mob is about to die. `mob_killed` credits a blow the acting player dealt;
+/// a kill from range names the killer by entity id instead, so it is credited
+/// here. A death the hook gives no player for (a mob's arrow, the void, a
+/// single-player player's arrow) unlocks nothing.
+pub fn living_death(host: &mut dyn Host, event: &LivingDeathEvent<'_>) -> Flow {
+    if event.kind == PLAYER {
+        return Flow::Continue;
+    }
+    let Some(kill) = kill_of(host, event.kind, Some(event.entity)) else {
+        return Flow::Continue;
+    };
+    if let Some(player) = killer(host, event.attacker) {
+        observe(host, player, |state| state.progress.note_kill(kill));
+    }
+    Flow::Continue
+}
+
+// ---------------------------------------------------------------------------
+// Commands
+// ---------------------------------------------------------------------------
+
+/// A command line's plan, once parsed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Action {
+    /// Show the active tier and the unlocked ones.
+    Show,
+    /// Activate a tier for the acting player.
+    Activate(WorldTier),
+    /// Set another player's tier, operators only.
+    Remote { target: String, tier: WorldTier },
+}
+
+/// Why a command line cannot run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rejection {
+    /// The words do not form a usage.
+    Usage,
+    /// A tier name no tier has.
+    UnknownTier,
+    /// `set_world_tier` below operator level 2.
+    NotOperator,
+}
+
+/// Whether an operator level may run `/apoth set_world_tier`, Java's
+/// `requires(c -> c.hasPermission(2))`.
+pub fn is_operator(permission: u8) -> bool {
+    permission >= 2
+}
+
+/// Plans `/apoth world_tier ...` from the words after `apoth`.
+pub fn plan(words: &[&str], permission: u8) -> Result<Action, Rejection> {
+    let Some((root, rest)) = words.split_first() else {
+        return Err(Rejection::Usage);
+    };
+    match *root {
+        "world_tier" => match rest {
+            [] => Ok(Action::Show),
+            [tier] => WorldTier::from_id(tier)
+                .map(Action::Activate)
+                .ok_or(Rejection::UnknownTier),
+            _ => Err(Rejection::Usage),
+        },
+        "set_world_tier" => {
+            if !is_operator(permission) {
+                return Err(Rejection::NotOperator);
+            }
+            match rest {
+                [target, tier] => WorldTier::from_id(tier)
+                    .map(|tier| Action::Remote {
+                        target: (*target).to_owned(),
+                        tier,
+                    })
+                    .ok_or(Rejection::UnknownTier),
+                _ => Err(Rejection::Usage),
+            }
+        }
+        _ => Err(Rejection::Usage),
+    }
+}
+
+/// Runs a parsed `plan` for the acting player, answering in their chat.
+pub fn command(host: &mut dyn Host, player: &NativeServerPlayer, words: &[&str]) -> Flow {
+    match plan(words, player.permission) {
+        Ok(Action::Show) => show(host, player.uuid),
+        Ok(Action::Activate(tier)) => activate(host, player, tier),
+        Ok(Action::Remote { target, tier }) => set_other(host, player, &target, tier),
+        Err(rejection) => host.feedback(rejection_line(rejection)),
+    }
+    Flow::Cancel
+}
+
+fn show(host: &mut dyn Host, player: u128) {
+    let state = state_of(host, player);
+    host.feedback(Text::translate_with_fallback(
+        "apotheosis.command.world_tier.show_active",
+        "World tier: %s",
+        &[state.tier().component()],
+    ));
+    host.feedback(Text::translate_with_fallback(
+        "apotheosis.command.world_tier.show_unlocked",
+        "Unlocked: %s",
+        &[names(&state.unlocked())],
+    ));
+}
+
+fn activate(host: &mut dyn Host, player: &NativeServerPlayer, tier: WorldTier) {
+    let mut state = state_of(host, player.uuid);
+    match state.set_active(tier) {
+        Change::Locked(tier) => host.feedback(Text::translate_with_fallback(
+            "apotheosis.world_tier.locked",
+            "%s is not unlocked yet.",
+            &[tier.component()],
+        )),
+        Change::AlreadyActive => host.feedback(Text::translate_with_fallback(
+            "apotheosis.command.world_tier.already",
+            "Your world tier is already %s.",
+            &[tier.component()],
+        )),
+        Change::Changed(tier) => {
+            if store(host, player.uuid, &state) {
+                host.feedback(Text::translate_with_fallback(
+                    "apotheosis.command.world_tier.changed",
+                    "World tier set to %s.",
+                    &[tier.component()],
+                ));
+            }
+        }
+    }
+}
+
+fn set_other(host: &mut dyn Host, actor: &NativeServerPlayer, target: &str, tier: WorldTier) {
+    let Some(player) = resolve(host, actor, target) else {
+        host.feedback(Text::translate_with_fallback(
+            "apotheosis.command.set_world_tier.missing_player",
+            "No player named %s is online.",
+            &[Text::literal(target.to_owned())],
+        ));
+        return;
+    };
+    let mut state = state_of(host, player.uuid);
+    let changed = state.force_active(tier);
+    if changed && !store(host, player.uuid, &state) {
+        return;
+    }
+    remember(player.uuid, tier);
+    host.feedback(Text::translate_with_fallback(
+        "apotheosis.command.set_world_tier.done",
+        "Set %s's world tier to %s.",
+        &[
+            Text::literal(player.name.clone()),
+            tier.component(),
+        ],
+    ));
+}
+
+/// The player a name names: the acting one or an online guest. A vanilla
+/// server's offline players are not reachable from a mod's hook.
+fn resolve(
+    host: &mut dyn Host,
+    actor: &NativeServerPlayer,
+    name: &str,
+) -> Option<NativeServerPlayer> {
+    if actor.name.eq_ignore_ascii_case(name) {
+        return Some(actor.clone());
+    }
+    host.server_players()
+        .into_iter()
+        .find(|player| player.name.eq_ignore_ascii_case(name))
+}
+
+fn rejection_line(rejection: Rejection) -> Text {
+    match rejection {
+        Rejection::Usage => Text::translate_with_fallback(
+            "apotheosis.command.world_tier.usage",
+            "Usage: /apoth world_tier [haven|frontier|ascent|summit|pinnacle], /apoth set_world_tier <player> <tier>",
+            &[],
+        ),
+        Rejection::UnknownTier => Text::translate_with_fallback(
+            "apotheosis.command.world_tier.unknown_tier",
+            "Unknown world tier: choose haven, frontier, ascent, summit or pinnacle.",
+            &[],
+        ),
+        Rejection::NotOperator => Text::translate_with_fallback(
+            "apotheosis.command.set_world_tier.denied",
+            "Only operators can set another player's world tier.",
+            &[],
+        ),
+    }
+}
+
+/// The tiers' names as one translated line: `Haven, Frontier`.
+fn names(tiers: &[WorldTier]) -> Text {
+    let mut line = Text::literal("");
+    for (index, tier) in tiers.iter().enumerate() {
+        if index > 0 {
+            line = line.append(Text::literal(", "));
+        }
+        line = line.append(tier.component());
+    }
+    line
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A state with every slot filled at `rarity` and no kills yet.
+    fn geared(rarity: Tier) -> State {
+        let mut state = State::default();
+        for slot in GearSlot::ALL {
+            state.progress.note_gear(slot, Some(rarity));
+        }
+        state.progress.grant();
+        state
+    }
+
+    fn unlocked(state: &State) -> Vec<WorldTier> {
+        state.unlocked()
+    }
+
+    #[test]
+    fn haven_is_active_and_unlocked_by_default() {
+        let state = State::default();
+        assert_eq!(state.tier(), WorldTier::Haven);
+        assert_eq!(unlocked(&state), vec![WorldTier::Haven]);
+        assert!(!state.is_unlocked(WorldTier::Frontier));
+        assert_eq!(WorldTier::from_id("PINNACLE"), Some(WorldTier::Pinnacle));
+        assert_eq!(WorldTier::from_id("nope"), None);
+    }
+
+    #[test]
+    fn frontier_needs_a_piece_in_every_slot() {
+        let mut state = State::default();
+        for slot in [GearSlot::Head, GearSlot::Chest, GearSlot::Legs, GearSlot::Feet] {
+            state.progress.note_gear(slot, Some(Tier::Common));
+        }
+        assert!(state.progress.grant().is_empty(), "four slots are not enough");
+        assert!(!state.is_unlocked(WorldTier::Frontier));
+
+        state.progress.note_gear(GearSlot::Hand, Some(Tier::Uncommon));
+        assert_eq!(state.progress.grant(), vec![WorldTier::Frontier]);
+        assert!(state.is_unlocked(WorldTier::Frontier));
+        // A higher rarity in one slot stands for the lower one.
+        assert!(state.progress.all_at_least(Tier::Common));
+    }
+
+    #[test]
+    fn a_slot_keeps_its_best_rarity() {
+        let mut state = State::default();
+        state.progress.note_gear(GearSlot::Head, Some(Tier::Rare));
+        state.progress.note_gear(GearSlot::Head, Some(Tier::Common));
+        state.progress.note_gear(GearSlot::Head, None);
+        assert_eq!(state.progress.best[GearSlot::Head.index()], Some(Tier::Rare));
+        assert!(!state.progress.all_at_least(Tier::Uncommon));
+    }
+
+    #[test]
+    fn criteria_are_memorised_apart() {
+        // One slot at common, the rest empty: nothing yet. Taking the piece
+        // off does not lose what was seen, and the other four complete it
+        // later.
+        let mut state = State::default();
+        state.progress.note_gear(GearSlot::Head, Some(Tier::Common));
+        state.progress.note_gear(GearSlot::Head, None);
+        assert!(state.progress.grant().is_empty());
+        for slot in [GearSlot::Chest, GearSlot::Legs, GearSlot::Feet, GearSlot::Hand] {
+            state.progress.note_gear(slot, Some(Tier::Common));
+        }
+        assert_eq!(state.progress.grant(), vec![WorldTier::Frontier]);
+    }
+
+    #[test]
+    fn each_boss_unlocks_the_tier_above_its_gear() {
+        // Ascent: uncommon in all five and an invader.
+        let mut state = geared(Tier::Uncommon);
+        assert_eq!(unlocked(&state), vec![WorldTier::Haven, WorldTier::Frontier]);
+        state.progress.note_kill(Kill::Invader);
+        assert_eq!(state.progress.grant(), vec![WorldTier::Ascent]);
+
+        // Summit: rare in all five and the Wither. Better gear alone stops at
+        // Frontier while a boss is missing.
+        let mut state = geared(Tier::Rare);
+        assert_eq!(unlocked(&state), vec![WorldTier::Haven, WorldTier::Frontier]);
+        state.progress.note_kill(Kill::Wither);
+        // The criteria are independent, as Java's advancements are: the rare
+        // set and the Wither open Summit, while Ascent still wants an invader.
+        assert_eq!(state.progress.grant(), vec![WorldTier::Summit]);
+        assert!(!state.is_unlocked(WorldTier::Ascent));
+
+        // Pinnacle: epic in all five and the dragon.
+        let mut state = geared(Tier::Epic);
+        assert_eq!(unlocked(&state), vec![WorldTier::Haven, WorldTier::Frontier]);
+        state.progress.note_kill(Kill::Dragon);
+        assert_eq!(state.progress.grant(), vec![WorldTier::Pinnacle]);
+    }
+
+    #[test]
+    fn a_kill_without_the_gear_unlocks_nothing() {
+        let mut state = State::default();
+        state.progress.note_kill(Kill::Invader);
+        state.progress.note_kill(Kill::Wither);
+        state.progress.note_kill(Kill::Dragon);
+        assert!(state.progress.grant().is_empty());
+        assert_eq!(unlocked(&state), vec![WorldTier::Haven]);
+    }
+
+    #[test]
+    fn a_tier_is_unlocked_once_and_announced_once() {
+        let mut state = geared(Tier::Epic);
+        state.progress.note_kill(Kill::Wither);
+        state.progress.note_kill(Kill::Dragon);
+        let first = state.progress.grant();
+        assert!(first.contains(&WorldTier::Pinnacle));
+        assert!(state.progress.grant().is_empty(), "a second check regrants");
+    }
+
+    #[test]
+    fn a_locked_tier_is_refused() {
+        let mut state = State::default();
+        assert_eq!(
+            state.set_active(WorldTier::Summit),
+            Change::Locked(WorldTier::Summit)
+        );
+        assert_eq!(state.tier(), WorldTier::Haven);
+
+        let mut state = geared(Tier::Common);
+        assert_eq!(state.set_active(WorldTier::Summit), Change::Locked(WorldTier::Summit));
+        assert_eq!(
+            state.set_active(WorldTier::Frontier),
+            Change::Changed(WorldTier::Frontier)
+        );
+        assert_eq!(state.tier(), WorldTier::Frontier);
+        assert_eq!(
+            state.set_active(WorldTier::Frontier),
+            Change::AlreadyActive
+        );
+    }
+
+    #[test]
+    fn an_operator_bypasses_the_unlock_check() {
+        let mut state = State::default();
+        assert!(state.force_active(WorldTier::Pinnacle));
+        assert_eq!(state.tier(), WorldTier::Pinnacle);
+        assert!(!state.is_unlocked(WorldTier::Pinnacle), "unlocks are untouched");
+        assert!(!state.force_active(WorldTier::Pinnacle));
+    }
+
+    #[test]
+    fn only_level_two_and_above_is_an_operator() {
+        assert!(!is_operator(0));
+        assert!(!is_operator(1));
+        assert!(is_operator(2));
+        assert!(is_operator(4));
+    }
+
+    #[test]
+    fn command_lines_plan_and_refuse() {
+        assert_eq!(plan(&["world_tier"], 0), Ok(Action::Show));
+        assert_eq!(
+            plan(&["world_tier", "Summit"], 0),
+            Ok(Action::Activate(WorldTier::Summit))
+        );
+        assert_eq!(
+            plan(&["world_tier", "nope"], 0),
+            Err(Rejection::UnknownTier)
+        );
+        assert_eq!(plan(&["world_tier", "summit", "x"], 0), Err(Rejection::Usage));
+
+        // The operator command is refused below level 2, whatever the words.
+        assert_eq!(
+            plan(&["set_world_tier", "Bob", "summit"], 1),
+            Err(Rejection::NotOperator)
+        );
+        assert_eq!(
+            plan(&["set_world_tier", "Bob", "summit"], 2),
+            Ok(Action::Remote {
+                target: "Bob".to_owned(),
+                tier: WorldTier::Summit
+            })
+        );
+        assert_eq!(
+            plan(&["set_world_tier", "Bob", "nope"], 4),
+            Err(Rejection::UnknownTier)
+        );
+        assert_eq!(plan(&["set_world_tier", "Bob"], 4), Err(Rejection::Usage));
+        assert_eq!(plan(&["salvage"], 0), Err(Rejection::Usage));
+    }
+
+    #[test]
+    fn state_round_trips_through_its_codec() {
+        let mut state = State::default();
+        for (slot, rarity) in [
+            (GearSlot::Head, Tier::Mythic),
+            (GearSlot::Chest, Tier::Epic),
+            (GearSlot::Legs, Tier::Rare),
+            (GearSlot::Feet, Tier::Common),
+            (GearSlot::Hand, Tier::Ancient),
+        ] {
+            state.progress.note_gear(slot, Some(rarity));
+        }
+        state.progress.note_kill(Kill::Invader);
+        state.progress.note_kill(Kill::Dragon);
+        state.progress.grant();
+        state.set_active(WorldTier::Ascent);
+
+        let encoded = state.encode();
+        assert_eq!(State::decode(&encoded), Some(state.clone()));
+    }
+
+    #[test]
+    fn a_default_state_round_trips() {
+        let state = State::default();
+        assert_eq!(State::decode(&state.encode()), Some(state));
+    }
+
+    #[test]
+    fn broken_data_is_refused() {
+        let mut data = Compound::new();
+        assert_eq!(State::decode(&data), None, "an empty compound");
+
+        data.insert("tier".into(), Tag::String("haven".into()));
+        data.insert("best".into(), Tag::List(vec![Tag::Int(0); 4]));
+        data.insert("kills".into(), Tag::Int(0));
+        data.insert("unlocked".into(), Tag::Int(1));
+        assert_eq!(State::decode(&data), None, "four slots");
+
+        data.insert("best".into(), Tag::List(vec![Tag::Int(9); 5]));
+        assert_eq!(State::decode(&data), None, "a rarity out of range");
+
+        data.insert("best".into(), Tag::List(vec![Tag::Int(0); 5]));
+        data.insert("tier".into(), Tag::String("olympus".into()));
+        assert_eq!(State::decode(&data), None, "an unknown tier");
+
+        data.insert("tier".into(), Tag::String("haven".into()));
+        assert_eq!(
+            State::decode(&data).map(|state| state.unlocked()),
+            Some(vec![WorldTier::Haven]),
+            "Haven is unlocked even when its bit is absent"
+        );
+    }
+
+    #[test]
+    fn tier_of_starts_at_haven() {
+        assert_eq!(tier_of(0x1234_5678_9abc_def0), WorldTier::Haven);
+    }
+}

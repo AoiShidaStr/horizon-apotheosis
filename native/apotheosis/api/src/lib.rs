@@ -16,8 +16,11 @@
 //! - `loot_drops`: gear a mob drops is rolled into a rarity with affixes (real
 //!   attribute modifiers plus lore), and a kill adds a gem of the level's
 //!   dimension, at its Java weight and purity floor.
-//! - `register_commands` / `perform_command`: `/apoth salvage`. Reforging is
-//!   the reforging tables' own menus (`menus`), as in Java.
+//! - `register_commands` / `perform_command`: `/apoth salvage`, and the world
+//!   tiers' `/apoth world_tier` and operator `/apoth set_world_tier`.
+//!   Reforging is the reforging tables' own menus (`menus`), as in Java.
+//! - `player_tick`, `mob_killed` and `living_death`: the gear and boss criteria
+//!   that unlock a player's world tiers (`tiers`).
 //! - `prepare_item_enchant`: Apothic Eterna from nearby shelf blocks raises the
 //!   three enchanting offers; shelves are read through Horizon's server Host.
 //! - `use_item`: scrapping, superior scrapping and extraction tomes move
@@ -61,7 +64,8 @@ use horizon_client::mod_api::{
     ArrowLooseEvent, BreakSpeedEvent, EntityJoinLevelEvent, ExperienceOrbPickupEvent, Flow, Hooks,
     Host, ItemDamagedEvent, ItemStack, LeftClickBlockEvent, LivingEquipmentChangeEvent,
     LivingHealEvent, LivingIncomingDamageEvent, LivingIncomingDamageV2Event, LootDropsEvent,
-    MobSpawnedEvent, ModifyDefaultComponentsEvent, NativeCommand, OnEquipEvent, PerformCommandEvent,
+    MobKilledEvent, MobSpawnedEvent, ModifyDefaultComponentsEvent, NativeCommand, OnEquipEvent,
+    PerformCommandEvent,
     PlaceBlockEvent, PlayerTickEvent, ProjectileLaunchEvent, RegisterCommandsEvent,
     RightClickBlockEvent, Tag, Text, TickEvent, TooltipEvent, UseItemOnEvent, serde_json,
 };
@@ -71,6 +75,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 mod menus;
 mod sockets;
+mod tiers;
 
 pub fn hooks() -> Box<dyn Hooks> {
     Box::new(Apotheosis)
@@ -740,6 +745,18 @@ impl Hooks for Apotheosis {
         affix_effects::mob_spawned(host, event);
     }
 
+    fn mob_killed(&self, host: &mut dyn Host, event: &mut MobKilledEvent<'_>) {
+        tiers::mob_killed(host, event);
+    }
+
+    fn living_death(
+        &self,
+        host: &mut dyn Host,
+        event: &mut horizon_client::mod_api::LivingDeathEvent<'_>,
+    ) -> Flow {
+        tiers::living_death(host, event)
+    }
+
     fn living_heal(&self, event: &mut LivingHealEvent) -> Flow {
         attributes::living_heal(event);
         Flow::Continue
@@ -777,6 +794,7 @@ impl Hooks for Apotheosis {
 
     fn player_tick(&self, host: &mut dyn Host, event: &mut PlayerTickEvent) {
         attributes::tick(host, event);
+        tiers::player_tick(host);
     }
 
     fn tick(&self, host: &mut dyn Host, _event: &mut TickEvent) {
@@ -877,6 +895,15 @@ impl Hooks for Apotheosis {
     fn register_commands(&self, _host: &mut dyn Host, event: &mut RegisterCommandsEvent<'_>) {
         event.commands.push(NativeCommand::new("apoth"));
         event.commands.push(NativeCommand::new("apoth salvage"));
+        event.commands.push(NativeCommand::new("apoth world_tier"));
+        event.commands
+            .push(NativeCommand::new("apoth world_tier <tier:word>"));
+        // Java's `set_world_tier` needs permission 2, and skips the unlock
+        // check.
+        event.commands.push(NativeCommand::op(
+            "apoth set_world_tier <target:player_name> <tier:word>",
+            2,
+        ));
     }
 
     fn perform_command(&self, host: &mut dyn Host, event: &mut PerformCommandEvent<'_>) -> Flow {
@@ -888,7 +915,7 @@ impl Hooks for Apotheosis {
         if words.len() < 2 {
             host.feedback(Text::translate_with_fallback(
                 "apotheosis.command.help",
-                "Apotheosis: /apoth salvage — break an affixed piece into rarity materials. Reforge at a reforging table.",
+                "Apotheosis: /apoth salvage — break an affixed piece into rarity materials. /apoth world_tier — show or change your world tier. Reforge at a reforging table.",
                 &[],
             ));
             return Flow::Cancel;
@@ -900,6 +927,9 @@ impl Hooks for Apotheosis {
                 i32::from(event.player.selected_slot),
             );
             return Flow::Cancel;
+        }
+        if words[1] == "world_tier" || words[1] == "set_world_tier" {
+            return tiers::command(host, event.player, &words[1..]);
         }
         host.feedback(Text::translate_with_fallback(
             "apotheosis.command.unknown",
