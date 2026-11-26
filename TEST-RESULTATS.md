@@ -71,3 +71,25 @@ Au survol, une gemme affiche l'infobulle de Java : nom dans la couleur de sa pur
 
 - Au survol, une étagère affiche ses statistiques d'enchantement comme Apothic Enchanting (vérifié : Bibliothèque Profonde, Éterna +5.00 (Max 70.00), Quanta +5.00 %, Arcana +5.00 %). La table compte maintenant aussi les bibliothèques et crânes vanilla, comme l'annonce leur infobulle.
 - Taux de butin : un monstre ordinaire tué par un joueur a 4 % de chance de gemme et 4 % d'équipement affixé, comme en Java. Mais 2 % des apparitions nocturnes devenaient des boss sans aucun délai : corrigé aux taux Java (1,8 % surface et End, 2,5 % Nether) avec le délai de 3 minutes entre deux boss (par dimension).
+
+## Troisième test en jeu : fin de jeu (26/11/2026)
+
+Client et serveur Docker reconstruits avec les commits b9cdb4e à 44d54f0, joueur en survie.
+
+| Fonction | Résultat |
+|---|---|
+| `/apoth world_tier` | affiche « Palier de monde : Havre » et les paliers déverrouillés, en français |
+| `/apoth world_tier pinnacle` sans déverrouillage | refusé : « Pinacle n'est pas encore déverrouillé. » |
+| `/apoth set_world_tier AoiShida pinnacle` (opérateur) | accepté sans contrôle, comme en Java |
+| Invocateur de boss sur un bloc | un Husk de 90 PV apparaît, un invocateur consommé ; l'annonce « Sauvage Zombie du Crépuscule s'est éveillé tout près ! » s'affiche |
+| Table de reforge, choix mythique | coûte 3 perles et 1 niveau, l'épée devient mythique |
+| Table d'augmentation | liste les 4 affixes avec leur niveau ; Améliorer : Giant Slaying 0,40 → 0,65, 2 sceaux d'amélioration et l'XP du niveau 225 retirés (308 → 221 niveaux) |
+| Sceau de malice (main secondaire : l'épée) | « Malice : Long suralimenté, Briserunes remis à zéro. », sceau consommé |
+| Sceau de suprématie | « Suprématie : tous les affixes sont à 1,5 au moins. » |
+
+Corrigé pendant le test (44d54f0) : le nom français « [NYI] Sceau d'Amélioration » venu du Java, l'aide qui citait
+encore `/apoth reforge`, et les coûts de la table d'augmentation qui recouvraient le mot « Inventaire ».
+
+Limites connues : les noms d'affixes de l'écran de la table d'augmentation restent en anglais (l'API 415 ne traduit pas
+un texte dessiné à l'écran ; ils sont traduits dans le chat et les infobulles) ; l'invocateur ne peut pas viser le
+joueur (pas de setter de cible à l'API 415) ; le sceau de suprématie n'a pas encore de source en survie (Gateways).
