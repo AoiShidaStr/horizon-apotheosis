@@ -12,6 +12,8 @@ use crate::sockets::Purity;
 /// One gem bonus: the classes of gear it applies to, and what it does.
 pub struct Bonus {
     pub classes: &'static [GemClass],
+    /// The Java `gem_class` key it is shown under: `gem_class.<key>`.
+    pub key: &'static str,
     pub kind: Kind,
 }
 
@@ -61,6 +63,7 @@ pub const GEMS: [Gem; 21] = [
         bonuses: &[
         Bonus {
             classes: &[GemClass::MeleeWeapon, GemClass::Trident],
+            key: "light_weapon",
             kind: Kind::Attribute {
                 attribute: "minecraft:attack_damage",
                 operation: "add_value",
@@ -69,6 +72,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Chestplate, GemClass::Leggings],
+            key: "core_armor",
             kind: Kind::Attribute {
                 attribute: "minecraft:knockback_resistance",
                 operation: "add_value",
@@ -88,6 +92,7 @@ pub const GEMS: [Gem; 21] = [
         bonuses: &[
         Bonus {
             classes: &[GemClass::MeleeWeapon, GemClass::Trident],
+            key: "light_weapon",
             kind: Kind::Attribute {
                 attribute: "minecraft:attack_speed",
                 operation: "add_multiplied_base",
@@ -96,6 +101,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Chestplate, GemClass::Leggings],
+            key: "core_armor",
             kind: Kind::Attribute {
                 attribute: "minecraft:max_health",
                 operation: "add_value",
@@ -104,6 +110,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Shield],
+            key: "shield",
             kind: Kind::Attribute {
                 attribute: "minecraft:max_health",
                 operation: "add_multiplied_total",
@@ -123,6 +130,7 @@ pub const GEMS: [Gem; 21] = [
         bonuses: &[
         Bonus {
             classes: &[GemClass::MeleeWeapon, GemClass::Trident],
+            key: "light_weapon",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:armor_pierce",
                 operation: "add_value",
@@ -142,6 +150,7 @@ pub const GEMS: [Gem; 21] = [
         bonuses: &[
         Bonus {
             classes: &[GemClass::Bow, GemClass::Trident],
+            key: "ranged_weapon",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:arrow_damage",
                 operation: "add_multiplied_base",
@@ -161,6 +170,7 @@ pub const GEMS: [Gem; 21] = [
         bonuses: &[
         Bonus {
             classes: &[GemClass::Chestplate, GemClass::Leggings],
+            key: "core_armor",
             kind: Kind::Attribute {
                 attribute: "minecraft:armor",
                 operation: "add_value",
@@ -169,6 +179,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::MeleeWeapon, GemClass::Trident],
+            key: "light_weapon",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:life_steal",
                 operation: "add_value",
@@ -177,6 +188,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Shield],
+            key: "shield",
             kind: Kind::Attribute {
                 attribute: "minecraft:armor",
                 operation: "add_multiplied_total",
@@ -196,6 +208,7 @@ pub const GEMS: [Gem; 21] = [
         bonuses: &[
         Bonus {
             classes: &[GemClass::Bow],
+            key: "bow",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:arrow_velocity",
                 operation: "add_multiplied_base",
@@ -204,6 +217,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Breaker, GemClass::Shears],
+            key: "tools",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:mining_speed",
                 operation: "add_value",
@@ -212,6 +226,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Leggings, GemClass::Boots],
+            key: "lower_armor",
             kind: Kind::Attribute {
                 attribute: "minecraft:movement_speed",
                 operation: "add_multiplied_total",
@@ -231,6 +246,7 @@ pub const GEMS: [Gem; 21] = [
         bonuses: &[
         Bonus {
             classes: &[GemClass::MeleeWeapon],
+            key: "melee_weapon",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:cold_damage",
                 operation: "add_value",
@@ -250,6 +266,7 @@ pub const GEMS: [Gem; 21] = [
         bonuses: &[
         Bonus {
             classes: &[GemClass::MeleeWeapon, GemClass::Trident, GemClass::Bow],
+            key: "weapons",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:crit_chance",
                 operation: "add_value",
@@ -258,6 +275,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Leggings, GemClass::Boots],
+            key: "lower_armor",
             kind: Kind::Attribute {
                 attribute: "minecraft:armor_toughness",
                 operation: "add_multiplied_total",
@@ -266,6 +284,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Leggings, GemClass::Boots],
+            key: "lower_armor",
             kind: Kind::Attribute {
                 attribute: "minecraft:movement_speed",
                 operation: "add_multiplied_total",
@@ -274,6 +293,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Helmet],
+            key: "helmet",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:arrow_velocity",
                 operation: "add_multiplied_total",
@@ -282,6 +302,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Shield],
+            key: "shield",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:dodge_chance",
                 operation: "add_value",
@@ -301,6 +322,7 @@ pub const GEMS: [Gem; 21] = [
         bonuses: &[
         Bonus {
             classes: &[GemClass::Bow],
+            key: "bow",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:draw_speed",
                 operation: "add_multiplied_base",
@@ -309,6 +331,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Breaker, GemClass::Shears],
+            key: "tools",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:mining_speed",
                 operation: "add_multiplied_base",
@@ -317,6 +340,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Boots],
+            key: "boots",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:dodge_chance",
                 operation: "add_value",
@@ -336,6 +360,7 @@ pub const GEMS: [Gem; 21] = [
         bonuses: &[
         Bonus {
             classes: &[GemClass::MeleeWeapon, GemClass::Trident],
+            key: "light_weapon",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:fire_damage",
                 operation: "add_value",
@@ -355,6 +380,7 @@ pub const GEMS: [Gem; 21] = [
         bonuses: &[
         Bonus {
             classes: &[GemClass::Helmet, GemClass::Chestplate, GemClass::Leggings, GemClass::Boots],
+            key: "armor",
             kind: Kind::Attribute {
                 attribute: "minecraft:luck",
                 operation: "add_value",
@@ -363,6 +389,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::MeleeWeapon, GemClass::Trident, GemClass::Bow, GemClass::Breaker],
+            key: "weapon_or_tool",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:experience_gained",
                 operation: "add_multiplied_base",
@@ -382,6 +409,7 @@ pub const GEMS: [Gem; 21] = [
         bonuses: &[
         Bonus {
             classes: &[GemClass::MeleeWeapon, GemClass::Trident],
+            key: "light_weapon",
             kind: Kind::Attribute {
                 attribute: "minecraft:attack_knockback",
                 operation: "add_value",
@@ -390,6 +418,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Chestplate, GemClass::Leggings],
+            key: "core_armor",
             kind: Kind::Attribute {
                 attribute: "minecraft:armor_toughness",
                 operation: "add_value",
@@ -398,6 +427,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Shield],
+            key: "shield",
             kind: Kind::Attribute {
                 attribute: "minecraft:armor_toughness",
                 operation: "add_multiplied_base",
@@ -406,6 +436,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Boots],
+            key: "boots",
             kind: Kind::Attribute {
                 attribute: "minecraft:max_health",
                 operation: "add_multiplied_total",
@@ -414,6 +445,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Boots],
+            key: "boots",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:life_steal",
                 operation: "add_value",
@@ -433,6 +465,7 @@ pub const GEMS: [Gem; 21] = [
         bonuses: &[
         Bonus {
             classes: &[GemClass::MeleeWeapon, GemClass::Bow],
+            key: "weapons",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:crit_damage",
                 operation: "add_multiplied_base",
@@ -441,6 +474,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Chestplate],
+            key: "chestplate",
             kind: Kind::Attribute {
                 attribute: "minecraft:max_health",
                 operation: "add_multiplied_base",
@@ -449,6 +483,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Helmet],
+            key: "helmet",
             kind: Kind::Attribute {
                 attribute: "minecraft:attack_damage",
                 operation: "add_multiplied_total",
@@ -468,6 +503,7 @@ pub const GEMS: [Gem; 21] = [
         bonuses: &[
         Bonus {
             classes: &[GemClass::MeleeWeapon, GemClass::Trident],
+            key: "light_weapon",
             kind: Kind::Enchantment {
                 id: "minecraft:sharpness",
                 existing_only: true,
@@ -476,6 +512,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Chestplate, GemClass::Leggings],
+            key: "core_armor",
             kind: Kind::Enchantment {
                 id: "minecraft:protection",
                 existing_only: true,
@@ -484,6 +521,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Breaker, GemClass::Shears],
+            key: "tools",
             kind: Kind::Enchantment {
                 id: "minecraft:fortune",
                 existing_only: true,
@@ -503,6 +541,7 @@ pub const GEMS: [Gem; 21] = [
         bonuses: &[
         Bonus {
             classes: &[GemClass::Bow],
+            key: "bow",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:draw_speed",
                 operation: "add_multiplied_total",
@@ -511,6 +550,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Shield],
+            key: "shield",
             kind: Kind::Attribute {
                 attribute: "minecraft:armor",
                 operation: "add_multiplied_base",
@@ -519,6 +559,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Shield],
+            key: "shield",
             kind: Kind::Attribute {
                 attribute: "minecraft:armor_toughness",
                 operation: "add_multiplied_base",
@@ -527,6 +568,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Shield],
+            key: "shield",
             kind: Kind::Attribute {
                 attribute: "minecraft:movement_speed",
                 operation: "add_multiplied_total",
@@ -546,6 +588,7 @@ pub const GEMS: [Gem; 21] = [
         bonuses: &[
         Bonus {
             classes: &[GemClass::MeleeWeapon, GemClass::Trident, GemClass::Bow],
+            key: "weapons",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:armor_shred",
                 operation: "add_value",
@@ -554,6 +597,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::MeleeWeapon, GemClass::Trident, GemClass::Bow],
+            key: "weapons",
             kind: Kind::Attribute {
                 attribute: "minecraft:armor",
                 operation: "add_multiplied_total",
@@ -562,6 +606,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Boots],
+            key: "boots",
             kind: Kind::Attribute {
                 attribute: "minecraft:knockback_resistance",
                 operation: "add_multiplied_total",
@@ -570,6 +615,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Boots],
+            key: "boots",
             kind: Kind::Attribute {
                 attribute: "minecraft:attack_knockback",
                 operation: "add_multiplied_total",
@@ -589,6 +635,7 @@ pub const GEMS: [Gem; 21] = [
         bonuses: &[
         Bonus {
             classes: &[GemClass::Anything],
+            key: "anything",
             kind: Kind::Enchantment {
                 id: "minecraft:sharpness",
                 existing_only: false,
@@ -608,6 +655,7 @@ pub const GEMS: [Gem; 21] = [
         bonuses: &[
         Bonus {
             classes: &[GemClass::MeleeWeapon, GemClass::Trident],
+            key: "light_weapon",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:armor_shred",
                 operation: "add_multiplied_base",
@@ -627,6 +675,7 @@ pub const GEMS: [Gem; 21] = [
         bonuses: &[
         Bonus {
             classes: &[GemClass::MeleeWeapon, GemClass::Trident],
+            key: "light_weapon",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:life_steal",
                 operation: "add_value",
@@ -635,6 +684,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::MeleeWeapon, GemClass::Trident],
+            key: "light_weapon",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:life_steal",
                 operation: "add_multiplied_total",
@@ -643,6 +693,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Helmet],
+            key: "helmet",
             kind: Kind::Attribute {
                 attribute: "minecraft:attack_damage",
                 operation: "add_multiplied_total",
@@ -651,6 +702,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Helmet],
+            key: "helmet",
             kind: Kind::Attribute {
                 attribute: "minecraft:max_health",
                 operation: "add_multiplied_total",
@@ -659,6 +711,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Chestplate],
+            key: "chestplate",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:healing_received",
                 operation: "add_multiplied_base",
@@ -678,6 +731,7 @@ pub const GEMS: [Gem; 21] = [
         bonuses: &[
         Bonus {
             classes: &[GemClass::Breaker],
+            key: "breaker",
             kind: Kind::Enchantment {
                 id: "minecraft:efficiency",
                 existing_only: true,
@@ -686,6 +740,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Helmet],
+            key: "helmet",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:fire_damage",
                 operation: "add_multiplied_total",
@@ -705,6 +760,7 @@ pub const GEMS: [Gem; 21] = [
         bonuses: &[
         Bonus {
             classes: &[GemClass::Bow],
+            key: "bow",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:armor_pierce",
                 operation: "add_value",
@@ -713,6 +769,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Chestplate],
+            key: "chestplate",
             kind: Kind::Attribute {
                 attribute: "minecraft:attack_damage",
                 operation: "add_multiplied_base",
@@ -721,6 +778,7 @@ pub const GEMS: [Gem; 21] = [
         },
         Bonus {
             classes: &[GemClass::Chestplate],
+            key: "chestplate",
             kind: Kind::Attribute {
                 attribute: "apothic_attributes:healing_received",
                 operation: "add_multiplied_total",
@@ -731,4 +789,25 @@ pub const GEMS: [Gem; 21] = [
         unsupported: &["omnetic"],
         unsupported_attributes: &["apothic_attributes:prot_pierce", "minecraft:generic.scale", "minecraft:player.entity_interaction_range"],
     },
+];
+
+/// The English text of each `gem_class.<key>` a bonus uses: the fallback of
+/// the key the lang files translate.
+pub const CLASS_TEXT: [(&str, &str); 16] = [
+    ("anything", "Any gear"),
+    ("armor", "Armor"),
+    ("boots", "Boots"),
+    ("bow", "Bows and crossbows"),
+    ("breaker", "Digging tools"),
+    ("chestplate", "Chestplates"),
+    ("core_armor", "Chestplates and leggings"),
+    ("helmet", "Helmets"),
+    ("light_weapon", "Melee weapons and tridents"),
+    ("lower_armor", "Leggings and boots"),
+    ("melee_weapon", "Melee weapons"),
+    ("ranged_weapon", "Ranged weapons"),
+    ("shield", "Shields"),
+    ("tools", "Tools"),
+    ("weapon_or_tool", "Weapons and tools"),
+    ("weapons", "Weapons"),
 ];

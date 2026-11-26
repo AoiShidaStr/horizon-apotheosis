@@ -15,7 +15,8 @@ script reads that data read-only and writes:
                                             above its floor, as Apotheosis lists
                                             them in its creative tab; its default
                                             components carry the type, purity
-                                            and coloured name
+                                            and name (the native tooltip hook
+                                            writes the rest)
   the creative tab and the `apotheosis:gems` tag, with those items
 
 The generated Rust is a data table, not code copied from Apotheosis: only the
@@ -39,8 +40,7 @@ RUST = ROOT / "native" / "apotheosis" / "api" / "src" / "java_gems.rs"
 MODELS = ROOT / "content" / "assets" / "apotheosis" / "models" / "item"
 
 PURITIES = ("cracked", "chipped", "flawed", "normal", "flawless", "perfect")
-# `Purity::colour` and the rarity `gems::stack` gave the generic gem.
-PURITY_COLOURS = ("#808080", "#A0A0A0", "#C8C8C8", "#55FF55", "#55AAFF", "#FFD700")
+# The rarity `gems::stack` gave the generic gem.
 PURITY_RARITIES = ("common", "uncommon", "uncommon", "rare", "epic", "epic")
 ITEM_DECLS = ROOT / "content" / "data" / "apotheosis" / "horizon" / "item"
 ITEM_MODELS = ROOT / "content" / "assets" / "apotheosis" / "items"
@@ -145,9 +145,11 @@ ENCHANT_NAMES = {
     "minecraft:efficiency": ("Efficiency", "Efficacité"),
 }
 
-# The port's own wording for the gem item's lore (`minecraft:lore`): the gear
-# categories (`gem_class.<key>`, one per Java `gem_class` key), the headings and
-# the purity words.  Written here, not taken from the Java lang files.
+# The port's own wording for a gem's tooltip, which the native tooltip hook
+# builds (`gems::tooltip_lines`): the gear categories (`gem_class.<key>`, one
+# per Java `gem_class` key, their English text also written into the Rust as
+# `CLASS_TEXT`), the headings and the purity words.  Written here, not taken
+# from the Java lang files.
 GEM_CLASS_TEXT = {
     "anything": ("Any gear", "Tout équipement"),
     "armor": ("Armor", "Armures"),
@@ -185,22 +187,6 @@ PURITY_TEXT = {
 # The purity word a gem's item name carries: none at Normal, as in Java.
 PURITY_PREFIX_EN = ("Cracked ", "Chipped ", "Flawed ", "", "Flawless ", "Perfect ")
 PURITY_SUFFIX_FR = ("fêlée", "ébréchée", "imparfaite", "", "sans défaut", "parfaite")
-SOCKETABLE_COLOUR = "#0AFF0A"
-SOCKETED_COLOUR = "#FFAA00"
-# Vanilla attributes the native `gems::attribute::format` shows as a plain
-# number; every other vanilla one is a percentage.
-VANILLA_FLAT = {
-    "minecraft:attack_damage", "minecraft:armor", "minecraft:armor_toughness",
-    "minecraft:max_health", "minecraft:luck", "minecraft:knockback_resistance",
-    "minecraft:attack_knockback",
-}
-# The Apothic Attributes `Attr::is_percent` (attributes.rs) shows as numbers.
-APOTHIC_FLAT = {
-    "apothic_attributes:armor_pierce", "apothic_attributes:fire_damage",
-    "apothic_attributes:cold_damage", "apothic_attributes:current_hp_damage",
-    "apothic_attributes:prot_pierce",
-}
-
 # Bonus types this port implements.  Every other type is listed in the gem's
 # `unsupported` field, and the README says what it would have done.
 SUPPORTED_TYPES = ("attribute", "multi_attribute", "enchantment")
@@ -238,23 +224,6 @@ def class_key(gem_class: object) -> str:
     if isinstance(gem_class, dict) and isinstance(gem_class.get("key"), str):
         return gem_class["key"]
     raise SystemExit(f"gem_class without a key: {gem_class!r}")
-
-
-def format_amount(attribute: str, amount: float) -> str:
-    """The value as the native `gems::attribute::format` writes it."""
-    sign = "" if amount < 0 else "+"
-    if attribute.startswith("minecraft:"):
-        percent = attribute not in VANILLA_FLAT
-    else:
-        percent = attribute not in APOTHIC_FLAT
-    if percent:
-        pct = amount * 100.0
-        if abs(pct - round(pct)) < 0.05:
-            return f"{sign}{pct:.0f}%"
-        return f"{sign}{pct:.1f}%"
-    if abs(amount - round(amount)) < 0.05:
-        return f"{sign}{amount:.0f}"
-    return f"{sign}{amount:.2f}"
 
 
 def values_of(raw: object) -> list[float | None]:
@@ -301,6 +270,7 @@ def rust_gem(
         bonuses.append(
             "        Bonus {\n"
             f"            classes: &[{class_list}],\n"
+            f'            key: "{key}",\n'
             f"            kind: {body},\n"
             "        },"
         )
@@ -441,77 +411,6 @@ def write_json(path: Path, value: dict) -> None:
     )
 
 
-def plain(text: dict) -> dict:
-    return {**text, "italic": False}
-
-
-def modifier_text(entry: dict, amount: float) -> dict:
-    """`+4 Fire Damage`: the value as the native code formats it, then the
-    attribute's (or enchantment's) translated name."""
-    if "enchantment" in entry:
-        enchantment = entry["enchantment"]
-        value = f"+{int(amount)}"
-        name = {
-            "translate": "enchantment." + enchantment.replace(":", "."),
-            "fallback": ENCHANT_NAMES[enchantment][0],
-        }
-    else:
-        attribute = entry["attribute"]
-        value = format_amount(attribute, amount)
-        namespace, path = attribute.split(":", 1)
-        if namespace == "minecraft":
-            key = f"attribute.name.{path}"
-        else:
-            key = f"apotheosis.attribute.{path}"
-        name = {"translate": key, "fallback": ATTR_NAMES[attribute][0]}
-    return {"text": "", "extra": [{"text": value}, {"text": " "}, name]}
-
-
-def gem_lore(info: dict, index: int) -> list[dict]:
-    """The lore a gem item shows at purity `index`: the gear it fits, then
-    each bonus it pays out at that purity, in Java's tooltip layout."""
-    paid = [e for e in info["lore_bonuses"] if e["values"][index] is not None]
-    classes: list[str] = []
-    for entry in paid:
-        if entry["class"] not in classes:
-            classes.append(entry["class"])
-    lines = [plain({
-        "translate": "text.apotheosis.socketable_into",
-        "fallback": LORE_TEXT["text.apotheosis.socketable_into"][0],
-        "color": SOCKETABLE_COLOUR,
-    })]
-    for key in classes:
-        lines.append(plain({
-            "translate": f"gem_class.{key}",
-            "fallback": GEM_CLASS_TEXT[key][0],
-            "color": SOCKETABLE_COLOUR,
-        }))
-    lines.append(plain({"text": ""}))
-    lines.append(plain({
-        "translate": "text.apotheosis.when_socketed_in",
-        "fallback": LORE_TEXT["text.apotheosis.when_socketed_in"][0],
-        "color": SOCKETED_COLOUR,
-    }))
-    for entry in paid:
-        lines.append(plain({
-            "translate": "text.apotheosis.dot_prefix",
-            "fallback": "• %s",
-            "color": SOCKETED_COLOUR,
-            "with": [{
-                "translate": "text.apotheosis.gem_bonus",
-                "fallback": "%s: %s",
-                "with": [
-                    {
-                        "translate": f"gem_class.{entry['class']}",
-                        "fallback": GEM_CLASS_TEXT[entry["class"]][0],
-                    },
-                    modifier_text(entry, entry["values"][index]),
-                ],
-            }],
-        }))
-    return lines
-
-
 def english_item_name(info: dict, index: int) -> str:
     """`Cracked Solar Gem`; a Normal gem has no purity word."""
     return PURITY_PREFIX_EN[index] + info["name"]
@@ -548,10 +447,7 @@ def gem_items(models: list[dict]) -> list[str]:
                     "minecraft:item_name": {
                         "translate": f"item.apotheosis.{name}",
                         "fallback": english_item_name(info, index),
-                        "color": PURITY_COLOURS[index],
-                        "italic": False,
                     },
-                    "minecraft:lore": gem_lore(info, index),
                 },
             })
             write_json(ITEM_MODELS / f"{name}.json", {
@@ -624,6 +520,10 @@ def main() -> None:
         rust, info = rust_gem(path, lang, fr_lang, gem_id)
         entries.append(rust)
         models.append(info)
+    used_classes = {e["class"] for info in models for e in info["lore_bonuses"]}
+    missing = sorted(used_classes - GEM_CLASS_TEXT.keys())
+    if missing:
+        raise SystemExit(f"no wording for gem classes {missing}")
 
     header = '''//! Apotheosis 8.9.0's gems, generated by `tools/gen_java_gems.py`.
 //!
@@ -639,6 +539,8 @@ use crate::sockets::Purity;
 /// One gem bonus: the classes of gear it applies to, and what it does.
 pub struct Bonus {
     pub classes: &'static [GemClass],
+    /// The Java `gem_class` key it is shown under: `gem_class.<key>`.
+    pub key: &'static str,
     pub kind: Kind,
 }
 
@@ -681,7 +583,20 @@ pub struct Gem {
 pub const GEMS: [Gem; %d] = [
 %s
 ];
-''' % (len(entries), "\n".join(entries))
+
+/// The English text of each `gem_class.<key>` a bonus uses: the fallback of
+/// the key the lang files translate.
+pub const CLASS_TEXT: [(&str, &str); %d] = [
+%s
+];
+''' % (
+        len(entries),
+        "\n".join(entries),
+        len(used_classes),
+        "\n".join(
+            f'    ("{key}", "{GEM_CLASS_TEXT[key][0]}"),' for key in sorted(used_classes)
+        ),
+    )
     RUST.write_text(header, encoding="utf-8", newline="\n")
 
     for info in models:
@@ -704,10 +619,6 @@ pub const GEMS: [Gem; %d] = [
     lang_dir = ROOT / "content" / "assets" / "apotheosis" / "lang"
     fr_names = json.loads((lang_dir / "fr_fr.json").read_text(encoding="utf-8"))
     item_names = gem_item_names(models, ids, fr_names)
-    used_classes = {e["class"] for info in models for e in info["lore_bonuses"]}
-    missing = sorted(used_classes - GEM_CLASS_TEXT.keys())
-    if missing:
-        raise SystemExit(f"no wording for gem classes {missing}")
     own_text = {
         **LORE_TEXT,
         **{f"gem_class.{key}": GEM_CLASS_TEXT[key] for key in sorted(used_classes)},
@@ -726,7 +637,7 @@ pub const GEMS: [Gem; %d] = [
                     added += 1
         # Each gem item's own name key (its `minecraft:item_name` translates
         # it, as does /give's message), with its purity worded, plus the
-        # lore's headings, gear categories and purity words: the port's own
+        # tooltip's headings, gear categories and purity words: the port's own
         # text, kept in step with this generator.
         for key, texts in own_text.items():
             if data.get(key) != texts[column - 1]:

@@ -804,7 +804,7 @@ fn socket_lore(socket: &Socket, entry: &crate::java_gems::Gem, item: &str) -> Ve
     lines
 }
 
-/// The tooltip lines this module adds: a gem's purity and how to socket it, or
+/// The tooltip lines this module adds: how to socket a gem, or
 /// a piece's sockets and what sits in them.
 pub fn tooltip(event: &mut TooltipEvent<'_>) {
     if let Some(seal) = seal(&event.stack.item) {
@@ -815,25 +815,9 @@ pub fn tooltip(event: &mut TooltipEvent<'_>) {
         return;
     }
     if gems::of_stack(event.stack).is_some() {
-        // A per-purity gem item's lore already says this; only the generic
-        // gem has no lore of its own.
-        if !gems::generic_gem(&event.stack.item) {
-            return;
-        }
-        let purity = purity_of(event.stack);
-        event.lines.push((
-            Text::translate_with_fallback(
-                "apotheosis.purity.line",
-                &format!("Purity: {}", purity.name()),
-                &[Text::translate_with_fallback(
-                    purity.name_key(),
-                    purity.name(),
-                    &[],
-                )],
-            )
-            .with_color(purity.colour()),
-            purity.colour(),
-        ));
+        // The gem's own lines come from the crate's tooltip hook
+        // (`gems::tooltip_lines`); this port sockets with a right-click, which
+        // Java does not, so it says how.
         event.lines.push((
             Text::translate_with_fallback(
                 "apotheosis.socket.hint",

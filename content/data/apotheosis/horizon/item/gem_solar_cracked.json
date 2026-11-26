@@ -5,66 +5,7 @@
   "components": {
     "minecraft:item_name": {
       "translate": "item.apotheosis.gem_solar_cracked",
-      "fallback": "Cracked Solar Gem",
-      "color": "#808080",
-      "italic": false
-    },
-    "minecraft:lore": [
-      {
-        "translate": "text.apotheosis.socketable_into",
-        "fallback": "Can be set into:",
-        "color": "#0AFF0A",
-        "italic": false
-      },
-      {
-        "translate": "gem_class.light_weapon",
-        "fallback": "Melee weapons and tridents",
-        "color": "#0AFF0A",
-        "italic": false
-      },
-      {
-        "text": "",
-        "italic": false
-      },
-      {
-        "translate": "text.apotheosis.when_socketed_in",
-        "fallback": "Once set into:",
-        "color": "#FFAA00",
-        "italic": false
-      },
-      {
-        "translate": "text.apotheosis.dot_prefix",
-        "fallback": "• %s",
-        "color": "#FFAA00",
-        "with": [
-          {
-            "translate": "text.apotheosis.gem_bonus",
-            "fallback": "%s: %s",
-            "with": [
-              {
-                "translate": "gem_class.light_weapon",
-                "fallback": "Melee weapons and tridents"
-              },
-              {
-                "text": "",
-                "extra": [
-                  {
-                    "text": "+1"
-                  },
-                  {
-                    "text": " "
-                  },
-                  {
-                    "translate": "apotheosis.attribute.fire_damage",
-                    "fallback": "Fire Damage"
-                  }
-                ]
-              }
-            ]
-          }
-        ],
-        "italic": false
-      }
-    ]
+      "fallback": "Cracked Solar Gem"
+    }
   }
 }

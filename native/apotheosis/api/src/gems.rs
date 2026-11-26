@@ -15,23 +15,16 @@
 //! module turns it into stacks, resolves the bonuses a given piece receives at
 //! a given purity, and describes them for a tooltip.
 
-use horizon_client::mod_api::{Compound, ItemStack, Tag};
+use horizon_client::mod_api::{Compound, ItemStack, Tag, Text};
 
 use crate::attributes::Attr;
-use crate::java_gems::{Gem, Kind, GEMS};
+use crate::java_gems::{Gem, Kind, CLASS_TEXT, GEMS};
 use crate::sockets::Purity;
 
 /// The single gem item of earlier versions, whose type and purity live in its
 /// custom data; still recognised, and used for a purity below a gem's floor,
 /// which has no item of its own.
 pub const ITEM: &str = "apotheosis:gem";
-
-/// Whether `item_id` is the generic gem (`ITEM`), the one item whose tooltip
-/// lines the native side writes.  A per-purity gem item declares the same
-/// lines in its `minecraft:lore`, so writing them again would show them twice.
-pub fn generic_gem(item_id: &str) -> bool {
-    item_id == ITEM
-}
 
 /// The custom-data key holding the gem's type id.
 pub const GEM_KEY: &str = "apotheosis:gem";
@@ -379,12 +372,11 @@ pub fn apothic(attributes: &[Resolved]) -> Vec<(Attr, f64)> {
 
 /// One translated bonus line: its key, the English fallback the generator
 /// writes for a client without the key, the value substituted into the key's
-/// `%s`, and the purity's colour.
+/// `%s`.
 pub struct DescriptionLine {
     pub key: String,
     pub fallback: String,
     pub value: String,
-    pub colour: u32,
 }
 
 /// What a gem's bonus lines say, for a tooltip: the classes it applies to and
@@ -392,6 +384,7 @@ pub struct DescriptionLine {
 /// (`apotheosis.gem.bonus.<gem>.<n>`), generated into both lang files; the
 /// English text stays the fallback.  Bonuses this port cannot pay out are not
 /// shown here; the README lists them.
+#[cfg(test)]
 pub fn description(gem: &Gem, purity: Purity) -> Vec<DescriptionLine> {
     description_filtered(gem, purity, None)
 }
@@ -404,7 +397,6 @@ pub fn description_for(gem: &Gem, purity: Purity, item: &str) -> Vec<Description
 }
 
 fn description_filtered(gem: &Gem, purity: Purity, item: Option<&str>) -> Vec<DescriptionLine> {
-    let colour = purity.colour();
     let mut lines = Vec::new();
     let index = purity.index() as usize;
     for (number, bonus) in gem.bonuses.iter().enumerate() {
@@ -434,7 +426,6 @@ fn description_filtered(gem: &Gem, purity: Purity, item: Option<&str>) -> Vec<De
                     key,
                     fallback: format!("{classes}: {value} {}", attribute_name(attribute)),
                     value,
-                    colour,
                 });
             }
             Kind::Enchantment { id, levels, .. } => {
@@ -446,7 +437,6 @@ fn description_filtered(gem: &Gem, purity: Purity, item: Option<&str>) -> Vec<De
                     key,
                     fallback: format!("{classes}: {value} {}", enchantment_name(id)),
                     value,
-                    colour,
                 });
             }
         }
@@ -521,6 +511,156 @@ fn enchantment_name(id: &str) -> &str {
     }
 }
 
+/// A piece of tooltip text, kept apart from `Text` so the lines can be checked
+/// without a language loaded: a translation key with its English fallback and
+/// arguments, a literal, or pieces one after another.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Piece {
+    Translate {
+        key: String,
+        fallback: String,
+        args: Vec<Piece>,
+    },
+    Literal(String),
+    Concat(Vec<Piece>),
+}
+
+impl Piece {
+    fn translate(key: impl Into<String>, fallback: impl Into<String>, args: Vec<Piece>) -> Piece {
+        Piece::Translate {
+            key: key.into(),
+            fallback: fallback.into(),
+            args,
+        }
+    }
+
+    /// The text in the player's language: each key resolved against the
+    /// client's current lang, its fallback where the lang has none.
+    pub fn text(&self) -> Text {
+        match self {
+            Piece::Translate {
+                key,
+                fallback,
+                args,
+            } => Text::translate_with_fallback(
+                key,
+                fallback,
+                &args.iter().map(Piece::text).collect::<Vec<_>>(),
+            ),
+            Piece::Literal(text) => Text::literal(text.as_str()),
+            Piece::Concat(pieces) => pieces
+                .iter()
+                .fold(Text::empty(), |text, piece| text.append(piece.text())),
+        }
+    }
+}
+
+/// One line a gem's tooltip adds under its name, and its colour.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TooltipLine {
+    pub piece: Piece,
+    pub colour: u32,
+}
+
+/// The colour of Java's "socketable into" heading and gear lines.
+const SOCKETABLE_COLOUR: u32 = 0x0A_FF0A;
+/// The colour of Java's "when socketed in" heading and bonus lines.
+const SOCKETED_COLOUR: u32 = 0xFF_AA00;
+
+/// The English text of a `gem_class.<key>`, its fallback.
+fn class_text(key: &str) -> &'static str {
+    CLASS_TEXT
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map_or("", |(_, text)| text)
+}
+
+/// The translated name of a bonus's attribute or enchantment.
+fn bonus_name(kind: &Kind) -> Piece {
+    match kind {
+        Kind::Attribute { attribute, .. } => {
+            let (namespace, path) = attribute.split_once(':').unwrap_or(("", attribute));
+            let key = if namespace == "minecraft" {
+                format!("attribute.name.{path}")
+            } else {
+                format!("apotheosis.attribute.{path}")
+            };
+            Piece::translate(key, attribute_name(attribute), Vec::new())
+        }
+        Kind::Enchantment { id, .. } => Piece::translate(
+            format!("enchantment.{}", id.replace(':', ".")),
+            enchantment_name(id),
+            Vec::new(),
+        ),
+    }
+}
+
+/// The lines Java Apotheosis' gem tooltip shows under the name, at `purity`:
+/// the gear the gem can be set into, an empty line, then each bonus it pays
+/// out at that purity as `• <gear>: <value> <name>`.  Only the bonuses this
+/// port pays out, as `resolved` applies them; the purity itself is the name's
+/// colour and word, as in Java.
+pub fn tooltip_lines(gem: &Gem, purity: Purity) -> Vec<TooltipLine> {
+    let index = purity.index() as usize;
+    let paid: Vec<(&str, String, &Kind)> = gem
+        .bonuses
+        .iter()
+        .filter_map(|bonus| {
+            let value = match &bonus.kind {
+                Kind::Attribute {
+                    attribute, values, ..
+                } => attribute::format(attribute, values[index]?),
+                Kind::Enchantment { levels, .. } => format!("+{}", levels[index]?),
+            };
+            Some((bonus.key, value, &bonus.kind))
+        })
+        .collect();
+    let class = |key: &str| {
+        Piece::translate(format!("gem_class.{key}"), class_text(key), Vec::new())
+    };
+    let mut lines = vec![TooltipLine {
+        piece: Piece::translate("text.apotheosis.socketable_into", "Can be set into:", Vec::new()),
+        colour: SOCKETABLE_COLOUR,
+    }];
+    let mut keys: Vec<&str> = Vec::new();
+    for (key, _, _) in &paid {
+        if !keys.contains(key) {
+            keys.push(key);
+            lines.push(TooltipLine {
+                piece: class(key),
+                colour: SOCKETABLE_COLOUR,
+            });
+        }
+    }
+    lines.push(TooltipLine {
+        piece: Piece::Literal(String::new()),
+        colour: SOCKETED_COLOUR,
+    });
+    lines.push(TooltipLine {
+        piece: Piece::translate("text.apotheosis.when_socketed_in", "Once set into:", Vec::new()),
+        colour: SOCKETED_COLOUR,
+    });
+    for (key, value, kind) in paid {
+        let value = Piece::Concat(vec![
+            Piece::Literal(format!("{value} ")),
+            bonus_name(kind),
+        ]);
+        lines.push(TooltipLine {
+            piece: Piece::translate(
+                "text.apotheosis.dot_prefix",
+                "• %s",
+                vec![Piece::translate(
+                    "text.apotheosis.gem_bonus",
+                    "%s: %s",
+                    vec![class(key), value],
+                )],
+            ),
+            colour: SOCKETED_COLOUR,
+        });
+    }
+    lines
+}
+
 /// What an ordinary mob or a boss rolls: a gem of the level's dimension, at a
 /// purity at or above its floor.  Every type in the dimension is eligible;
 /// the floor clamps the purity afterwards, as Java's `Gem.toStack` does, so a
@@ -555,17 +695,6 @@ pub fn roll(dimension: &str, boss: bool, rng: &mut crate::Rng) -> (&'static Gem,
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn only_the_generic_gem_gets_native_tooltip_lines() {
-        assert!(generic_gem(ITEM));
-        assert!(generic_gem("apotheosis:gem"));
-        // A per-purity item carries those lines in its lore already.
-        assert!(!generic_gem("apotheosis:gem_solar_normal"));
-        assert!(!generic_gem("apotheosis:gem_ballast_cracked"));
-        assert!(!generic_gem("apotheosis:gem_dust"));
-        assert!(!generic_gem("minecraft:diamond"));
-    }
 
     #[test]
     fn the_catalogue_is_the_java_gems_outside_twilight() {
@@ -909,4 +1038,126 @@ mod tests {
             );
         }
     }
+
+    /// A piece as text that names its keys: `key(arg, arg)`, literals as they are.
+    fn spelled(piece: &Piece) -> String {
+        match piece {
+            Piece::Translate { key, args, .. } if args.is_empty() => key.clone(),
+            Piece::Translate { key, args, .. } => format!(
+                "{key}({})",
+                args.iter().map(spelled).collect::<Vec<_>>().join(", ")
+            ),
+            Piece::Literal(text) => text.clone(),
+            Piece::Concat(pieces) => pieces.iter().map(spelled).collect(),
+        }
+    }
+
+    /// The lines as (key, args as strings, colour); a literal line has no key.
+    fn rows(lines: &[TooltipLine]) -> Vec<(String, Vec<String>, u32)> {
+        lines
+            .iter()
+            .map(|line| match &line.piece {
+                Piece::Translate { key, args, .. } => {
+                    (key.clone(), args.iter().map(spelled).collect(), line.colour)
+                }
+                other => (String::new(), vec![spelled(other)], line.colour),
+            })
+            .collect()
+    }
+
+    /// The value a gem pays out on `item`, as the socket writes it.
+    fn paid_value(gem: &Gem, purity: Purity, item: &str, attribute: &str) -> String {
+        resolved(gem, purity, item)
+            .into_iter()
+            .find_map(|entry| match entry {
+                Resolved::Attribute {
+                    attribute: a,
+                    amount,
+                    ..
+                } if a == attribute => Some(attribute::format(a, amount)),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{} pays no {attribute} on {item}", gem.id))
+    }
+
+    fn bonus(class: &str, value: &str, name_key: &str) -> (String, Vec<String>, u32) {
+        (
+            "text.apotheosis.dot_prefix".into(),
+            vec![format!(
+                "text.apotheosis.gem_bonus(gem_class.{class}, {value} {name_key})"
+            )],
+            0xFF_AA00,
+        )
+    }
+
+    fn heading(key: &str, colour: u32) -> (String, Vec<String>, u32) {
+        (key.into(), Vec::new(), colour)
+    }
+
+    #[test]
+    fn a_solar_gems_tooltip_is_javas_at_normal() {
+        let gem = get("apotheosis:core/solar").unwrap();
+        let fire = paid_value(
+            gem,
+            Purity::Normal,
+            "minecraft:diamond_sword",
+            "apothic_attributes:fire_damage",
+        );
+        assert_eq!(fire, "+4");
+        assert_eq!(
+            rows(&tooltip_lines(gem, Purity::Normal)),
+            vec![
+                heading("text.apotheosis.socketable_into", 0x0A_FF0A),
+                heading("gem_class.light_weapon", 0x0A_FF0A),
+                (String::new(), vec![String::new()], 0xFF_AA00),
+                heading("text.apotheosis.when_socketed_in", 0xFF_AA00),
+                bonus("light_weapon", &fire, "apotheosis.attribute.fire_damage"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_tyrannical_gems_tooltip_names_each_gear_once() {
+        let gem = get("apotheosis:core/tyrannical").unwrap();
+        let p = Purity::Normal;
+        let value = |item: &str, attribute: &str| paid_value(gem, p, item, attribute);
+        assert_eq!(
+            rows(&tooltip_lines(gem, p)),
+            vec![
+                heading("text.apotheosis.socketable_into", 0x0A_FF0A),
+                heading("gem_class.light_weapon", 0x0A_FF0A),
+                heading("gem_class.core_armor", 0x0A_FF0A),
+                heading("gem_class.shield", 0x0A_FF0A),
+                heading("gem_class.boots", 0x0A_FF0A),
+                (String::new(), vec![String::new()], 0xFF_AA00),
+                heading("text.apotheosis.when_socketed_in", 0xFF_AA00),
+                bonus(
+                    "light_weapon",
+                    &value("minecraft:diamond_sword", "minecraft:attack_knockback"),
+                    "attribute.name.attack_knockback"
+                ),
+                bonus(
+                    "core_armor",
+                    &value("minecraft:diamond_chestplate", "minecraft:armor_toughness"),
+                    "attribute.name.armor_toughness"
+                ),
+                bonus(
+                    "shield",
+                    &value("minecraft:shield", "minecraft:armor_toughness"),
+                    "attribute.name.armor_toughness"
+                ),
+                bonus(
+                    "boots",
+                    &value("minecraft:diamond_boots", "minecraft:max_health"),
+                    "attribute.name.max_health"
+                ),
+                bonus(
+                    "boots",
+                    &value("minecraft:diamond_boots", "apothic_attributes:life_steal"),
+                    "apotheosis.attribute.life_steal"
+                ),
+            ]
+        );
+    }
+
 }

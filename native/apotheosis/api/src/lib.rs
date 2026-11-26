@@ -568,20 +568,18 @@ impl Hooks for Apotheosis {
     fn tooltip(&self, _host: &dyn Host, event: &mut TooltipEvent<'_>) {
         attributes::tooltip(event);
         spawners::on_tooltip(event);
-        if let Some((gem, purity)) = gems::of_stack(event.stack)
-            && gems::generic_gem(&event.stack.item)
-        {
-            for line in gems::description(gem, purity) {
-                let colour = line.colour;
-                event.lines.push((
-                    Text::translate_with_fallback(
-                        &line.key,
-                        &line.fallback,
-                        &[Text::literal(line.value)],
-                    )
-                    .with_color(colour),
-                    colour,
-                ));
+        // Java's gem tooltip, built here: Horizon's client shows neither the
+        // lore nor the name colour a gem item's declaration would carry.
+        if let Some((gem, purity)) = gems::of_stack(event.stack) {
+            let colour = purity.colour();
+            if let Some((name, line_colour)) = event.lines.first_mut() {
+                *name = std::mem::take(name).with_color(colour);
+                *line_colour = colour;
+            }
+            for line in gems::tooltip_lines(gem, purity) {
+                event
+                    .lines
+                    .push((line.piece.text().with_color(line.colour), line.colour));
             }
         }
         sockets::tooltip(event);

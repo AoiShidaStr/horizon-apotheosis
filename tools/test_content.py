@@ -53,7 +53,9 @@ class ContentTests(unittest.TestCase):
             label = components["minecraft:item_name"]
             # Its own name key, worded with its purity in each lang file.
             self.assertEqual(label["translate"], "item.apotheosis." + name)
-            self.assertIs(label["italic"], False)
+            # Its colour is the purity's, set by the native tooltip hook: the client ignores one
+            # declared here.
+            self.assertNotIn("color", label)
             self.assertIn("apotheosis:" + name, tag)
             self.assertTrue(os.path.exists(os.path.join(
                 ROOT, "content", "assets", "apotheosis", "items", name + ".json")), name)
@@ -67,9 +69,10 @@ class ContentTests(unittest.TestCase):
                                 PURITIES.index(after.rsplit("_", 1)[1]))
 
 
-    def test_every_gem_item_carries_its_lore(self):
-        # Java's tooltip (gear it fits, then its bonuses) is the item's own lore, so the
-        # declaration carries only the name and the lore: no custom_data, which fails to load.
+    def test_gem_items_declare_only_their_name(self):
+        # Horizon's client shows neither a declaration's lore nor its name colour: the native
+        # tooltip hook writes Java's gem tooltip (gems::tooltip_lines). A lore here would show
+        # those lines twice if it ever did; custom_data fails to load.
         folder = os.path.join(DATA, "item")
         names = [name for name in os.listdir(folder)
                  if re.fullmatch(r"gem_[a-z_]+_(%s)\.json" % "|".join(PURITIES), name)]
@@ -77,12 +80,24 @@ class ContentTests(unittest.TestCase):
         for name in names:
             with open(os.path.join(folder, name), encoding="utf-8") as handle:
                 components = json.load(handle)["components"]
-            self.assertEqual(sorted(components), ["minecraft:item_name", "minecraft:lore"], name)
-            lore = components["minecraft:lore"]
-            self.assertEqual(lore[0]["translate"], "text.apotheosis.socketable_into", name)
-            self.assertIn({"text": "", "italic": False}, lore, name)
-            for line in lore:
-                self.assertIs(line["italic"], False, name)
+            self.assertNotIn("minecraft:lore", components, name)
+            self.assertNotIn("minecraft:custom_data", components, name)
+            self.assertEqual(sorted(components), ["minecraft:item_name"], name)
+            self.assertEqual(components["minecraft:item_name"]["translate"],
+                             "item.apotheosis." + name[:-5], name)
+
+    def test_every_gem_class_key_is_translated(self):
+        # gems::tooltip_lines translates gem_class.<key> for each bonus's Java key.
+        with open(os.path.join(ROOT, "native", "apotheosis", "api", "src", "java_gems.rs"),
+                  encoding="utf-8") as handle:
+            keys = set(re.findall(r'^\s+key: "([a-z_]+)",$', handle.read(), re.M))
+        self.assertIn("light_weapon", keys)
+        for lang in ("en_us", "fr_fr"):
+            with open(os.path.join(ROOT, "content", "assets", "apotheosis", "lang",
+                                   lang + ".json"), encoding="utf-8") as handle:
+                texts = json.load(handle)
+            for key in keys:
+                self.assertIn("gem_class." + key, texts, lang)
 
     def test_declarations_only_use_loadable_components(self):
         # Horizon refuses a whole mod's content when a declaration's default components contain
