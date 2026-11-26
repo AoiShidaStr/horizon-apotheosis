@@ -415,13 +415,13 @@ fn description_filtered(gem: &Gem, purity: Purity, item: Option<&str>) -> Vec<De
         match &bonus.kind {
             Kind::Attribute {
                 attribute,
+                operation,
                 values,
-                ..
             } => {
                 let Some(amount) = values[index] else {
                     continue;
                 };
-                let value = attribute::format(attribute, amount);
+                let value = attribute::format(attribute, operation, amount);
                 lines.push(DescriptionLine {
                     key,
                     fallback: format!("{classes}: {value} {}", attribute_name(attribute)),
@@ -484,9 +484,11 @@ pub mod attribute {
         )
     }
 
-    pub fn format(attribute: &str, amount: f64) -> String {
+    /// `operation` is the modifier's: a multiplier (`add_multiplied_base`,
+    /// `add_multiplied_total`) always reads as a percentage, as in Java.
+    pub fn format(attribute: &str, operation: &str, amount: f64) -> String {
         let sign = if amount < 0.0 { "" } else { "+" };
-        if is_percent(attribute) {
+        if is_percent(attribute) || operation != "add_value" {
             let pct = amount * 100.0;
             if (pct - pct.round()).abs() < 0.05 {
                 format!("{sign}{pct:.0}%")
@@ -608,8 +610,10 @@ pub fn tooltip_lines(gem: &Gem, purity: Purity) -> Vec<TooltipLine> {
         .filter_map(|bonus| {
             let value = match &bonus.kind {
                 Kind::Attribute {
-                    attribute, values, ..
-                } => attribute::format(attribute, values[index]?),
+                    attribute,
+                    operation,
+                    values,
+                } => attribute::format(attribute, operation, values[index]?),
                 Kind::Enchantment { levels, .. } => format!("+{}", levels[index]?),
             };
             Some((bonus.key, value, &bonus.kind))
@@ -1072,9 +1076,9 @@ mod tests {
             .find_map(|entry| match entry {
                 Resolved::Attribute {
                     attribute: a,
+                    operation,
                     amount,
-                    ..
-                } if a == attribute => Some(attribute::format(a, amount)),
+                } if a == attribute => Some(attribute::format(a, operation, amount)),
                 _ => None,
             })
             .unwrap_or_else(|| panic!("{} pays no {attribute} on {item}", gem.id))
@@ -1160,4 +1164,17 @@ mod tests {
         );
     }
 
+}
+
+#[cfg(test)]
+mod format_tests {
+    use super::attribute::format;
+
+    #[test]
+    fn a_multiplier_bonus_reads_as_a_percentage() {
+        // Tyrannical on a shield: armor toughness x1.30, not "+0.30".
+        assert_eq!(format("minecraft:armor_toughness", "add_multiplied_base", 0.3), "+30%");
+        assert_eq!(format("minecraft:max_health", "add_multiplied_total", 0.17), "+17%");
+        assert_eq!(format("minecraft:armor", "add_value", 3.0), "+3");
+    }
 }
