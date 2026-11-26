@@ -1094,13 +1094,38 @@ fn take_join(event: &MobSpawnedEvent<'_>) -> Option<u32> {
     found.map(|index| joins.remove(index).entity)
 }
 
-/// The chance a natural spawn becomes an invader, per dimension.
+/// The chance, in 1000, that a natural spawn becomes an invader: Java's
+/// `invader_spawn_rules.json` at the first world tier that has invaders
+/// (frontier): 1.8% in the overworld and the end, 2.5% in the nether.
 fn chance(dimension: &str) -> u64 {
     match dimension {
-        "minecraft:the_nether" => 2,
-        "minecraft:the_end" => 2,
-        _ => 2,
+        "minecraft:the_nether" => 25,
+        _ => 18,
     }
+}
+
+/// Java's `bossSpawnCooldown`: 3600 ticks (three minutes) between two natural
+/// invaders. Java keeps it per player and their neighbours; Horizon's spawn
+/// event names no player, so this port keeps one per dimension.
+const INVADER_COOLDOWN: Duration = Duration::from_secs(3600 / 20);
+
+static LAST_INVADER: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+
+/// Whether `dimension` may have an invader at `now`; if so, starts its
+/// cooldown.
+fn invader_ready(dimension: &str, now: Instant) -> bool {
+    let mut last = LAST_INVADER
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if last
+        .get(dimension)
+        .is_some_and(|then| now.duration_since(*then) < INVADER_COOLDOWN)
+    {
+        return false;
+    }
+    last.insert(dimension.to_string(), now);
+    true
 }
 
 /// Whether the spawn is on the surface: at or above the column's highest
@@ -1134,7 +1159,7 @@ pub fn mob_spawned(host: &mut dyn Host, event: &MobSpawnedEvent<'_>) {
         return;
     }
     let mut rng = roll(u64::from(entity) ^ event.pos[0].to_bits().rotate_left(9));
-    if !rng.chance(chance(event.dimension)) {
+    if rng.below(1000) >= chance(event.dimension) || !invader_ready(event.dimension, Instant::now()) {
         return;
     }
     become_boss(host, event.dimension, entity, event.kind, &mut rng);
@@ -1573,5 +1598,24 @@ mod tests {
     fn base_names_read_as_words() {
         assert_eq!(base_name("minecraft:wither_skeleton").1, "Wither Skeleton");
         assert_eq!(base_name("minecraft:zombie").1, "Zombie");
+    }
+}
+
+#[cfg(test)]
+mod invader_rate_tests {
+    use super::{chance, invader_ready, INVADER_COOLDOWN};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn invaders_follow_java_rates_and_cooldown() {
+        assert_eq!(chance("minecraft:overworld"), 18);
+        assert_eq!(chance("minecraft:the_end"), 18);
+        assert_eq!(chance("minecraft:the_nether"), 25);
+        let t0 = Instant::now();
+        let dim = "test:invader_cooldown";
+        assert!(invader_ready(dim, t0));
+        assert!(!invader_ready(dim, t0 + Duration::from_secs(60)));
+        assert!(invader_ready(dim, t0 + INVADER_COOLDOWN));
+        assert!(invader_ready("test:other_dimension", t0));
     }
 }
