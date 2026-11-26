@@ -25,7 +25,8 @@
 use crate::affixes::roll_range;
 use crate::attributes::{self, ItemClass};
 use crate::java_affixes::{Affix, AFFIXES};
-use crate::{BOSS_TIERS, Rng, Tier, apply_affixes, one};
+use crate::tiers::{self, WorldTier};
+use crate::{Rng, Tier, apply_affixes, one};
 use horizon_client::mod_api::{
     Compound, EntityJoinLevelEvent, EquipmentSlot, Flow, Host, ItemDamagedEvent, ItemStack,
     LivingIncomingDamageV2Event, LootDropsEvent, MobSpawnedEvent, NativeEffect, NativeHeightmap, Tag,
@@ -535,10 +536,12 @@ fn custom_data(stack: &ItemStack) -> Compound {
     }
 }
 
-/// Drops the effect rolls a previous affix pass wrote, and the enchantment
-/// levels that pass added.
+/// Drops the effect rolls and lore lines a previous affix pass wrote, and the
+/// enchantment levels that pass added. A level rewrite (`affixes::rewrite`)
+/// keeps the effect lines, so a reroll has to take them back here.
 fn clear_effects(stack: &mut ItemStack) {
     remove_effect_enchantments(stack);
+    remove_effect_lore(stack);
     let mut custom = custom_data(stack);
     if custom.remove(&EFFECTS_KEY.into()).is_some() {
         stack
@@ -602,6 +605,32 @@ fn add_enchantment(stack: &mut ItemStack, id: &str, levels: f64) {
     stack
         .data_mut()
         .set_other("minecraft:custom_data", Some(Tag::Compound(custom)));
+}
+
+/// Removes this module's effect lore lines, leaving the stat lines and any
+/// foreign line in place.
+fn remove_effect_lore(stack: &mut ItemStack) {
+    let mut lore = match stack
+        .data()
+        .and_then(|data| data.other("minecraft:lore"))
+    {
+        Some(Tag::List(lines)) => lines.clone(),
+        _ => return,
+    };
+    let before = lore.len();
+    lore.retain(|line| {
+        !matches!(
+            line.get("translate"),
+            Some(Tag::String(key))
+                if key.to_string_lossy().starts_with("apotheosis.affix.effect.")
+        )
+    });
+    if lore.len() != before {
+        stack.data_mut().set_other(
+            "minecraft:lore",
+            (!lore.is_empty()).then_some(Tag::List(lore)),
+        );
+    }
 }
 
 /// Takes back the enchantment levels the last effect affix added, leaving the
@@ -1075,8 +1104,9 @@ pub fn entity_join_level(event: &mut EntityJoinLevelEvent<'_>) -> Flow {
     Flow::Continue
 }
 
-/// Takes the fresh join matching `event`, if one is waiting.
-fn take_join(event: &MobSpawnedEvent<'_>) -> Option<u32> {
+/// Takes the fresh join matching `event`, if one is waiting. The spawn's
+/// augments (`augments::monster_spawned`) take it first and hand it on.
+pub fn take_spawn(event: &MobSpawnedEvent<'_>) -> Option<u32> {
     let mut joins = joins().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     joins.retain(|join| join.at.elapsed().as_secs() < 5);
     let mut found = None;
@@ -1094,37 +1124,28 @@ fn take_join(event: &MobSpawnedEvent<'_>) -> Option<u32> {
     found.map(|index| joins.remove(index).entity)
 }
 
-/// The chance, in 1000, that a natural spawn becomes an invader: Java's
-/// `invader_spawn_rules.json` at the first world tier that has invaders
-/// (frontier): 1.8% in the overworld and the end, 2.5% in the nether.
-fn chance(dimension: &str) -> u64 {
-    match dimension {
-        "minecraft:the_nether" => 25,
-        _ => 18,
-    }
-}
-
 /// Java's `bossSpawnCooldown`: 3600 ticks (three minutes) between two natural
-/// invaders. Java keeps it per player and their neighbours; Horizon's spawn
-/// event names no player, so this port keeps one per dimension.
+/// invaders. Java keeps it per player; the spawn event names no player, so
+/// this port uses the nearest one, the same player whose world tier decides
+/// whether the spawn may be an invader at all.
 const INVADER_COOLDOWN: Duration = Duration::from_secs(3600 / 20);
 
-static LAST_INVADER: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+static LAST_INVADER: OnceLock<Mutex<HashMap<u128, Instant>>> = OnceLock::new();
 
-/// Whether `dimension` may have an invader at `now`; if so, starts its
+/// Whether `player` may have an invader at `now`; if so, starts their
 /// cooldown.
-fn invader_ready(dimension: &str, now: Instant) -> bool {
+fn invader_ready(player: u128, now: Instant) -> bool {
     let mut last = LAST_INVADER
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     if last
-        .get(dimension)
+        .get(&player)
         .is_some_and(|then| now.duration_since(*then) < INVADER_COOLDOWN)
     {
         return false;
     }
-    last.insert(dimension.to_string(), now);
+    last.insert(player, now);
     true
 }
 
@@ -1144,12 +1165,13 @@ fn on_surface(host: &mut dyn Host, dimension: &str, pos: [f64; 3]) -> bool {
 }
 
 /// `mob_spawned`: a fresh natural mob on the surface, at night in the
-/// overworld, may become an Apothic Invader.
-pub fn mob_spawned(host: &mut dyn Host, event: &MobSpawnedEvent<'_>) {
+/// overworld, may become an Apothic Invader. `entity` is the id `take_spawn`
+/// matched to the event.
+pub fn mob_spawned(host: &mut dyn Host, event: &MobSpawnedEvent<'_>, entity: Option<u32>) {
     if !event.natural {
         return;
     }
-    let Some(entity) = take_join(event) else {
+    let Some(entity) = entity else {
         return;
     };
     let night = (host.day_time().rem_euclid(24_000) >= 13_000)
@@ -1158,20 +1180,25 @@ pub fn mob_spawned(host: &mut dyn Host, event: &MobSpawnedEvent<'_>) {
     if overworld && (!night || !on_surface(host, event.dimension, event.pos)) {
         return;
     }
+    // The nearest player decides both the chance (Haven never spawns one) and
+    // whose cooldown the invader takes.
+    let Some(player) = tiers::nearest_player(host, event.dimension, event.pos) else {
+        return;
+    };
+    let world = tiers::tier_of_with(host, player);
     let mut rng = roll(u64::from(entity) ^ event.pos[0].to_bits().rotate_left(9));
-    if rng.below(1000) >= chance(event.dimension) || !invader_ready(event.dimension, Instant::now()) {
+    if rng.below(10_000) >= tiers::invader_chance(world, event.dimension)
+        || !invader_ready(player, Instant::now())
+    {
         return;
     }
-    become_boss(host, event.dimension, entity, event.kind, &mut rng);
+    // The player's tier decides the invader's rarity, as Java's `GenContext`
+    // does; the summoner (`boss_summoner`) rolls it the same way, but without
+    // the natural spawn's cooldown.
+    let luck = crate::augments::player_luck(world);
+    let tier = tiers::roll_rarity(world, luck, &mut rng);
+    become_invader(host, event.dimension, entity, event.kind, world, tier, &mut rng);
 }
-
-/// The rarity a converted invader rolls.
-const BOSS_RARITIES: [(Tier, u64); 4] = [
-    (Tier::Uncommon, 35),
-    (Tier::Rare, 40),
-    (Tier::Epic, 20),
-    (Tier::Mythic, 5),
-];
 
 /// Extra health by rarity, so an invader is a fight.
 fn bonus_health(tier: Tier) -> f64 {
@@ -1282,12 +1309,24 @@ fn generated_name(rng: &mut Rng, kind: &str) -> (String, Text) {
     (json.to_string(), text)
 }
 
-/// Converts the freshly spawned mob into an invader.
-fn become_boss(host: &mut dyn Host, dimension: &str, entity: u32, kind: &str, rng: &mut Rng) {
+/// Turns a freshly spawned mob into an Apothic Invader of `tier`, for a player
+/// of `world`: a generated name, more health, affixed gear in every empty slot,
+/// the boss tag and an announcement. The natural spawn and the boss summoner
+/// share it; only the rarity's roll and the summoner's missing cooldown tell
+/// them apart.
+pub(crate) fn become_invader(
+    host: &mut dyn Host,
+    dimension: &str,
+    entity: u32,
+    kind: &str,
+    world: WorldTier,
+    tier: Tier,
+    rng: &mut Rng,
+) {
     let Some(reference) = host.entity(entity) else {
         return;
     };
-    let tier = rng.tier(&BOSS_RARITIES);
+    let luck = crate::augments::player_luck(world);
     let (name, name_text) = generated_name(rng, kind);
     let health = 20.0 + bonus_health(tier);
     let _ = host.entity_set_attribute_base(reference, "minecraft:max_health", health);
@@ -1298,6 +1337,11 @@ fn become_boss(host: &mut dyn Host, dimension: &str, entity: u32, kind: &str, rn
     boss_nbt.insert("Health".into(), Tag::Float((health as f32).to_bits()));
     let _ = host.entity_merge_nbt(reference, boss_nbt);
     let _ = host.entity_add_tag(reference, BOSS_TAG);
+    // Java's rare invader stat blocks start at the rare rarity; their bonus
+    // loot uses the rare table (`entity/rare_boss_drops`).
+    if tier >= Tier::Rare {
+        let _ = host.entity_add_tag(reference, RARE_BOSS_TAG);
+    }
 
     // Gear: a high-rarity affixed piece in every empty equipment slot.
     if let Some(living) = host.living(reference) {
@@ -1310,7 +1354,8 @@ fn become_boss(host: &mut dyn Host, dimension: &str, entity: u32, kind: &str, rn
         ];
         for slot in slots {
             let mut stack = one(boss_gear(kind, slot, rng));
-            apply_affixes(&mut stack, rng.tier(&BOSS_TIERS), rng);
+            let rarity = tiers::roll_rarity(world, luck, rng);
+            apply_affixes(&mut stack, rarity, rng);
             let _ = host.living_set_equipment(living, slot, Some(stack));
         }
     }
@@ -1342,6 +1387,9 @@ fn boss_gear(kind: &str, slot: EquipmentSlot, rng: &mut Rng) -> &'static str {
     }
 }
 
+/// The tag a rare invader carries: its awaited rarity is rare or above.
+pub const RARE_BOSS_TAG: &str = "apotheosis:rare_boss";
+
 /// Whether a mob carries the boss tag, read from the entity the loot hook
 /// names.
 pub fn is_boss(host: &mut dyn Host, entity: u32) -> bool {
@@ -1350,9 +1398,12 @@ pub fn is_boss(host: &mut dyn Host, entity: u32) -> bool {
         .is_some_and(|tags| tags.iter().any(|tag| tag == BOSS_TAG))
 }
 
-/// The boss loot tiers, exposed for `loot_drops`' gear upgrade.
-pub fn boss_tiers() -> &'static [(Tier, u64)] {
-    &BOSS_TIERS
+/// Whether an invader was rolled at the rare rarity or above, so its death uses
+/// Java's rare bonus table.
+pub fn is_rare_boss(host: &mut dyn Host, entity: u32) -> bool {
+    host.entity(entity)
+        .and_then(|reference| host.entity_tags(reference))
+        .is_some_and(|tags| tags.iter().any(|tag| tag == RARE_BOSS_TAG))
 }
 
 #[cfg(test)]
@@ -1582,14 +1633,6 @@ mod tests {
     }
 
     #[test]
-    fn every_boss_rarity_is_below_ancient() {
-        for (tier, _) in BOSS_RARITIES {
-            assert!(tier < Tier::Ancient, "{tier:?} should not be a boss roll");
-        }
-        assert!(boss_tiers().iter().any(|(tier, _)| *tier == Tier::Ancient));
-    }
-
-    #[test]
     fn the_boss_tag_is_the_one_the_loot_hook_reads() {
         assert_eq!(BOSS_TAG, "apotheosis:boss");
     }
@@ -1603,19 +1646,17 @@ mod tests {
 
 #[cfg(test)]
 mod invader_rate_tests {
-    use super::{chance, invader_ready, INVADER_COOLDOWN};
+    use super::{invader_ready, INVADER_COOLDOWN};
     use std::time::{Duration, Instant};
 
     #[test]
-    fn invaders_follow_java_rates_and_cooldown() {
-        assert_eq!(chance("minecraft:overworld"), 18);
-        assert_eq!(chance("minecraft:the_end"), 18);
-        assert_eq!(chance("minecraft:the_nether"), 25);
+    fn the_invader_cooldown_is_per_player() {
         let t0 = Instant::now();
-        let dim = "test:invader_cooldown";
-        assert!(invader_ready(dim, t0));
-        assert!(!invader_ready(dim, t0 + Duration::from_secs(60)));
-        assert!(invader_ready(dim, t0 + INVADER_COOLDOWN));
-        assert!(invader_ready("test:other_dimension", t0));
+        let one = 0xAAAA;
+        let two = 0xBBBB;
+        assert!(invader_ready(one, t0));
+        assert!(!invader_ready(one, t0 + Duration::from_secs(60)));
+        assert!(invader_ready(two, t0), "another player has their own cooldown");
+        assert!(invader_ready(one, t0 + INVADER_COOLDOWN));
     }
 }

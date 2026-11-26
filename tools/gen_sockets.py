@@ -138,10 +138,70 @@ MESSAGES = {
         "Hold an affixed piece in your off hand to use a sigil on it.",
         "Tenez un objet affixé en main secondaire pour y utiliser un sceau.",
     ),
+    "apotheosis.seal.hint": (
+        "Right-click with this sigil in hand and the affixed piece in your off hand.",
+        "Clic droit avec ce sceau en main et l'objet affixé en main secondaire.",
+    ),
+    "apotheosis.malice.no_affixes": (
+        "Malice needs an affixed piece with at least two level-dependent affixes.",
+        "Malice demande un objet affixé portant au moins deux affixes dépendants du niveau.",
+    ),
+    "apotheosis.malice.maxed": (
+        "Every affix on that piece is already at 2.0.",
+        "Tous les affixes de cet objet sont déjà à 2,0.",
+    ),
+    "apotheosis.malice.done": (
+        "Malice: %s overcharged, %s reset.",
+        "Malice : %s suralimenté, %s remis à zéro.",
+    ),
+    "apotheosis.malice.final": (
+        "Malice: %s overcharged; nothing else was reset.",
+        "Malice : %s suralimenté ; rien d'autre n'a été remis à zéro.",
+    ),
+    "apotheosis.supremacy.no_affixes": (
+        "Supremacy needs an affixed piece.",
+        "Suprématie demande un objet affixé.",
+    ),
+    "apotheosis.supremacy.done": (
+        "Supremacy: every affix is at least 1.5.",
+        "Suprématie : tous les affixes sont à 1,5 au moins.",
+    ),
     "apotheosis.enhance.done": ("Enhanced: %s.", "Amélioré : %s."),
     "apotheosis.enhance.max": (
         "That piece is already ancient.",
         "Cette pièce est déjà ancienne.",
+    ),
+    "block.apotheosis.augmenting_table.desc": (
+        "Uses Sigils of Enhancement to augment individual affixes",
+        "Utilise des sceaux d'amélioration pour augmenter chaque affixe",
+    ),
+    "button.apotheosis.augmenting.upgrade": (
+        "Upgrade Selected Affix",
+        "Améliorer l'affixe sélectionné",
+    ),
+    "button.apotheosis.augmenting.reroll": (
+        "Reroll Selected Affix",
+        "Relancer l'affixe sélectionné",
+    ),
+    "button.apotheosis.augmenting.no_selection": (
+        "No Affix Selected",
+        "Aucun affixe sélectionné",
+    ),
+    "button.apotheosis.augmenting.max_level": (
+        "Already Max Level",
+        "Niveau maximal déjà atteint",
+    ),
+    "button.apotheosis.augmenting.no_alternatives": (
+        "No Alternative Affixes",
+        "Aucun affixe de remplacement",
+    ),
+    "button.apotheosis.augmenting.upgrade.cost": (
+        "Cost: %sx %s",
+        "Coût : %sx %s",
+    ),
+    "button.apotheosis.augmenting.upgrade.exp_cost": (
+        "Experience Cost: %s Levels",
+        "Coût en expérience : %s niveaux",
     ),
     "apotheosis.cut.no_dust": (
         "The gem cutting table needs %s gem dust and the purity materials.",
@@ -161,9 +221,11 @@ MESSAGES = {
     ),
     "apotheosis.command.help": (
         "Apotheosis: /apoth reforge — roll affixes onto the gear you hold (3 levels); "
-        "/apoth salvage — break an affixed piece into rarity materials.",
+        "/apoth salvage — break an affixed piece into rarity materials; "
+        "/apoth world_tier — show or change your world tier.",
         "Apothéose : /apoth reforge — relance les affixes de l'équipement tenu "
-        "(3 niveaux) ; /apoth salvage — recycle un objet affixé en matériaux de rareté.",
+        "(3 niveaux) ; /apoth salvage — recycle un objet affixé en matériaux de rareté ; "
+        "/apoth world_tier — affiche ou change votre palier de monde.",
     ),
 }
 
@@ -185,7 +247,26 @@ SEALS = [
     ("sigil_of_unnaming", "rare", "Sigil of Unnaming",
      "Sceau d'effacement", "Removes the affix name from an item",
      "Retire le nom d'affixe d'un objet", 0x627A8B, "cross"),
+    # Overcharge affixes: no recipe, as in Java, where the Malice sigil comes
+    # from invader bonus loot and Supremacy from the endless gateway (not yet
+    # ported), so creative mode or a command is its only source.
+    ("sigil_of_malice", "rare", "Sigil of Malice",
+     "Sceau de malice", "Overcharges one affix and resets another",
+     "Suralimente un affixe et en remet un autre à zéro", 0x9B1C1C, "flame"),
+    ("sigil_of_supremacy", "epic", "Sigil of Supremacy",
+     "Sceau de suprématie", "Overcharges every affix on an affixed item",
+     "Suralimente tous les affixes d'un objet affixé", 0xC9A227, "crown"),
 ]
+
+# Java's boss summoner: no recipe (it comes from creative or a command), a
+# stack of 64, the vanilla default item. Its texture is Java's when the local
+# asset layer is imported; this port draws a stand-in for the --no-java pack.
+SUMMONER = (
+    "boss_summoner", "Apothic Invader Summoner", "Invocateur de Boss Apothéotique",
+    "Summons an Apothic Invader on the block you click",
+    "Invoque un Invader Apothéotique sur le bloc cliqué",
+    0x4B2A6E, "eye",
+)
 
 SEAL_RECIPES = {
     "sigil_of_socketing": {
@@ -274,6 +355,8 @@ TABLES = [
      0x5B5F63, 0xC2CBD2),
     ("reforging_table", "Reforging Table", "Table de recréation",
      0x6B4A2A, 0xE8C36A),
+    ("augmenting_table", "Augmenting Table", "Table d'augmentation",
+     0x3A3536, 0xE0B84A),
 ]
 
 TABLE_RECIPES = {
@@ -307,6 +390,16 @@ TABLE_RECIPES = {
         "pattern": ["GGG", "GSG", "SSS"],
         "key": {"G": "minecraft:gold_ingot", "S": ID + ":mysterious_scrap_metal"},
         "result": {"id": ID + ":reforging_table"},
+    },
+    # Java's data/apotheosis/recipe/augmenting_table.json, verbatim.
+    "augmenting_table": {
+        "type": "minecraft:crafting_shaped",
+        "category": "misc",
+        "group": "apotheosis",
+        "pattern": [" N ", "GEG", "PPP"],
+        "key": {"N": "minecraft:nether_star", "G": ID + ":godforged_pearl",
+                "E": "minecraft:enchanting_table", "P": "minecraft:polished_blackstone"},
+        "result": {"id": ID + ":augmenting_table"},
     },
 }
 
@@ -356,6 +449,33 @@ SEAL_GLYPHS = {
         "..x.x..",
         ".x...x.",
         "x.....x",
+    ],
+    "eye": [
+        ".......",
+        "..xxx..",
+        ".x...x.",
+        "x..x..x",
+        ".x...x.",
+        "..xxx..",
+        ".......",
+    ],
+    "flame": [
+        "...x...",
+        "..xxx..",
+        ".xxxxx.",
+        ".xx.xx.",
+        ".xxxxx.",
+        "..xxx..",
+        "...x...",
+    ],
+    "crown": [
+        "x..x..x",
+        "xx.x.xx",
+        "xxxxxxx",
+        ".xxxxx.",
+        ".xxxxx.",
+        ".......",
+        ".......",
     ],
 }
 
@@ -410,6 +530,24 @@ TABLE_EMBLEMS = {
         "....xxxxxxxx....",
         "................",
         "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+    ],
+    "augmenting_table": [
+        "................",
+        "................",
+        ".......x........",
+        "....x..x..x.....",
+        ".....x.x.x......",
+        "......xxx.......",
+        "...xxxxxxxxx....",
+        "......xxx.......",
+        ".....x.x.x......",
+        "....x..x..x.....",
+        ".......x........",
         "................",
         "................",
         "................",
@@ -733,6 +871,8 @@ TEXTURES = {
 for (_seal, _rarity, _en, _fr, _den, _dfr, _colour, _glyph) in SEALS:
     TEXTURES[_seal] = (lambda c=_colour, g=_glyph: seal_pixels(c, g))
 
+TEXTURES[SUMMONER[0]] = (lambda c=SUMMONER[5], g=SUMMONER[6]: seal_pixels(c, g))
+
 for (_table, _en, _fr, _base, _emblem) in TABLES:
     TEXTURES[_table] = (
         lambda b=_base, e=_emblem, s=TABLE_EMBLEMS[_table]: table_pixels(b, e, s)
@@ -793,16 +933,12 @@ def main():
         })
         png(os.path.join(CONTENT, "assets", ID, "textures", "item", material + ".png"),
             TEXTURES[material]())
-        write_json(os.path.join(CONTENT, "data", ID, "recipe", material + ".json"),
-                   RECIPES[material])
-        # A material grinds back into dust, the currency a purity upgrade takes.
-        write_json(os.path.join(CONTENT, "data", ID, "recipe",
-                                material + "_to_gem_dust.json"), {
-            "type": "minecraft:crafting_shapeless",
-            "category": "misc",
-            "ingredients": ["%s:%s" % (ID, material)],
-            "result": {"id": "%s:gem_dust" % ID, "count": 3},
-        })
+        # No crafting recipe, as in Java: a rarity material comes from salvaging
+        # affixed gear (and bosses), never from a recipe or from dust.
+        for stale in (material + ".json", material + "_to_gem_dust.json"):
+            path = os.path.join(CONTENT, "data", ID, "recipe", stale)
+            if os.path.exists(path):
+                os.remove(path)
         en["item.%s.%s" % (ID, material)] = name_en
         fr["item.%s.%s" % (ID, material)] = name_fr
 
@@ -821,12 +957,45 @@ def main():
         })
         png(os.path.join(CONTENT, "assets", ID, "textures", "item", seal + ".png"),
             TEXTURES[seal]())
-        write_json(os.path.join(CONTENT, "data", ID, "recipe", seal + ".json"),
-                   SEAL_RECIPES[seal])
+        # Java has no recipe for Malice or Supremacy: Malice comes from invader
+        # bonus loot, Supremacy from the endless gateway (not ported yet).
+        # Creative mode or a command is their only source for now.
+        recipe = SEAL_RECIPES.get(seal)
+        if recipe is None:
+            stale = os.path.join(CONTENT, "data", ID, "recipe", seal + ".json")
+            if os.path.exists(stale):
+                os.remove(stale)
+        else:
+            write_json(os.path.join(CONTENT, "data", ID, "recipe", seal + ".json"),
+                       recipe)
         en["item.%s.%s" % (ID, seal)] = name_en
         fr["item.%s.%s" % (ID, seal)] = name_fr
         en["item.%s.%s.desc" % (ID, seal)] = desc_en
         fr["item.%s.%s.desc" % (ID, seal)] = desc_fr
+
+    (summoner, name_en, name_fr, desc_en, desc_fr, _colour, _glyph) = SUMMONER
+    write_json(os.path.join(CONTENT, "data", ID, "horizon", "item", summoner + ".json"), {
+        "template": "minecraft:paper",
+        "max_stack_size": 64,
+        "rarity": "common",
+    })
+    write_json(os.path.join(CONTENT, "assets", ID, "items", summoner + ".json"), {
+        "model": {"type": "minecraft:model", "model": "%s:item/%s" % (ID, summoner)}
+    })
+    write_json(os.path.join(CONTENT, "assets", ID, "models", "item", summoner + ".json"), {
+        "parent": "minecraft:item/generated",
+        "textures": {"layer0": "%s:item/%s" % (ID, summoner)},
+    })
+    png(os.path.join(CONTENT, "assets", ID, "textures", "item", summoner + ".png"),
+        TEXTURES[summoner]())
+    # No recipe, as in Java: creative mode or a command is the only source.
+    stale = os.path.join(CONTENT, "data", ID, "recipe", summoner + ".json")
+    if os.path.exists(stale):
+        os.remove(stale)
+    en["item.%s.%s" % (ID, summoner)] = name_en
+    fr["item.%s.%s" % (ID, summoner)] = name_fr
+    en["item.%s.%s.desc" % (ID, summoner)] = desc_en
+    fr["item.%s.%s.desc" % (ID, summoner)] = desc_fr
 
     # Vanilla-shaped recipes and their Java item ids; generated here so repeated
     # runs do not depend on the local asset importer. The item models point at
@@ -919,6 +1088,9 @@ def main():
         item = "%s:%s" % (ID, seal)
         if item not in items:
             items.append(item)
+    item = "%s:%s" % (ID, SUMMONER[0])
+    if item not in items:
+        items.append(item)
     for (table, *_rest) in TABLES:
         item = "%s:%s" % (ID, table)
         if item not in items:

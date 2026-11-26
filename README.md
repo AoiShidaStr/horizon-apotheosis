@@ -4,7 +4,7 @@ A clean-room Horizon port of [Apotheosis](https://github.com/Shadows-of-Fire/Apo
 by Shadows_of_Fire (MIT) and its 1.21 companions **Apothic Enchanting**,
 **Apothic Attributes** and **Apothic Spawners**, as the Saison 1 server ran them
 on NeoForge 1.21.1 (Apotheosis 8.9.0, Apothic Enchanting 1.6.4, Apothic Attributes
-2.11.0, Apothic Spawners 1.4.0). Version 0.6.0 targets Horizon a85af177 (native
+2.11.0, Apothic Spawners 1.4.0). Version 0.7.0 targets Horizon a85af177 (native
 hook API 415).
 
 | Part | Section |
@@ -31,8 +31,9 @@ In-game test plan (French): [`TEST-EN-JEU.md`](TEST-EN-JEU.md); results of the
 
 - **Content mod `.hmod`** (`side = "both"`, id `apotheosis`) with creative
   entries for the gem item, gem dust, the enchanting shelves and the rarity
-  salvage materials. All of them are craftable or salvageable in survival (see
-  *Recipes* below).
+  salvage materials. As in Java, the rarity materials and gem dust have no
+  crafting recipe: they come from the salvaging table (affixed gear, gems) and
+  from bosses.
 - **The real Apotheosis gems** — one item, `apotheosis:gem`, carrying its gem
   type in `minecraft:custom_data` (`apotheosis:gem`) and its purity in
   `apotheosis:gem_purity`, exactly as the mod stores them. The catalogue is
@@ -66,12 +67,10 @@ In-game test plan (French): [`TEST-EN-JEU.md`](TEST-EN-JEU.md); results of the
   carried as ordinary modifiers.
 - **Recipes for everything** (vanilla 26.3 data-pack format under
   `data/apotheosis/recipe/`):
-  - **Gem dust** (`gem_dust`, a stack of 64) from one amethyst shard → 2 dust,
-    and 1 gem (via the `apotheosis:gems` item tag) → 3 dust.
-  - **Gem cutting** (`gem_cutting`) and the gem blocks do not exist in this
-    port: the Java gems are cut at the gem cutting table on Horizon, not
-    crafted. The dust recipe reads the `apotheosis:gems` tag, which now holds
-    the single `apotheosis:gem` item.
+  - **Gem dust** (`gem_dust`, a stack of 64) has no recipe, as in Java: the
+    salvaging table breaks a gem into dust. Neither do the five rarity
+    materials, which come from salvaging affixed gear and from bosses.
+  - **Gem cutting** happens at the gem cutting table, not in a recipe.
 - **Affixes on looted gear** (`loot_drops`, API 75): gear a mob drops (a
   zombie's sword, a skeleton's bow…) is rolled into a rarity and carries real
   `minecraft:attribute_modifiers`, a lore that names each affix, and the
@@ -344,6 +343,13 @@ In-game test plan (French): [`TEST-EN-JEU.md`](TEST-EN-JEU.md); results of the
   persistent `apotheosis:boss` tag, and a broadcast announcement.
 - Its death is recognised by the tag: the existing `loot_drops` boss path
   drops a high gem and rolls boss-tier affixes on its gear.
+- **The boss summoner** (`apotheosis:boss_summoner`, creative or `/give` only,
+  as Java has no recipe) uses `use_item_on`: the Java registry's Overworld,
+  Nether and End invaders pick the base mob (a wolf is no monster here), the
+  clicked face and the cell above it are tried against `block_collision` for a
+  two-block mob, and the item is taken once, only after the summon succeeded.
+  `affix_effects::become_invader` gives it the rarity the player's world tier
+  rolls, exactly as a natural invader; no cooldown applies.
 - Names and descriptions for the 14 effect affixes, the boss words, titles
   and 24 base mob names are merged into `en_us.json` and `fr_fr.json` by
   `python tools/gen_attributes.py` (idempotent, shared files untouched).
@@ -375,6 +381,10 @@ In-game test plan (French): [`TEST-EN-JEU.md`](TEST-EN-JEU.md); results of the
   ascent / summit / pinnacle chances are collapsed to 2 % for this slice.
 - Invader names are generated server-side from translated components; there
   is no name-preserving save/load beyond the `CustomName` NBT.
+- The summoner cannot give its invader the player as target as Java's
+  `setTarget` does: Horizon API 415 has no target setter, so the mob's own
+  goals choose one. A mod's dimension has no invader registry entry here, so
+  the summoner fails without consuming there, as Java does.
 
 ### Missing
 
@@ -678,8 +688,8 @@ into its engine (adapted from Horizon's `packaging/server/Dockerfile`):
 
 ```sh
 bash tools/docker/stage-context.sh "<Horizon source at the pinned commit>" ../docker-ctx
-docker build -t horizon-apotheosis:0.6.0 ../docker-ctx
-docker run -d --name apotheosis -p 25565:25565 --stop-timeout 180   -v apotheosis-data:/data   -v "<prepared 26.3 folder>:/opt/horizon/.local/horizon-client/26.3:ro"   -e HORIZON_EULA=true -e HORIZON_WHITELIST=true -e HORIZON_PLAYERS=<name> -e HORIZON_OP=<name>   horizon-apotheosis:0.6.0
+docker build -t horizon-apotheosis:0.7.0 ../docker-ctx
+docker run -d --name apotheosis -p 25565:25565 --stop-timeout 180   -v apotheosis-data:/data   -v "<prepared 26.3 folder>:/opt/horizon/.local/horizon-client/26.3:ro"   -e HORIZON_EULA=true -e HORIZON_WHITELIST=true -e HORIZON_PLAYERS=<name> -e HORIZON_OP=<name>   horizon-apotheosis:0.7.0
 ```
 
 The Horizon source at the pinned commit is in the launcher's cache

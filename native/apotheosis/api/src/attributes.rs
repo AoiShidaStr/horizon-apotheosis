@@ -750,7 +750,7 @@ fn unit(salt: u64) -> f64 {
 // ---------------------------------------------------------------------------
 
 /// The physical damage types the elemental and armour attributes act on.
-fn is_physical(damage_type: &str) -> bool {
+pub(crate) fn is_physical(damage_type: &str) -> bool {
     let name = damage_type.rsplit(':').next().unwrap_or(damage_type);
     matches!(
         name,
@@ -889,10 +889,38 @@ pub fn incoming_damage(event: &mut LivingIncomingDamageEvent<'_>) -> bool {
         event.amount = (f64::from(event.amount) * multiplier) as f32;
     }
     // Feathery, Runed, Deflective, Blast Forged, Grounded and Blockading: the
-    // victim's own armour removes a share of that damage class.
-    let share = reduction_of(event.entity as u32).get(damage_class(event.damage_type));
+    // victim's own armour removes a share of that damage class. A spawned
+    // monster's tier augments add to it (Summit and Pinnacle reduce physical
+    // and magic damage).
+    let share = (reduction_of(event.entity as u32).get(damage_class(event.damage_type))
+        + crate::augments::reduction(
+            event.entity as u32,
+            event.damage_type,
+            f64::from(event.amount),
+        ))
+    .min(0.95);
     if share > 0.0 {
         event.amount = (f64::from(event.amount) * (1.0 - share)) as f32;
+    }
+    // A monster's tier perforation: its own physical blow ignores a share of
+    // the victim's armour (2% a point, as the v2 weapon attributes read it),
+    // and its protection perforation shaves the protection points the victim
+    // has (4% a point, capped at 80%). Java reads it only when the hit's
+    // direct entity is the living attacker, which a melee blow is and an
+    // arrow is not.
+    let attacker = event.causing.max(0) as u32;
+    if attacker != 0
+        && event.direct == event.causing
+        && is_physical(event.damage_type)
+        && let Some((armor_pierce, prot_pierce)) = crate::augments::pierce(attacker)
+    {
+        let mut extra = armor_pierce.max(0.0) * 0.02;
+        if protection_of(event.entity as u32) > 0.0 {
+            extra += (prot_pierce.max(0.0) * 0.04).min(0.8);
+        }
+        if extra > 0.0 {
+            event.amount = (f64::from(event.amount) * (1.0 + extra)) as f32;
+        }
     }
     if let Some(dodged) = take_dodge(event.entity) {
         return dodged;
@@ -921,6 +949,31 @@ fn victim_health(host: &mut dyn Host, id: u32) -> Option<f32> {
         Some(Tag::Double(bits)) => Some(f64::from_bits(*bits) as f32),
         _ => None,
     }
+}
+
+/// The protection points of each player as the last `tick` read them, for the
+/// v1 damage hook, which has no host.
+static PROTECTION_CACHE: OnceLock<Mutex<HashMap<u32, f64>>> = OnceLock::new();
+
+fn protection_of(entity: u32) -> f64 {
+    PROTECTION_CACHE
+        .get()
+        .and_then(|cache| {
+            cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(&entity)
+                .copied()
+        })
+        .unwrap_or(0.0)
+}
+
+fn store_protection(entity: u32, points: f64) {
+    PROTECTION_CACHE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(entity, points);
 }
 
 /// The victim's protection points: one per Protection level on worn armour,
@@ -1238,6 +1291,7 @@ pub fn tick(host: &mut dyn Host, _event: &mut PlayerTickEvent) {
     }
     let mut set = AttrSet::default();
     let mut reduction = Reduction::default();
+    let mut protection = 0.0;
     for slot in [
         EquipmentSlot::Head,
         EquipmentSlot::Chest,
@@ -1249,10 +1303,12 @@ pub fn tick(host: &mut dyn Host, _event: &mut PlayerTickEvent) {
                 set.add(&attrs);
             }
             reduction.add(&worn_reduction(&stack));
+            protection += f64::from(stack.enchantment_level("minecraft:protection"));
         }
     }
     store_armor(player.entity_id as u32, set);
     store_reduction(player.entity_id as u32, reduction);
+    store_protection(player.entity_id as u32, protection.min(20.0));
 }
 
 // ---------------------------------------------------------------------------

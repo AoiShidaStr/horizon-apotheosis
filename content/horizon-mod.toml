@@ -1,6 +1,6 @@
 id = "apotheosis"
 name = "Apotheosis"
-version = "0.6.0"
+version = "0.7.0"
 description = "Apotheosis 8.9.0, Apothic Enchanting, Apothic Attributes and Apothic Spawners for Horizon, aligned on the Java mods: the 99 Java affixes (69 applied) and Apothic attributes, the 21 Java gems with purity and sockets, sigils, reforging, salvaging and gem cutting tables, Apothic Invader bosses, the Apothic Enchanting shelves with Eterna, infusion, tomes and libraries, and silk-touch spawners with the Java modifiers. Java textures, models and names are imported locally from your own jars (tools/import_java_assets.py), never shipped. See README.md."
 authors = ["Saison 2 server"]
 api = "0.2"

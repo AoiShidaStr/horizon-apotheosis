@@ -16,8 +16,11 @@
 //! - `loot_drops`: gear a mob drops is rolled into a rarity with affixes (real
 //!   attribute modifiers plus lore), and a kill adds a gem of the level's
 //!   dimension, at its Java weight and purity floor.
-//! - `register_commands` / `perform_command`: `/apoth salvage`. Reforging is
-//!   the reforging tables' own menus (`menus`), as in Java.
+//! - `register_commands` / `perform_command`: `/apoth salvage`, and the world
+//!   tiers' `/apoth world_tier` and operator `/apoth set_world_tier`.
+//!   Reforging is the reforging tables' own menus (`menus`), as in Java.
+//! - `player_tick`, `mob_killed` and `living_death`: the gear and boss criteria
+//!   that unlock a player's world tiers (`tiers`).
 //! - `prepare_item_enchant`: Apothic Eterna from nearby shelf blocks raises the
 //!   three enchanting offers; shelves are read through Horizon's server Host.
 //! - `use_item`: scrapping, superior scrapping and extraction tomes move
@@ -30,6 +33,11 @@
 //! resolves what a gem gives a piece at its purity.
 //! `affix_effects` holds the effect affixes (poison, execution, cleaving,
 //! spectral arrows, telepathy...) and the Apothic Invader boss.
+//! `boss_summoner` is the creative-only item that summons one on a clicked
+//! block.
+//! `augments` holds step 3 of the world tiers: the augments a monster takes
+//! from the nearest player's tier when it spawns, and the experience and luck
+//! bonuses a player of that tier has.
 /// A tooltip line's colour as Horizon draws it: opaque ABGR (`hud::rgba`), from
 /// the 0xRRGGBB this crate writes. A bare 0xRRGGBB has no alpha and draws
 /// nothing.
@@ -50,7 +58,9 @@ mod tip_colour_tests {
 
 mod affix_effects;
 mod affixes;
+mod boss_summoner;
 mod attributes;
+mod augments;
 mod enchanting;
 mod gems;
 mod java_affixes;
@@ -61,8 +71,9 @@ use horizon_client::mod_api::{
     ArrowLooseEvent, BreakSpeedEvent, EntityJoinLevelEvent, ExperienceOrbPickupEvent, Flow, Hooks,
     Host, ItemDamagedEvent, ItemStack, LeftClickBlockEvent, LivingEquipmentChangeEvent,
     LivingHealEvent, LivingIncomingDamageEvent, LivingIncomingDamageV2Event, LootDropsEvent,
-    MobSpawnedEvent, ModifyDefaultComponentsEvent, NativeCommand, OnEquipEvent, PerformCommandEvent,
-    PlaceBlockEvent, PlayerTickEvent, ProjectileLaunchEvent, RegisterCommandsEvent,
+    MobKilledEvent, MobSpawnedEvent, ModifyDefaultComponentsEvent, NativeCommand, OnEquipEvent,
+    PerformCommandEvent, PlaceBlockEvent, PlayerTickEvent, PlayerXpChangeEvent,
+    ProjectileLaunchEvent, RegisterCommandsEvent,
     RightClickBlockEvent, Tag, Text, TickEvent, TooltipEvent, UseItemOnEvent, serde_json,
 };
 
@@ -71,6 +82,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 mod menus;
 mod sockets;
+mod tiers;
 
 pub fn hooks() -> Box<dyn Hooks> {
     Box::new(Apotheosis)
@@ -211,6 +223,49 @@ const BOSSES: [&str; 4] = [
     "minecraft:elder_guardian",
 ];
 
+/// What a boss's bonus loot table rolls: one of these, never more.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BossDrop {
+    Gem,
+    Malice,
+    Nothing,
+}
+
+/// Java's two invader bonus tables (`entity/boss_drops`, `entity/rare_boss_drops`)
+/// as weights for a gem, a Sigil of Malice and nothing. A happy entry's quality
+/// is 1, so the killer's luck adds its floor to the weight, as Java's loot
+/// entries do. The rare table's music disc entry is folded into "nothing".
+fn boss_drop_weights(rare: bool, luck: f32) -> [u64; 3] {
+    let (gem, malice, nothing) = if rare {
+        (45u32, 30u32, 25u32)
+    } else {
+        (30u32, 25u32, 45u32)
+    };
+    let weighed = |weight: u32| {
+        (f64::from(weight) + f64::from(luck.max(0.0)))
+            .floor()
+            .max(0.0) as u64
+    };
+    [weighed(gem), weighed(malice), u64::from(nothing)]
+}
+
+/// One roll of a boss's bonus table, with `luck` the killer's.
+fn boss_drop(rare: bool, luck: f32, rng: &mut Rng) -> BossDrop {
+    let weights = boss_drop_weights(rare, luck);
+    let total: u64 = weights.iter().sum();
+    let mut roll = rng.below(total.max(1));
+    for (drop, weight) in [BossDrop::Gem, BossDrop::Malice, BossDrop::Nothing]
+        .into_iter()
+        .zip(weights)
+    {
+        if roll < weight {
+            return drop;
+        }
+        roll -= weight;
+    }
+    BossDrop::Nothing
+}
+
 /// The gem chance for a kill, in 1000: Java's 4% for a real player kill and
 /// 0.5% otherwise, but never for a passive entity.  Horizon API 415 has no
 /// fake-player distinction, so every player kill is the 4% branch.
@@ -297,17 +352,10 @@ impl Rng {
     }
 }
 
-/// What an ordinary mob killed by a player can roll: never above epic, so the
-/// two high tiers stay boss-only.
+/// What the sigil of rebirth rolls: never above epic, so the two high tiers
+/// stay boss-only. Loot rolls its rarity from the player's world tier instead
+/// (`tiers::roll_rarity`).
 const ORDINARY_TIERS: [(Tier, u64); 3] = [(Tier::Uncommon, 55), (Tier::Rare, 30), (Tier::Epic, 15)];
-
-/// What a boss's gear rolls.
-pub(crate) const BOSS_TIERS: [(Tier, u64); 4] = [
-    (Tier::Rare, 25),
-    (Tier::Epic, 40),
-    (Tier::Mythic, 25),
-    (Tier::Ancient, 10),
-];
 
 const CHEST_GEM_POOL: &str = "apotheosis:chest_gems";
 
@@ -395,63 +443,6 @@ const BOSS_GEAR: [&str; 5] = [
     "minecraft:bow",
 ];
 
-/// `minecraft:custom_data` key recording the attribute values the last affix
-/// pass wrote, so a reroll takes them back instead of stacking them.
-const AFFIX_ATTRS_KEY: &str = "apotheosis:affix_attrs";
-
-/// Every lore line this module writes is a translated `apotheosis.affix.*`
-/// line: that prefix is how a reroll tells its own lines from someone else's.
-const AFFIX_LORE_PREFIX: &str = "apotheosis.affix.";
-
-/// The id of a `minecraft:attribute_modifiers` entry, when it names one.
-fn modifier_id(entry: &Tag) -> Option<String> {
-    match entry.get("id")? {
-        Tag::String(id) => Some(id.to_string_lossy()),
-        _ => None,
-    }
-}
-
-/// Whether a modifier entry was written by an affix pass of this module. The
-/// ids are the Java affix ids; socket modifiers use `apotheosis:socket_*` and
-/// are left to `sockets`.
-fn is_affix_modifier(entry: &Tag) -> bool {
-    modifier_id(entry)
-        .is_some_and(|id| java_affixes::AFFIXES.iter().any(|affix| affix.id == id))
-}
-
-/// Whether a lore line was written by an affix pass of this module.
-fn is_affix_lore(entry: &Tag) -> bool {
-    matches!(
-        entry.get("translate"),
-        Some(Tag::String(key)) if key.to_string_lossy().starts_with(AFFIX_LORE_PREFIX)
-    )
-}
-
-/// The modifiers and lore already on `stack`, minus this module's own entries:
-/// anything a datapack, another mod or the player wrote survives a reforge.
-fn foreign_entries(stack: &ItemStack) -> (Vec<Tag>, Vec<Tag>) {
-    let modifiers = match stack
-        .data()
-        .and_then(|data| data.other("minecraft:attribute_modifiers"))
-    {
-        Some(Tag::List(entries)) => entries
-            .iter()
-            .filter(|entry| !is_affix_modifier(entry))
-            .cloned()
-            .collect(),
-        _ => Vec::new(),
-    };
-    let lore = match stack.data().and_then(|data| data.other("minecraft:lore")) {
-        Some(Tag::List(lines)) => lines
-            .iter()
-            .filter(|line| !is_affix_lore(line))
-            .cloned()
-            .collect(),
-        _ => Vec::new(),
-    };
-    (modifiers, lore)
-}
-
 /// Rolls `tier`'s affixes onto `stack`: real `minecraft:attribute_modifiers`, a
 /// lore that says them, Java's prefix/suffix name, and the rarity that colours
 /// the name. Only affixes this port can actually pay out enter the pool; the
@@ -465,8 +456,7 @@ pub(crate) fn apply_affixes(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) {
     let count = tier.affixes();
     // Strip last pass's attributes even if this roll ends up empty, so they can
     // never be read twice.
-    attributes::attach_recorded(stack, &[], AFFIX_ATTRS_KEY);
-    let (mut modifiers, mut lore) = foreign_entries(stack);
+    attributes::attach_recorded(stack, &[], affixes::AFFIX_ATTRS_KEY);
     if count == 0 {
         return;
     }
@@ -475,44 +465,30 @@ pub(crate) fn apply_affixes(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) {
     if candidates.is_empty() {
         return;
     }
-    // The item's own modifiers come first: writing the component replaces the
-    // defaults, so an affixed sword would otherwise lose its base damage. A
-    // piece rolled before already carries them, so only add the missing ones.
-    for entry in attributes::base_modifiers(&stack.item) {
-        let id = modifier_id(&entry);
-        if id.is_none() || !modifiers.iter().any(|kept| modifier_id(kept) == id) {
-            modifiers.push(entry);
-        }
-    }
-    modifiers.reserve(count);
-    let mut custom = Vec::with_capacity(count);
-    lore.reserve(count);
-    let mut chosen: Vec<&'static java_affixes::Affix> = Vec::with_capacity(count);
+    // A fresh roll draws a level in [0, 1) for each affix, so a dropped or
+    // reforged piece is never overcharged; `rewrite` recomputes the amount
+    // from that level.
+    let mut picked: Vec<affixes::Instance> = Vec::with_capacity(count);
     for _ in 0..count.min(candidates.len()) {
         let pick = rng.below(candidates.len() as u64) as usize;
         let affix = candidates.swap_remove(pick);
-        let Some(amount) = affixes::amount(affix, tier, rng) else {
+        let level = affixes::roll_level(rng);
+        let Some(value) = affixes::value_at(affix, tier, level) else {
             continue;
         };
-        let (Some(attribute), Some(operation)) = (affix.attribute, affix.operation) else {
+        if affix.attribute.is_none() || affix.operation.is_none() {
             continue;
-        };
-        modifiers.push(Tag::compound([
-            ("type", string(attribute)),
-            ("id", string(affix.id)),
-            ("amount", Tag::Double(amount.to_bits())),
-            ("operation", string(operation)),
-            ("slot", string(affixes::slot(class))),
-        ]));
-        lore.push(affixes::stat_line(affix, tier, amount));
-        if let Some(attr) = affix.attr {
-            custom.push((attr, amount));
         }
-        chosen.push(affix);
+        picked.push(affixes::Instance {
+            affix,
+            level: Some(level),
+            value,
+        });
     }
-    if chosen.is_empty() {
+    if picked.is_empty() {
         return;
     }
+    let chosen: Vec<&'static java_affixes::Affix> = picked.iter().map(|instance| instance.affix).collect();
     // A reroll replaces the name our last roll wrote, but never a player's; a
     // kept name still carries the tier's colour, as Java's rarity component
     // gives it, so a mythic piece stays orange after an anvil rename.
@@ -524,12 +500,8 @@ pub(crate) fn apply_affixes(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) {
         .as_ref()
         .is_some_and(|name| !affixes::is_generated_name(name));
     let name = affixes::item_name_component(&stack.item, tier, &chosen);
+    affixes::rewrite(stack, tier, &picked);
     let data = stack.data_mut();
-    data.set_other(
-        "minecraft:attribute_modifiers",
-        (!modifiers.is_empty()).then_some(Tag::List(modifiers)),
-    );
-    data.set_other("minecraft:lore", (!lore.is_empty()).then_some(Tag::List(lore)));
     if keep_name {
         if let Some(kept) = kept_name {
             data.set_other(
@@ -544,7 +516,6 @@ pub(crate) fn apply_affixes(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) {
     // Vanilla's component stops at epic; this one keeps the five Java rarities
     // (and this port's ancient).
     data.set_other("apotheosis:rarity", Some(string(tier.id())));
-    attributes::attach_recorded(stack, &custom, AFFIX_ATTRS_KEY);
     // Effect affixes are extra, never replacements: the attribute lines and
     // their count stay as they were, and the effects follow Java's rarity
     // counts.
@@ -602,6 +573,7 @@ impl Hooks for Apotheosis {
             }
         }
         sockets::tooltip(event);
+        boss_summoner::tooltip(event);
     }
 
     fn use_item(&self, host: &mut dyn Host, event: &mut horizon_client::mod_api::UseItemEvent<'_>) -> Flow {
@@ -644,14 +616,37 @@ impl Hooks for Apotheosis {
         let Some(gem_rate) = gem_kill_chance(kind, boss, killed_by_player) else {
             return;
         };
+        // The killer's tier, or the nearest player's when the mob names none:
+        // it decides the rarity, the gem's purity, the gear and the luck its
+        // player has. A hook reads no `minecraft:luck`, so the tier's own
+        // bonus is the luck the rolls take (see `augments`).
+        let world = tiers::tier_for_drop(
+            host,
+            event.context.player,
+            event.context.dimension,
+            event.context.origin,
+        );
+        let luck = augments::player_luck(world);
         let n = DROPS.fetch_add(1, Ordering::Relaxed);
         let mut rng = Rng::new(seed_of(&event.context, n));
 
-        // A gem of the level's dimension, at a purity at or above its Java
-        // floor: a boss draws from better steps than an ordinary mob.
+        // Java's invader bonus table: one roll of a gem, a Sigil of Malice or
+        // nothing, never the guaranteed gem this port used to give. A rare
+        // invader (and one of the game's own bosses) uses the rare table.
         if boss {
-            let (gem, purity) = gems::roll(event.context.dimension, true, &mut rng);
-            event.drops.push(gems::stack(gem, purity));
+            let rare = BOSSES.contains(&kind) || affix_effects::is_rare_boss(host, id);
+            match boss_drop(rare, luck, &mut rng) {
+                // A gem of the level's dimension, at the world tier's purity
+                // above its Java floor: a boss may reach a step an ordinary
+                // drop cannot.
+                BossDrop::Gem => {
+                    let (gem, purity) =
+                        gems::roll(event.context.dimension, world, true, &mut rng);
+                    event.drops.push(gems::stack(gem, purity));
+                }
+                BossDrop::Malice => event.drops.push(one("apotheosis:sigil_of_malice")),
+                BossDrop::Nothing => {}
+            }
         }
         // The gear this mob dropped, upgraded in place: a zombie's sword, a
         // skeleton's bow.
@@ -660,11 +655,11 @@ impl Hooks for Apotheosis {
                 continue;
             }
             if boss {
-                let tier = rng.tier(&BOSS_TIERS);
+                let tier = tiers::roll_rarity(world, luck, &mut rng);
                 apply_affixes(stack, tier, &mut rng);
                 sockets::after_affixes(stack, tier, &mut rng);
             } else if killed_by_player && rng.chance(35) {
-                let tier = rng.tier(&ORDINARY_TIERS);
+                let tier = tiers::roll_rarity(world, luck, &mut rng);
                 apply_affixes(stack, tier, &mut rng);
                 sockets::after_affixes(stack, tier, &mut rng);
             }
@@ -672,7 +667,7 @@ impl Hooks for Apotheosis {
         // A low gem from an ordinary monster: 4% for a player kill, 0.5%
         // otherwise, as the two Java GLMs do.
         if !boss && rng.below(1000) < gem_rate {
-            let (gem, purity) = gems::roll(event.context.dimension, false, &mut rng);
+            let (gem, purity) = gems::roll(event.context.dimension, world, false, &mut rng);
             event.drops.push(gems::stack(gem, purity));
         }
         // And one of its own: a boss always, an ordinary mob killed by a player
@@ -686,11 +681,7 @@ impl Hooks for Apotheosis {
         };
         let drop = boss || (killed_by_player && rng.chance(4));
         if drop {
-            let tier = if boss {
-                rng.tier(&BOSS_TIERS)
-            } else {
-                rng.tier(&ORDINARY_TIERS)
-            };
+            let tier = tiers::roll_rarity(world, luck, &mut rng);
             let item = gear(&mut rng);
             let mut stack = one(item);
             apply_affixes(&mut stack, tier, &mut rng);
@@ -700,7 +691,7 @@ impl Hooks for Apotheosis {
         // A gem's purity is rolled where it drops; the gear above is done.
         for stack in event.drops.iter_mut() {
             if stack.data().is_none() {
-                sockets::roll_dropped_purity(stack, &mut rng, boss);
+                sockets::roll_dropped_purity(stack, world, &mut rng, boss);
             }
         }    }
 
@@ -737,7 +728,23 @@ impl Hooks for Apotheosis {
     }
 
     fn mob_spawned(&self, host: &mut dyn Host, event: &mut MobSpawnedEvent<'_>) {
-        affix_effects::mob_spawned(host, event);
+        // One join per spawn: the tier's augments (any monster) and the invader
+        // roll (a natural one) both need the entity id the event omits.
+        let entity = affix_effects::take_spawn(event);
+        augments::monster_spawned(host, event, entity);
+        affix_effects::mob_spawned(host, event, entity);
+    }
+
+    fn mob_killed(&self, host: &mut dyn Host, event: &mut MobKilledEvent<'_>) {
+        tiers::mob_killed(host, event);
+    }
+
+    fn living_death(
+        &self,
+        host: &mut dyn Host,
+        event: &mut horizon_client::mod_api::LivingDeathEvent<'_>,
+    ) -> Flow {
+        tiers::living_death(host, event)
     }
 
     fn living_heal(&self, event: &mut LivingHealEvent) -> Flow {
@@ -751,6 +758,15 @@ impl Hooks for Apotheosis {
         event: &mut ExperienceOrbPickupEvent<'_>,
     ) -> Flow {
         attributes::orb(host, event);
+        Flow::Continue
+    }
+
+    fn player_xp_change(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerXpChangeEvent<'_>,
+    ) -> Flow {
+        augments::xp_change(host, event);
         Flow::Continue
     }
 
@@ -777,6 +793,7 @@ impl Hooks for Apotheosis {
 
     fn player_tick(&self, host: &mut dyn Host, event: &mut PlayerTickEvent) {
         attributes::tick(host, event);
+        tiers::player_tick(host);
     }
 
     fn tick(&self, host: &mut dyn Host, _event: &mut TickEvent) {
@@ -858,10 +875,14 @@ impl Hooks for Apotheosis {
     }
 
     fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
-        // A spawner modifier on a spawner block, then an infusion on the
-        // apothic enchanting table. The Apotheosis tables open their menus.
+        // A spawner modifier on a spawner block, an infusion on the apothic
+        // enchanting table, then the boss summoner on any block. The
+        // Apotheosis tables open their menus.
         match spawners::on_use_item_on(host, event) {
-            Flow::Continue => enchanting::on_use_item_on(host, event),
+            Flow::Continue => match enchanting::on_use_item_on(host, event) {
+                Flow::Continue => boss_summoner::on_use_item_on(host, event),
+                Flow::Cancel => Flow::Cancel,
+            },
             Flow::Cancel => Flow::Cancel,
         }
     }
@@ -877,6 +898,15 @@ impl Hooks for Apotheosis {
     fn register_commands(&self, _host: &mut dyn Host, event: &mut RegisterCommandsEvent<'_>) {
         event.commands.push(NativeCommand::new("apoth"));
         event.commands.push(NativeCommand::new("apoth salvage"));
+        event.commands.push(NativeCommand::new("apoth world_tier"));
+        event.commands
+            .push(NativeCommand::new("apoth world_tier <tier:word>"));
+        // Java's `set_world_tier` needs permission 2, and skips the unlock
+        // check.
+        event.commands.push(NativeCommand::op(
+            "apoth set_world_tier <target:player_name> <tier:word>",
+            2,
+        ));
     }
 
     fn perform_command(&self, host: &mut dyn Host, event: &mut PerformCommandEvent<'_>) -> Flow {
@@ -888,7 +918,7 @@ impl Hooks for Apotheosis {
         if words.len() < 2 {
             host.feedback(Text::translate_with_fallback(
                 "apotheosis.command.help",
-                "Apotheosis: /apoth salvage — break an affixed piece into rarity materials. Reforge at a reforging table.",
+                "Apotheosis: /apoth salvage — break an affixed piece into rarity materials. /apoth world_tier — show or change your world tier. Reforge at a reforging table.",
                 &[],
             ));
             return Flow::Cancel;
@@ -900,6 +930,9 @@ impl Hooks for Apotheosis {
                 i32::from(event.player.selected_slot),
             );
             return Flow::Cancel;
+        }
+        if words[1] == "world_tier" || words[1] == "set_world_tier" {
+            return tiers::command(host, event.player, &words[1..]);
         }
         host.feedback(Text::translate_with_fallback(
             "apotheosis.command.unknown",
@@ -1133,9 +1166,18 @@ mod tests {
             lore.contains(&foreign_lore),
             "the foreign lore line was erased"
         );
+        let affix_lines = lore
+            .iter()
+            .filter(|line| {
+                matches!(
+                    line.get("translate"),
+                    Some(Tag::String(key))
+                        if key.to_string_lossy().starts_with("apotheosis.affix.")
+                )
+            })
+            .count();
         assert_eq!(
-            lore.iter().filter(|line| is_affix_lore(line)).count(),
-            3,
+            affix_lines, 3,
             "rare: two stat lines and one effect line, replaced not stacked"
         );
         let Some(Tag::List(modifiers)) = data.other("minecraft:attribute_modifiers") else {
@@ -1146,7 +1188,10 @@ mod tests {
             "the foreign modifier was erased"
         );
         assert_eq!(
-            modifiers.iter().filter(|entry| is_affix_modifier(entry)).count(),
+            modifiers
+                .iter()
+                .filter(|entry| affixes::is_affix_modifier(entry))
+                .count(),
             2,
             "the affix modifiers replace each other"
         );
@@ -1259,6 +1304,33 @@ mod tests {
         // A boss tagged by the other module still counts even if its id is
         // outside the vanilla monster list.
         assert_eq!(gem_kill_chance("mymod:boss", true, true), Some(40));
+    }
+
+    #[test]
+    fn boss_bonus_loot_is_java_single_draw_and_luck_only_weighs_gem_and_malice() {
+        assert_eq!(boss_drop_weights(false, 0.0), [30, 25, 45]);
+        assert_eq!(boss_drop_weights(true, 0.0), [45, 30, 25]);
+        // Each entry's quality is 1: the killer's luck adds its floor to the
+        // gem and Malice weights, never to "nothing".
+        assert_eq!(boss_drop_weights(false, 0.5), [30, 25, 45]);
+        assert_eq!(boss_drop_weights(false, 1.0), [31, 26, 45]);
+        assert_eq!(boss_drop_weights(true, 1.0), [46, 31, 25]);
+
+        let mut rng = Rng::new(0xC0FFEE);
+        let mut counts = [0u32; 3];
+        for _ in 0..4_000 {
+            match boss_drop(false, 0.0, &mut rng) {
+                BossDrop::Gem => counts[0] += 1,
+                BossDrop::Malice => counts[1] += 1,
+                BossDrop::Nothing => counts[2] += 1,
+            }
+        }
+        for (count, expected) in counts.iter().zip([1_200.0, 1_000.0, 1_800.0]) {
+            assert!(
+                (f64::from(*count) - expected).abs() < 180.0,
+                "weights drifted: {counts:?}"
+            );
+        }
     }
 
     /// `seed_of` over a bare context, for the test above.

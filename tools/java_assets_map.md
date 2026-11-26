@@ -6,12 +6,12 @@ Source inspectée : `java-ref`
 
 ## Résumé
 
-- blocs avec blockstate Java : 33
-- objets avec modèle Java : 52
-- modèles copiés : 119
-- textures copiées : 132
-- clés lang en_us : 1851
-- clés lang fr_fr : 1741
+- blocs avec blockstate Java : 34
+- objets avec modèle Java : 56
+- modèles copiés : 124
+- textures copiées : 140
+- clés lang en_us : 1870
+- clés lang fr_fr : 1778
 
 Les ids sans équivalent Java gardent nos définitions et nos textures originales de `content/`. Les gemmes viennent de Java : une seule gemme (`apotheosis:gem`) dont le modèle choisit la texture du type qu'elle porte, ci-dessous en liste à part.
 
@@ -20,6 +20,7 @@ Les ids sans équivalent Java gardent nos définitions et nos textures originale
 | Id du port | Source Java | Fichiers importés |
 | --- | --- | --- |
 | `apothic_enchanting_table` | `apothic_enchanting:apothic_enchanting_table` | `blockstates/apothic_enchanting_table.json` → `apothic_enchanting:block/apothic_enchanting_table` |
+| `augmenting_table` | `apotheosis:augmenting_table` | `blockstates/augmenting_table.json` → `apotheosis:block/augmenting_table` |
 | `basic_bookshelf` | `apothic_enchanting:basic_bookshelf` | `blockstates/basic_bookshelf.json` → `apothic_enchanting:block/basic_bookshelf` |
 | `beeshelf` | `apothic_enchanting:beeshelf` | `blockstates/beeshelf.json` → `apothic_enchanting:block/beeshelf` |
 | `blazing_hellshelf` | `apothic_enchanting:blazing_hellshelf` | `blockstates/blazing_hellshelf.json` → `apothic_enchanting:block/blazing_hellshelf` |
@@ -59,9 +60,11 @@ Les ids sans équivalent Java gardent nos définitions et nos textures originale
 | --- | --- | --- |
 | `apothic_enchanting_table` | `apothic_enchanting:apothic_enchanting_table` | `items/apothic_enchanting_table.json` → `apothic_enchanting:item/apothic_enchanting_table` |
 | `arcane_sands` | `apotheosis:arcane_sands` | `items/arcane_sands.json` → `apotheosis:item/arcane_sands` |
+| `augmenting_table` | `apotheosis:augmenting_table` | `items/augmenting_table.json` → `apotheosis:item/augmenting_table` |
 | `basic_bookshelf` | `apothic_enchanting:basic_bookshelf` | `items/basic_bookshelf.json` → `apothic_enchanting:item/basic_bookshelf` |
 | `beeshelf` | `apothic_enchanting:beeshelf` | `items/beeshelf.json` → `apothic_enchanting:item/beeshelf` |
 | `blazing_hellshelf` | `apothic_enchanting:blazing_hellshelf` | `items/blazing_hellshelf.json` → `apothic_enchanting:item/blazing_hellshelf` |
+| `boss_summoner` | `apotheosis:boss_summoner` | `items/boss_summoner.json` → `apotheosis:item/boss_summoner` |
 | `crystal_seashelf` | `apothic_enchanting:crystal_seashelf` | `items/crystal_seashelf.json` → `apothic_enchanting:item/crystal_seashelf` |
 | `deepshelf` | `apothic_enchanting:deepshelf` | `items/deepshelf.json` → `apothic_enchanting:item/deepshelf` |
 | `diamond_upgrade_smithing_template` | `apotheosis:diamond_upgrade_smithing_template` | `items/diamond_upgrade_smithing_template.json` → `apotheosis:item/diamond_upgrade_smithing_template` |
@@ -207,8 +210,10 @@ Les ids sans équivalent Java gardent nos définitions et nos textures originale
 | `sightshelf` | `apothic_enchanting:sightshelf` | `items/sightshelf.json` → `apothic_enchanting:item/sightshelf` |
 | `sightshelf_t2` | `apothic_enchanting:sightshelf_t2` | `items/sightshelf_t2.json` → `apothic_enchanting:item/sightshelf_t2` |
 | `sigil_of_enhancement` | `apotheosis:sigil_of_enhancement` | `items/sigil_of_enhancement.json` → `apotheosis:item/sigil_of_enhancement` |
+| `sigil_of_malice` | `apotheosis:sigil_of_malice` | `items/sigil_of_malice.json` → `apotheosis:item/sigil_of_malice` |
 | `sigil_of_rebirth` | `apotheosis:sigil_of_rebirth` | `items/sigil_of_rebirth.json` → `apotheosis:item/sigil_of_rebirth` |
 | `sigil_of_socketing` | `apotheosis:sigil_of_socketing` | `items/sigil_of_socketing.json` → `apotheosis:item/sigil_of_socketing` |
+| `sigil_of_supremacy` | `apotheosis:sigil_of_supremacy` | `items/sigil_of_supremacy.json` → `apotheosis:item/sigil_of_supremacy` |
 | `sigil_of_unnaming` | `apotheosis:sigil_of_unnaming` | `items/sigil_of_unnaming.json` → `apotheosis:item/sigil_of_unnaming` |
 | `sigil_of_withdrawal` | `apotheosis:sigil_of_withdrawal` | `items/sigil_of_withdrawal.json` → `apotheosis:item/sigil_of_withdrawal` |
 | `simple_reforging_table` | `apotheosis:simple_reforging_table` | `items/simple_reforging_table.json` → `apotheosis:item/simple_reforging_table` |

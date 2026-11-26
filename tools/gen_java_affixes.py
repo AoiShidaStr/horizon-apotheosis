@@ -31,6 +31,25 @@ LANG = os.path.join(ROOT, "content", "assets", ID, "lang")
 
 RARITIES = ["common", "uncommon", "rare", "epic", "mythic"]
 
+# Java's world tiers, in `WorldTier` order: the index of an affix's weights.
+TIERS = ["haven", "frontier", "ascent", "summit", "pinnacle"]
+
+
+def parse_weights(raw):
+    """Java's `TieredWeights`: one object for every tier, or one per tier."""
+    if not isinstance(raw, dict):
+        return {}
+    if "weight" in raw or "quality" in raw:
+        weight = int(raw.get("weight", 0))
+        quality = raw.get("quality", 0)
+        return {tier: (weight, quality) for tier in TIERS}
+    parsed = {}
+    for tier, value in raw.items():
+        short = str(tier).rsplit(":", 1)[-1]
+        if short in TIERS and isinstance(value, dict):
+            parsed[short] = (int(value.get("weight", 0)), value.get("quality", 0))
+    return parsed
+
 # Attributes whose behaviour this port implements, and the `Attr` variant that
 # stores them. Anything else stays in the catalogue with `supported = false`.
 APOTHIC_ATTRS = {
@@ -365,11 +384,8 @@ def affix_entries():
                     if rolled is not None:
                         effects[short] = rolled
             definition = data.get("definition", {})
-            weights = definition.get("weights", {})
-            weight = int(weights.get("weight", 0)) if isinstance(weights, dict) else 0
-            if isinstance(weights, dict) and not weight:
-                weight = max((int(v.get("weight", 0)) for v in weights.values()
-                              if isinstance(v, dict)), default=0)
+            weights = parse_weights(definition.get("weights", {}))
+            exclusive = [str(affix) for affix in definition.get("exclusive_set", [])]
             # A file with no category list takes its folder's: Java's
             # `shield/retreating` and `generic/telepathic` rely on this.
             categories = (data.get("categories") or data.get("types")
@@ -397,7 +413,8 @@ def affix_entries():
                 "effect_target": data.get("target"),
                 "damage_kind": data.get("damage_type"),
                 "enchantment": data.get("enchantment"),
-                "weight": weight,
+                "weights": weights,
+                "exclusive": exclusive,
                 "attr": variant,
                 "supported": supported,
             })
@@ -459,6 +476,14 @@ def render(entries):
         "    pub rolls: u32,",
         "}",
         "",
+        "/// One world tier's weight, as Java's `TieredWeights.Weight`: the base",
+        "/// weight and how much one point of `minecraft:luck` moves it.",
+        "#[derive(Clone, Copy, Debug, PartialEq)]",
+        "pub struct TierWeight {",
+        "    pub weight: u32,",
+        "    pub quality: f32,",
+        "}",
+        "",
         "/// One affix from `data/apotheosis/affixes/**`.",
         "#[derive(Clone, Copy, Debug)]",
         "pub struct Affix {",
@@ -493,7 +518,11 @@ def render(entries):
         "    pub damage_kind: Option<&'static str>,",
         "    /// The vanilla enchantment of an `enchantment` affix.",
         "    pub enchantment: Option<&'static str>,",
-        "    pub weight: u32,",
+        "    /// Java's `TieredWeights`, by `WorldTier` (haven..pinnacle): absent",
+        "    /// where Java gives the affix no weight at that tier.",
+        "    pub weights: [Option<TierWeight>; 5],",
+        "    /// Java's `exclusive_set`: affixes this one cannot share a piece with.",
+        "    pub exclusive: &'static [&'static str],",
         "    /// The port's storage slot for an Apothic attribute.",
         "    pub attr: Option<crate::attributes::Attr>,",
         "    pub supported: bool,",
@@ -513,6 +542,13 @@ def render(entries):
         effect_text = ", ".join(effect_literal(value) for value in rolled)
         rarity_indices = ", ".join(str(RARITIES.index(r)) for r in entry["rarities"])
         categories = ", ".join(rust_string(c) for c in entry["categories"])
+        weights = ", ".join(
+            "None" if tier not in entry["weights"] else
+            "Some(TierWeight { weight: %d, quality: %s })"
+            % entry["weights"][tier]
+            for tier in TIERS
+        )
+        exclusive = ", ".join(rust_string(a) for a in entry["exclusive"])
         attr = ("Some(crate::attributes::Attr::%s)" % entry["attr"]
                 if entry["attr"] else "None")
         lines.extend([
@@ -537,7 +573,8 @@ def render(entries):
             "        effect_target: %s," % optional_string(entry["effect_target"]),
             "        damage_kind: %s," % optional_string(entry["damage_kind"]),
             "        enchantment: %s," % optional_string(entry["enchantment"]),
-            "        weight: %d," % entry["weight"],
+            "        weights: [%s]," % weights,
+            "        exclusive: &[%s]," % exclusive,
             "        attr: %s," % attr,
             "        supported: %s," % ("true" if entry["supported"] else "false"),
             "    },",
