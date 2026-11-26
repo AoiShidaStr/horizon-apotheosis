@@ -858,9 +858,9 @@ def main():
 
     for (table, name_en, name_fr, _base, _emblem) in TABLES:
         write_json(os.path.join(CONTENT, "data", ID, "horizon", "block", table + ".json"), {
-            # A plain block, not the crafting table: a template with a use of
-            # its own would open its menu before the click reached the mod.
-            "template": "minecraft:oak_planks",
+            # The crafting table: Horizon only opens a mod menu (menus.rs) on a
+            # block whose template opens a menu.
+            "template": "minecraft:crafting_table",
             "item": True,
             "properties": {
                 "hardness": 2.5,

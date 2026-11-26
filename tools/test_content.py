@@ -93,5 +93,13 @@ class ContentTests(unittest.TestCase):
                 components = json.load(f).get("components", {})
             self.assertNotIn("minecraft:custom_data", components, file)
 
+    def test_menu_tables_use_a_template_that_opens_a_menu(self):
+        # Horizon opens a mod menu only on a block whose template opens one.
+        for table in ("reforging_table", "simple_reforging_table", "salvaging_table",
+                      "gem_cutting_table"):
+            with open(os.path.join(ROOT, "content", "data", "apotheosis", "horizon", "block",
+                                   table + ".json"), encoding="utf-8") as handle:
+                self.assertEqual(json.load(handle)["template"], "minecraft:crafting_table", table)
+
 if __name__ == "__main__":
     unittest.main()
