@@ -106,6 +106,30 @@ fn aggregate(stats: impl IntoIterator<Item = ShelfStats>) -> ShelfStats {
     values
 }
 
+/// What a placed block gives the table, as Java counts it: the port's shelves
+/// by name, and the vanilla blocks Java counts (a bookshelf 2 Eterna up to 30,
+/// the skulls through `basic_skulls` and `wither_skull`, standing or on a
+/// wall). Block-state properties are ignored.
+fn placed_shelf(block: &str) -> Option<ShelfStats> {
+    let id = block.split('[').next().unwrap_or(block);
+    match id {
+        "minecraft:bookshelf" => Some(ShelfStats { eterna: 2.0, ..ShelfStats::DEFAULT }),
+        "minecraft:skeleton_skull"
+        | "minecraft:skeleton_wall_skull"
+        | "minecraft:creeper_head"
+        | "minecraft:creeper_wall_head"
+        | "minecraft:zombie_head"
+        | "minecraft:zombie_wall_head"
+        | "minecraft:piglin_head"
+        | "minecraft:piglin_wall_head" => shelf_stats("basic_skulls"),
+        "minecraft:wither_skeleton_skull" | "minecraft:wither_skeleton_wall_skull" => {
+            shelf_stats("wither_skull")
+        }
+        "apotheosis:basic_skulls" | "apotheosis:wither_skull" => None,
+        _ => shelf_stats(id),
+    }
+}
+
 fn read_table_stats(host: &dyn Host, pos: [i32; 3]) -> ShelfStats {
     let mut shelves = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
@@ -119,7 +143,7 @@ fn read_table_stats(host: &dyn Host, pos: [i32; 3]) -> ShelfStats {
             if !seen.insert(shelf_pos) {
                 continue;
             }
-            if let Some(stats) = shelf_stats(&host.block(shelf_pos)) {
+            if let Some(stats) = placed_shelf(&host.block(shelf_pos)) {
                 shelves.push(stats);
             }
         }
@@ -1899,5 +1923,20 @@ mod tests {
         assert!(take_pending(909, 3).is_none());
         assert!(take_pending(909, 4).is_some());
         assert!(take_pending(909, 4).is_none());
+    }
+}
+
+#[cfg(test)]
+mod placed_shelf_tests {
+    use super::placed_shelf;
+
+    #[test]
+    fn the_table_counts_vanilla_blocks_as_java_does() {
+        assert_eq!(placed_shelf("minecraft:bookshelf").unwrap().eterna, 2.0);
+        assert_eq!(placed_shelf("minecraft:skeleton_wall_skull[facing=north]").unwrap().quanta, 5.0);
+        assert_eq!(placed_shelf("minecraft:creeper_head[rotation=4]").unwrap().quanta, 5.0);
+        assert_eq!(placed_shelf("minecraft:wither_skeleton_skull").unwrap().quanta, 10.0);
+        assert_eq!(placed_shelf("apotheosis:deepshelf").unwrap().eterna, 5.0);
+        assert!(placed_shelf("minecraft:stone").is_none());
     }
 }
