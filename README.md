@@ -31,8 +31,9 @@ In-game test plan (French): [`TEST-EN-JEU.md`](TEST-EN-JEU.md); results of the
 
 - **Content mod `.hmod`** (`side = "both"`, id `apotheosis`) with creative
   entries for the gem item, gem dust, the enchanting shelves and the rarity
-  salvage materials. All of them are craftable or salvageable in survival (see
-  *Recipes* below).
+  salvage materials. As in Java, the rarity materials and gem dust have no
+  crafting recipe: they come from the salvaging table (affixed gear, gems) and
+  from bosses.
 - **The real Apotheosis gems** — one item, `apotheosis:gem`, carrying its gem
   type in `minecraft:custom_data` (`apotheosis:gem`) and its purity in
   `apotheosis:gem_purity`, exactly as the mod stores them. The catalogue is
@@ -66,12 +67,10 @@ In-game test plan (French): [`TEST-EN-JEU.md`](TEST-EN-JEU.md); results of the
   carried as ordinary modifiers.
 - **Recipes for everything** (vanilla 26.3 data-pack format under
   `data/apotheosis/recipe/`):
-  - **Gem dust** (`gem_dust`, a stack of 64) from one amethyst shard → 2 dust,
-    and 1 gem (via the `apotheosis:gems` item tag) → 3 dust.
-  - **Gem cutting** (`gem_cutting`) and the gem blocks do not exist in this
-    port: the Java gems are cut at the gem cutting table on Horizon, not
-    crafted. The dust recipe reads the `apotheosis:gems` tag, which now holds
-    the single `apotheosis:gem` item.
+  - **Gem dust** (`gem_dust`, a stack of 64) has no recipe, as in Java: the
+    salvaging table breaks a gem into dust. Neither do the five rarity
+    materials, which come from salvaging affixed gear and from bosses.
+  - **Gem cutting** happens at the gem cutting table, not in a recipe.
 - **Affixes on looted gear** (`loot_drops`, API 75): gear a mob drops (a
   zombie's sword, a skeleton's bow…) is rolled into a rarity and carries real
   `minecraft:attribute_modifiers`, a lore that names each affix, and the

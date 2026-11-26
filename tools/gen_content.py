@@ -242,18 +242,12 @@ def main():
     png(os.path.join(CONTENT, "assets", ID, "textures", "item", "gem_dust.png"),
         dust_pixels())
 
-    gate("gem_dust_from_amethyst", {
-        "type": "minecraft:crafting_shapeless",
-        "category": "misc",
-        "ingredients": ["minecraft:amethyst_shard"],
-        "result": {"id": "%s:gem_dust" % ID, "count": 2},
-    })
-    gate("gem_dust_from_gems", {
-        "type": "minecraft:crafting_shapeless",
-        "category": "misc",
-        "ingredients": ["#%s:gems" % ID],
-        "result": {"id": "%s:gem_dust" % ID, "count": 3},
-    })
+    # No gem dust recipe, as in Java: dust comes from salvaging gems at the
+    # salvaging table.
+    for stale in ("gem_dust_from_amethyst.json", "gem_dust_from_gems.json"):
+        path = os.path.join(CONTENT, "data", ID, "recipe", stale)
+        if os.path.exists(path):
+            os.remove(path)
 
     # The per-purity gem items are added by `tools/gen_java_gems.py`; keep them.
     gems_tag_path = os.path.join(CONTENT, "data", ID, "tags", "item", "gems.json")

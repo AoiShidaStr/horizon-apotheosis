@@ -10,7 +10,7 @@ ignoré par git.
 ## Ce qui est porté
 
 33 blocs et 127 objets sont déclarés sous
-`content/data/apotheosis/horizon/`, avec 58 recettes sous
+`content/data/apotheosis/horizon/`, avec 46 recettes sous
 `content/data/apotheosis/recipe/`.
 
 Blocs : `apothic_enchanting_table`, `basic_bookshelf`, `beeshelf`, `blazing_hellshelf`, `crystal_seashelf`, `deepshelf`, `dormant_deepshelf`, `draconic_endshelf`, `echoing_deepshelf`, `echoing_sculkshelf`, `enchantment_library`, `ender_library`, `endshelf`, `filtering_shelf`, `gem_cutting_table`, `geode_shelf`, `glowing_hellshelf`, `heart_seashelf`, `hellshelf`, `infused_hellshelf`, `infused_seashelf`, `melonshelf`, `pearl_endshelf`, `reforging_table`, `salvaging_table`, `seashelf`, `sightshelf`, `sightshelf_t2`, `simple_reforging_table`, `soul_touched_deepshelf`, `soul_touched_sculkshelf`, `stoneshelf`, `treasure_shelf`.

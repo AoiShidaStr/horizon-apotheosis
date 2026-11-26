@@ -793,16 +793,12 @@ def main():
         })
         png(os.path.join(CONTENT, "assets", ID, "textures", "item", material + ".png"),
             TEXTURES[material]())
-        write_json(os.path.join(CONTENT, "data", ID, "recipe", material + ".json"),
-                   RECIPES[material])
-        # A material grinds back into dust, the currency a purity upgrade takes.
-        write_json(os.path.join(CONTENT, "data", ID, "recipe",
-                                material + "_to_gem_dust.json"), {
-            "type": "minecraft:crafting_shapeless",
-            "category": "misc",
-            "ingredients": ["%s:%s" % (ID, material)],
-            "result": {"id": "%s:gem_dust" % ID, "count": 3},
-        })
+        # No crafting recipe, as in Java: a rarity material comes from salvaging
+        # affixed gear (and bosses), never from a recipe or from dust.
+        for stale in (material + ".json", material + "_to_gem_dust.json"):
+            path = os.path.join(CONTENT, "data", ID, "recipe", stale)
+            if os.path.exists(path):
+                os.remove(path)
         en["item.%s.%s" % (ID, material)] = name_en
         fr["item.%s.%s" % (ID, material)] = name_fr
 

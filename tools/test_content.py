@@ -116,5 +116,16 @@ class ContentTests(unittest.TestCase):
                                    table + ".json"), encoding="utf-8") as handle:
                 self.assertEqual(json.load(handle)["template"], "minecraft:crafting_table", table)
 
+    def test_rarity_materials_and_dust_have_no_crafting_recipe(self):
+        # Java has none: they come from salvaging. A recipe would bypass the
+        # salvaging table (and ProjectE would make them free).
+        folder = os.path.join(ROOT, "content", "data", "apotheosis", "recipe")
+        for name in ("mysterious_scrap_metal", "timeworn_fabric", "luminous_crystal_shard",
+                     "arcane_sands", "godforged_pearl"):
+            for stem in (name, name + "_to_gem_dust"):
+                self.assertFalse(os.path.exists(os.path.join(folder, stem + ".json")), stem)
+        for stem in ("gem_dust_from_amethyst", "gem_dust_from_gems"):
+            self.assertFalse(os.path.exists(os.path.join(folder, stem + ".json")), stem)
+
 if __name__ == "__main__":
     unittest.main()
