@@ -653,5 +653,16 @@
   "apotheosis.polish.done": "Pureté améliorée : %s.",
   "apotheosis.polish.hint": "Clic droit avec de la poussière de gemme en main secondaire pour augmenter sa pureté.",
   "apotheosis.cut.no_dust": "La table de taille demande %s poussière de gemme.",
-  "apotheosis.table.cut.hint": "La table de taille aiguise la gemme tenue en main."
+  "apotheosis.table.cut.hint": "La table de taille aiguise la gemme tenue en main.",
+  "info.apothic_enchanting.ench_stats": "Statistiques d'enchantement :",
+  "info.apothic_enchanting.eterna": " - Éterna : %s",
+  "info.apothic_enchanting.eterna.p": " - Éterna : +%s (max %s)",
+  "info.apothic_enchanting.quanta": " - Quanta : %s %%",
+  "info.apothic_enchanting.quanta.p": " - Quanta : +%s %%",
+  "info.apothic_enchanting.arcana": " - Arcana : %s %%",
+  "info.apothic_enchanting.arcana.p": " - Arcana : +%s %%",
+  "info.apothic_enchanting.clues": " - Indices d'enchantement : %s",
+  "info.apothic_enchanting.clues.p": " - Indices d'enchantement : +%s",
+  "info.apothic_enchanting.allows_treasure": " - Autorise les enchantements de trésor",
+  "info.apothic_enchanting.provides_stability": " - Apporte la stabilité quantique"
 }

@@ -586,6 +586,7 @@ impl Hooks for Apotheosis {
     fn tooltip(&self, _host: &dyn Host, event: &mut TooltipEvent<'_>) {
         attributes::tooltip(event);
         spawners::on_tooltip(event);
+        enchanting::tooltip(event);
         // Java's gem tooltip, built here: Horizon's client shows neither the
         // lore nor the name colour a gem item's declaration would carry.
         if let Some((gem, purity)) = gems::of_stack(event.stack) {

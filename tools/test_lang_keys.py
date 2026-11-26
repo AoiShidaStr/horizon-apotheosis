@@ -16,6 +16,9 @@ TRANSLATE = re.compile(r'translate_with_fallback\(\s*"(apotheosis\.[^"]+)"')
 # The table screens' tooltip lines (menus.rs `line(key, ...)`); `container.*` keys are vanilla's.
 MENU_LINE = re.compile(r'\bline\(\s*"((?!container\.)[^"]+)"')
 
+# The shelf tooltip lines (enchanting.rs `shelf_tooltip_lines`) keep Java's key names.
+SHELF_STAT = re.compile(r'"(info\.apothic_enchanting\.[a-z_.]+)"')
+
 # Legacy keys that no code reads any more (proof: grep over native/ and content/).
 LEGACY_FIXED = ["apotheosis.tooltip.tier", "apotheosis.affix.line", "apotheosis.reforge.not_affixed"]
 LEGACY_PATTERNS = [
@@ -48,6 +51,14 @@ class LangKeyTests(unittest.TestCase):
         menus = (NATIVE / "apotheosis" / "api" / "src" / "menus.rs").read_text(encoding="utf-8")
         keys = set(MENU_LINE.findall(menus))
         self.assertIn("text.apotheosis.reforge_cost", keys)
+        for name in ("en_us.json", "fr_fr.json"):
+            lang = load_lang(name)
+            self.assertEqual(sorted(k for k in keys if k not in lang), [], name)
+
+    def test_every_shelf_stat_key_exists_in_both_lang_files(self):
+        enchanting = (NATIVE / "apotheosis" / "api" / "src" / "enchanting.rs").read_text(encoding="utf-8")
+        keys = set(SHELF_STAT.findall(enchanting))
+        self.assertIn("info.apothic_enchanting.eterna.p", keys)
         for name in ("en_us.json", "fr_fr.json"):
             lang = load_lang(name)
             self.assertEqual(sorted(k for k in keys if k not in lang), [], name)

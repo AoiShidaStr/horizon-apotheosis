@@ -1,7 +1,7 @@
 use horizon_client::mod_api::{
     BlockEntityEvent, BlockEntityTickEvent, BlockEntityTicksEvent, Compound, EquipmentSlot, Flow,
     Host, InventoryTickEvent, ItemStack, PrepareItemEnchantEvent, RightClickBlockEvent, Tag, Text,
-    UseItemEvent, UseItemOnEvent,
+    TooltipEvent, UseItemEvent, UseItemOnEvent,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -125,6 +125,121 @@ fn read_table_stats(host: &dyn Host, pos: [i32; 3]) -> ShelfStats {
         }
     }
     aggregate(shelves)
+}
+
+// ---------------------------------------------------------------------------
+// Shelf tooltips
+// ---------------------------------------------------------------------------
+// Java's `TooltipUtil.appendBlockStats`: a block item that counts as a shelf
+// lists what it gives an enchanting table, in Java's colours.
+
+const STATS_GOLD: u32 = 0xFF_AA00;
+const ETERNA_GREEN: u32 = 0x55_FF55;
+const QUANTA_RED: u32 = 0xFF_5555;
+const ARCANA_PURPLE: u32 = 0xAA_00AA;
+const CLUES_AQUA: u32 = 0x00_AAAA;
+
+/// One tooltip line of a shelf: its lang key, English fallback, the `%s`
+/// arguments and its 0xRRGGBB colour.
+#[derive(Debug, PartialEq)]
+struct StatLine {
+    key: &'static str,
+    fallback: &'static str,
+    args: Vec<String>,
+    colour: u32,
+}
+
+/// The stats an item places as a shelf, with Java's two special flags
+/// (allows treasure, provides stability). Vanilla blocks count as Java counts
+/// them: a bookshelf through its enchanting power (1 power = 2 Eterna, max
+/// 30), the skulls through Java's `basic_skulls` tag and `wither_skull` file.
+fn item_shelf(item: &str) -> Option<(ShelfStats, bool, bool)> {
+    let (namespace, name) = item.split_once(':')?;
+    let shelf = match (namespace, name) {
+        ("minecraft", "bookshelf") => "minecraft_bookshelf",
+        ("minecraft", "skeleton_skull" | "creeper_head" | "zombie_head" | "piglin_head") => {
+            "basic_skulls"
+        }
+        ("minecraft", "wither_skeleton_skull") => "wither_skull",
+        ("minecraft", "amethyst_cluster") => "amethyst_cluster",
+        ("apotheosis", "basic_skulls" | "wither_skull" | "amethyst_cluster") => return None,
+        ("apotheosis", name) => name,
+        _ => return None,
+    };
+    let stats = if shelf == "minecraft_bookshelf" {
+        ShelfStats { eterna: 2.0, ..ShelfStats::DEFAULT }
+    } else {
+        shelf_stats(shelf)?
+    };
+    Some((stats, shelf == "treasure_shelf", shelf == "geode_shelf"))
+}
+
+/// Java's `String.format("%.2f")`, with a dot whatever the language.
+fn two_places(value: f32) -> String {
+    format!("{value:.2}")
+}
+
+/// The lines a shelf item's tooltip gains, as Java writes them: a header,
+/// then Eterna (with its cap when positive), Quanta, Arcana and clues when
+/// non-zero, then the treasure and stability flags.
+fn shelf_tooltip_lines(item: &str) -> Vec<StatLine> {
+    let Some((stats, treasure, stable)) = item_shelf(item) else {
+        return Vec::new();
+    };
+    let mut lines = Vec::new();
+    let mut line = |key, fallback, args: Vec<String>, colour| {
+        lines.push(StatLine { key, fallback, args, colour });
+    };
+    let any = stats.eterna != 0.0
+        || stats.quanta != 0.0
+        || stats.arcana != 0.0
+        || stats.clues != 0
+        || treasure
+        || stable;
+    if any {
+        line("info.apothic_enchanting.ench_stats", "Enchanting stats:", vec![], STATS_GOLD);
+    }
+    if stats.eterna > 0.0 {
+        line(
+            "info.apothic_enchanting.eterna.p",
+            " - Eterna: +%s (max %s)",
+            vec![two_places(stats.eterna), two_places(stats.max_eterna)],
+            ETERNA_GREEN,
+        );
+    } else if stats.eterna < 0.0 {
+        line("info.apothic_enchanting.eterna", " - Eterna: %s", vec![two_places(stats.eterna)], ETERNA_GREEN);
+    }
+    if stats.quanta > 0.0 {
+        line("info.apothic_enchanting.quanta.p", " - Quanta: +%s%%", vec![two_places(stats.quanta)], QUANTA_RED);
+    } else if stats.quanta < 0.0 {
+        line("info.apothic_enchanting.quanta", " - Quanta: %s%%", vec![two_places(stats.quanta)], QUANTA_RED);
+    }
+    if stats.arcana > 0.0 {
+        line("info.apothic_enchanting.arcana.p", " - Arcana: +%s%%", vec![two_places(stats.arcana)], ARCANA_PURPLE);
+    } else if stats.arcana < 0.0 {
+        line("info.apothic_enchanting.arcana", " - Arcana: %s%%", vec![two_places(stats.arcana)], ARCANA_PURPLE);
+    }
+    if stats.clues > 0 {
+        line("info.apothic_enchanting.clues.p", " - Enchanting clues: +%s", vec![stats.clues.to_string()], CLUES_AQUA);
+    } else if stats.clues < 0 {
+        line("info.apothic_enchanting.clues", " - Enchanting clues: %s", vec![stats.clues.to_string()], CLUES_AQUA);
+    }
+    if treasure {
+        line("info.apothic_enchanting.allows_treasure", " - Allows treasure enchantments", vec![], STATS_GOLD);
+    }
+    if stable {
+        line("info.apothic_enchanting.provides_stability", " - Provides quantic stability", vec![], STATS_GOLD);
+    }
+    lines
+}
+
+/// An item tooltip, on the client: a shelf block item lists its stats.
+pub(super) fn tooltip(event: &mut TooltipEvent<'_>) {
+    for line in shelf_tooltip_lines(event.stack.item.as_ref()) {
+        let args: Vec<Text> = line.args.into_iter().map(Text::literal).collect();
+        let text = Text::translate_with_fallback(line.key, line.fallback, &args).with_color(line.colour);
+        event.lines.push((text, crate::tip_colour(line.colour)));
+    }
 }
 
 fn apply_costs(costs: &mut [i32; 3], eterna: f32) {
@@ -1269,6 +1384,71 @@ mod tests {
         assert_eq!(shelf_stats("minecraft:amethyst_cluster").unwrap().eterna, 1.0);
         assert_eq!(shelf_stats("apotheosis:stoneshelf").unwrap().eterna, -3.0);
         assert_eq!(shelf_stats("minecraft:air"), None);
+    }
+
+    fn shelf_line(key: &'static str, args: &[&str], colour: u32) -> (&'static str, Vec<String>, u32) {
+        (key, args.iter().map(|arg| arg.to_string()).collect(), colour)
+    }
+
+    fn shelf_lines(item: &str) -> Vec<(&'static str, Vec<String>, u32)> {
+        shelf_tooltip_lines(item)
+            .into_iter()
+            .map(|line| (line.key, line.args, line.colour))
+            .collect()
+    }
+
+    #[test]
+    fn shelf_tooltips_list_java_stats_and_colours() {
+        assert_eq!(
+            shelf_lines("apotheosis:deepshelf"),
+            vec![
+                shelf_line("info.apothic_enchanting.ench_stats", &[], 0xFFAA00),
+                shelf_line("info.apothic_enchanting.eterna.p", &["5.00", "70.00"], 0x55FF55),
+                shelf_line("info.apothic_enchanting.quanta.p", &["5.00"], 0xFF5555),
+                shelf_line("info.apothic_enchanting.arcana.p", &["5.00"], 0xAA00AA),
+            ]
+        );
+        assert_eq!(
+            shelf_lines("apotheosis:blazing_hellshelf"),
+            vec![
+                shelf_line("info.apothic_enchanting.ench_stats", &[], 0xFFAA00),
+                shelf_line("info.apothic_enchanting.eterna.p", &["10.00", "65.00"], 0x55FF55),
+                shelf_line("info.apothic_enchanting.quanta.p", &["10.00"], 0xFF5555),
+                shelf_line("info.apothic_enchanting.clues", &["-1"], 0x00AAAA),
+            ]
+        );
+        assert_eq!(
+            shelf_lines("apotheosis:treasure_shelf"),
+            vec![
+                shelf_line("info.apothic_enchanting.ench_stats", &[], 0xFFAA00),
+                shelf_line("info.apothic_enchanting.eterna.p", &["5.00", "70.00"], 0x55FF55),
+                shelf_line("info.apothic_enchanting.quanta", &["-15.00"], 0xFF5555),
+                shelf_line("info.apothic_enchanting.arcana", &["-15.00"], 0xAA00AA),
+                shelf_line("info.apothic_enchanting.allows_treasure", &[], 0xFFAA00),
+            ]
+        );
+    }
+
+    #[test]
+    fn vanilla_shelf_blocks_show_their_stats() {
+        assert_eq!(
+            shelf_lines("minecraft:bookshelf"),
+            vec![
+                shelf_line("info.apothic_enchanting.ench_stats", &[], 0xFFAA00),
+                shelf_line("info.apothic_enchanting.eterna.p", &["2.00", "30.00"], 0x55FF55),
+            ]
+        );
+        assert_eq!(shelf_lines("minecraft:zombie_head")[1], shelf_line("info.apothic_enchanting.quanta.p", &["5.00"], 0xFF5555));
+        assert_eq!(
+            shelf_lines("minecraft:wither_skeleton_skull")[1],
+            shelf_line("info.apothic_enchanting.quanta.p", &["10.00"], 0xFF5555)
+        );
+        assert_eq!(shelf_lines("minecraft:amethyst_cluster")[1].1, vec!["1.00", "40.00"]);
+        assert_eq!(shelf_lines("apotheosis:geode_shelf").last().unwrap().0, "info.apothic_enchanting.provides_stability");
+        // No stats, no header: a plain block, an empty filtering shelf, a table id.
+        assert!(shelf_lines("minecraft:dirt").is_empty());
+        assert!(shelf_lines("apotheosis:filtering_shelf").is_empty());
+        assert!(shelf_lines("apotheosis:wither_skull").is_empty());
     }
 
     #[test]

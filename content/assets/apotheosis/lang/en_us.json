@@ -653,5 +653,16 @@
   "apotheosis.polish.done": "Purity raised to %s.",
   "apotheosis.polish.hint": "Right-click with gem dust in your off hand to raise its purity.",
   "apotheosis.cut.no_dust": "The gem cutting table needs %s gem dust and the purity materials.",
-  "apotheosis.table.cut.hint": "The gem cutting table sharpens the gem in your hand."
+  "apotheosis.table.cut.hint": "The gem cutting table sharpens the gem in your hand.",
+  "info.apothic_enchanting.ench_stats": "Enchanting stats:",
+  "info.apothic_enchanting.eterna": " - Eterna: %s",
+  "info.apothic_enchanting.eterna.p": " - Eterna: +%s (max %s)",
+  "info.apothic_enchanting.quanta": " - Quanta: %s%%",
+  "info.apothic_enchanting.quanta.p": " - Quanta: +%s%%",
+  "info.apothic_enchanting.arcana": " - Arcana: %s%%",
+  "info.apothic_enchanting.arcana.p": " - Arcana: +%s%%",
+  "info.apothic_enchanting.clues": " - Enchanting clues: %s",
+  "info.apothic_enchanting.clues.p": " - Enchanting clues: +%s",
+  "info.apothic_enchanting.allows_treasure": " - Allows treasure enchantments",
+  "info.apothic_enchanting.provides_stability": " - Provides quantic stability"
 }
