@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "group": "apotheosis",
+  "pattern": [
+    " N ",
+    "GEG",
+    "PPP"
+  ],
+  "key": {
+    "N": "minecraft:nether_star",
+    "G": "apotheosis:godforged_pearl",
+    "E": "minecraft:enchanting_table",
+    "P": "minecraft:polished_blackstone"
+  },
+  "result": {
+    "id": "apotheosis:augmenting_table"
+  }
+}

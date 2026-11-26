@@ -111,7 +111,7 @@ class ContentTests(unittest.TestCase):
     def test_menu_tables_use_a_template_that_opens_a_menu(self):
         # Horizon opens a mod menu only on a block whose template opens one.
         for table in ("reforging_table", "simple_reforging_table", "salvaging_table",
-                      "gem_cutting_table"):
+                      "gem_cutting_table", "augmenting_table"):
             with open(os.path.join(ROOT, "content", "data", "apotheosis", "horizon", "block",
                                    table + ".json"), encoding="utf-8") as handle:
                 self.assertEqual(json.load(handle)["template"], "minecraft:crafting_table", table)

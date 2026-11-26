@@ -693,5 +693,14 @@
   "apotheosis.malice.done": "Malice: %s overcharged, %s reset.",
   "apotheosis.malice.final": "Malice: %s overcharged; nothing else was reset.",
   "apotheosis.supremacy.no_affixes": "Supremacy needs an affixed piece.",
-  "apotheosis.supremacy.done": "Supremacy: every affix is at least 1.5."
+  "apotheosis.supremacy.done": "Supremacy: every affix is at least 1.5.",
+  "block.apotheosis.augmenting_table": "Augmenting Table",
+  "block.apotheosis.augmenting_table.desc": "Uses Sigils of Enhancement to augment individual affixes",
+  "button.apotheosis.augmenting.upgrade": "Upgrade Selected Affix",
+  "button.apotheosis.augmenting.reroll": "Reroll Selected Affix",
+  "button.apotheosis.augmenting.no_selection": "No Affix Selected",
+  "button.apotheosis.augmenting.max_level": "Already Max Level",
+  "button.apotheosis.augmenting.no_alternatives": "No Alternative Affixes",
+  "button.apotheosis.augmenting.upgrade.cost": "Cost: %sx %s",
+  "button.apotheosis.augmenting.upgrade.exp_cost": "Experience Cost: %s Levels"
 }

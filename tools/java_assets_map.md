@@ -6,12 +6,12 @@ Source inspectée : `java-ref`
 
 ## Résumé
 
-- blocs avec blockstate Java : 33
-- objets avec modèle Java : 55
-- modèles copiés : 122
-- textures copiées : 135
+- blocs avec blockstate Java : 34
+- objets avec modèle Java : 56
+- modèles copiés : 124
+- textures copiées : 140
 - clés lang en_us : 1870
-- clés lang fr_fr : 1769
+- clés lang fr_fr : 1778
 
 Les ids sans équivalent Java gardent nos définitions et nos textures originales de `content/`. Les gemmes viennent de Java : une seule gemme (`apotheosis:gem`) dont le modèle choisit la texture du type qu'elle porte, ci-dessous en liste à part.
 
@@ -20,6 +20,7 @@ Les ids sans équivalent Java gardent nos définitions et nos textures originale
 | Id du port | Source Java | Fichiers importés |
 | --- | --- | --- |
 | `apothic_enchanting_table` | `apothic_enchanting:apothic_enchanting_table` | `blockstates/apothic_enchanting_table.json` → `apothic_enchanting:block/apothic_enchanting_table` |
+| `augmenting_table` | `apotheosis:augmenting_table` | `blockstates/augmenting_table.json` → `apotheosis:block/augmenting_table` |
 | `basic_bookshelf` | `apothic_enchanting:basic_bookshelf` | `blockstates/basic_bookshelf.json` → `apothic_enchanting:block/basic_bookshelf` |
 | `beeshelf` | `apothic_enchanting:beeshelf` | `blockstates/beeshelf.json` → `apothic_enchanting:block/beeshelf` |
 | `blazing_hellshelf` | `apothic_enchanting:blazing_hellshelf` | `blockstates/blazing_hellshelf.json` → `apothic_enchanting:block/blazing_hellshelf` |
@@ -59,6 +60,7 @@ Les ids sans équivalent Java gardent nos définitions et nos textures originale
 | --- | --- | --- |
 | `apothic_enchanting_table` | `apothic_enchanting:apothic_enchanting_table` | `items/apothic_enchanting_table.json` → `apothic_enchanting:item/apothic_enchanting_table` |
 | `arcane_sands` | `apotheosis:arcane_sands` | `items/arcane_sands.json` → `apotheosis:item/arcane_sands` |
+| `augmenting_table` | `apotheosis:augmenting_table` | `items/augmenting_table.json` → `apotheosis:item/augmenting_table` |
 | `basic_bookshelf` | `apothic_enchanting:basic_bookshelf` | `items/basic_bookshelf.json` → `apothic_enchanting:item/basic_bookshelf` |
 | `beeshelf` | `apothic_enchanting:beeshelf` | `items/beeshelf.json` → `apothic_enchanting:item/beeshelf` |
 | `blazing_hellshelf` | `apothic_enchanting:blazing_hellshelf` | `items/blazing_hellshelf.json` → `apothic_enchanting:item/blazing_hellshelf` |

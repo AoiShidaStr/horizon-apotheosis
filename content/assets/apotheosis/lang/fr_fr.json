@@ -693,5 +693,14 @@
   "apotheosis.malice.done": "Malice : %s suralimenté, %s remis à zéro.",
   "apotheosis.malice.final": "Malice : %s suralimenté ; rien d'autre n'a été remis à zéro.",
   "apotheosis.supremacy.no_affixes": "Suprématie demande un objet affixé.",
-  "apotheosis.supremacy.done": "Suprématie : tous les affixes sont à 1,5 au moins."
+  "apotheosis.supremacy.done": "Suprématie : tous les affixes sont à 1,5 au moins.",
+  "block.apotheosis.augmenting_table": "Table d'augmentation",
+  "block.apotheosis.augmenting_table.desc": "Utilise des sceaux d'amélioration pour augmenter chaque affixe",
+  "button.apotheosis.augmenting.upgrade": "Améliorer l'affixe sélectionné",
+  "button.apotheosis.augmenting.reroll": "Relancer l'affixe sélectionné",
+  "button.apotheosis.augmenting.no_selection": "Aucun affixe sélectionné",
+  "button.apotheosis.augmenting.max_level": "Niveau maximal déjà atteint",
+  "button.apotheosis.augmenting.no_alternatives": "Aucun affixe de remplacement",
+  "button.apotheosis.augmenting.upgrade.cost": "Coût : %sx %s",
+  "button.apotheosis.augmenting.upgrade.exp_cost": "Coût en expérience : %s niveaux"
 }

@@ -956,14 +956,14 @@ pub fn seal(item: &str) -> Option<Seal> {
     }
 }
 
-/// The working block an id is: the three tables, each doing on a right click
-/// what its command does.
+/// The working block an id is: the tables that open a menu.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Table {
     SimpleReforging,
     Reforging,
     Salvaging,
     Cutting,
+    Augmenting,
 }
 
 pub fn table(block: &str) -> Option<Table> {
@@ -972,6 +972,7 @@ pub fn table(block: &str) -> Option<Table> {
         "apotheosis:reforging_table" => Some(Table::Reforging),
         "apotheosis:salvaging_table" => Some(Table::Salvaging),
         "apotheosis:gem_cutting_table" => Some(Table::Cutting),
+        "apotheosis:augmenting_table" => Some(Table::Augmenting),
         _ => None,
     }
 }
@@ -2246,6 +2247,7 @@ mod tests {
         );
         assert_eq!(table("apotheosis:salvaging_table"), Some(Table::Salvaging));
         assert_eq!(table("apotheosis:gem_cutting_table"), Some(Table::Cutting));
+        assert_eq!(table("apotheosis:augmenting_table"), Some(Table::Augmenting));
         assert_eq!(table("minecraft:crafting_table"), None);
     }
 

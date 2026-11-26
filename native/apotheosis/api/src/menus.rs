@@ -23,6 +23,15 @@
 //! second one of the same type and purity, gem dust and a rarity material; its
 //! button turns the first gem into the next purity's item.
 //!
+//! The augmenting table (Java's `AugmentingMenu`) lists the affixes of the
+//! piece in its first slot, sorted by id, six to a page (Java uses a dropdown).
+//! A row selects an affix; Upgrade raises it by 0.25 up to 1.0, Reroll replaces
+//! it with another affix of the same type that the piece's rarity and category
+//! allow, at a level drawn in `[0, 1)`. Both cost Sigils of Enhancement and
+//! experience levels, free in creative. Deviation: the port keeps no level for
+//! effect affixes, so only the attribute affixes the `affixes` module ties to a
+//! level are listed and upgradable; Java lists both kinds.
+//!
 //! Deviation: Java gives the gear back to the player when the menu closes
 //! (`removed()`); taking a slot out of a block entity from a close hook needs a
 //! host helper past API 415, so the gear stays in the table, as in a furnace.
@@ -32,13 +41,17 @@
 use horizon_client::mod_api::{
     BlockEntityContainerEvent, BlockEntityEvent, BlockEntityTickEvent, BlockEntityTicksEvent,
     Compound, Host, HudBatch, ItemStack, MenuButtonEvent, MenuSlotRulesEvent, ModContainer, NativeScreen,
-    ScreenClickEvent, ScreenDrawEvent, ScreenEvent, ScreenTooltipEvent, Text,
+    ScreenClickEvent, ScreenDrawEvent, ScreenEvent, ScreenTooltipEvent, Tag, Text,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
+use crate::affixes::{self, Instance};
+use crate::attributes;
 use crate::gems;
+use crate::java_affixes::{Affix, AFFIXES};
 use crate::sockets::{self, Purity, Table, REFORGE_COSTS, UPGRADE_COSTS};
+use crate::tiers::{self, WorldTier};
 use crate::{is_equipment, Rng, Tier};
 
 /// The reforging menu type, shared by both reforging tables.
@@ -64,6 +77,7 @@ fn menu_of(block: &str) -> Option<&'static str> {
         Table::SimpleReforging | Table::Reforging => Some(REFORGING),
         Table::Salvaging => Some(SALVAGING),
         Table::Cutting => Some(CUTTING),
+        Table::Augmenting => Some(AUGMENTING),
     }
 }
 
@@ -199,6 +213,7 @@ pub fn on_block_entity_container(event: &BlockEntityContainerEvent<'_>) -> Optio
         slots: match menu {
             SALVAGING => SALVAGE_SLOTS,
             CUTTING => CUT_SLOTS,
+            AUGMENTING => AUG_SLOTS,
             _ => 3,
         },
         faces: Default::default(),
@@ -210,6 +225,20 @@ pub fn on_block_entity_container(event: &BlockEntityContainerEvent<'_>) -> Optio
 
 /// True when the entity was one of ours.
 pub fn on_block_entity_tick(event: &mut BlockEntityTickEvent<'_>) -> bool {
+    if menu_of(&event.entity.id) == Some(AUGMENTING) {
+        let selected = clamp_selection(
+            &event.entity.items,
+            augmenting_selected(&event.entity.nbt),
+        );
+        if augmenting_selected(&event.entity.nbt) != selected {
+            set_augmenting_selected(&mut event.entity.nbt, selected);
+        }
+        let data = augmenting_data(&event.entity.items, selected);
+        if event.entity.data[..] != data[..] {
+            event.entity.data = data.to_vec();
+        }
+        return true;
+    }
     if menu_of(&event.entity.id) == Some(CUTTING) {
         let data = cut_data(&event.entity.items);
         if event.entity.data[..] != data[..] {
@@ -235,6 +264,9 @@ pub fn on_block_entity_tick(event: &mut BlockEntityTickEvent<'_>) -> bool {
 }
 
 pub fn on_menu_button(host: &mut dyn Host, event: &mut MenuButtonEvent<'_>) {
+    if menu_of(&event.entity.id) == Some(AUGMENTING) {
+        return augmenting_button(host, event);
+    }
     if menu_of(&event.entity.id) == Some(SALVAGING) {
         return salvage_button(host, event);
     }
@@ -276,6 +308,7 @@ pub fn on_menu_slot_rules(event: &mut MenuSlotRulesEvent<'_>) {
         REFORGING => slot_rule(event.slot, &event.stack.item),
         SALVAGING => salvage_slot_rule(event.slot, event.stack),
         CUTTING => cut_slot_rule(event.slot, event.stack),
+        AUGMENTING => augmenting_slot_rule(event.slot, event.stack),
         _ => return,
     };
     if let Some((may_place, max_stack)) = rule {
@@ -323,6 +356,7 @@ pub fn on_screen(event: &ScreenEvent<'_>) -> Option<NativeScreen> {
     match menu_of(event.block)? {
         SALVAGING => return Some(salvage_screen()),
         CUTTING => return Some(cut_screen()),
+        AUGMENTING => return Some(augmenting_screen()),
         _ => {}
     }
     Some(NativeScreen {
@@ -341,6 +375,7 @@ pub fn on_screen_draw(host: &dyn Host, event: &mut ScreenDrawEvent<'_>) {
         Some(REFORGING) => {}
         Some(SALVAGING) => return salvage_draw(host, event),
         Some(CUTTING) => return cut_draw(host, event),
+        Some(AUGMENTING) => return augmenting_draw(host, event),
         _ => return,
     }
     let [ox, oy] = event.origin;
@@ -398,6 +433,9 @@ pub fn on_screen_click(event: &ScreenClickEvent<'_>) -> Option<i32> {
         let ready = !event.right && get(event.data, 0) & VALID != 0;
         return (ready && on_cut_button(event.at)).then_some(0);
     }
+    if menu_of(event.block)? == AUGMENTING {
+        return augmenting_click(event);
+    }
     if event.right || get(event.data, 3) & VALID == 0 {
         return None;
     }
@@ -410,6 +448,9 @@ pub fn on_screen_tooltip(event: &mut ScreenTooltipEvent<'_>) {
     }
     if menu_of(event.block) == Some(CUTTING) {
         return cut_tooltip(event);
+    }
+    if menu_of(event.block) == Some(AUGMENTING) {
+        return augmenting_tooltip(event);
     }
     if menu_of(event.block).is_none() || get(event.data, 3) & VALID == 0 {
         return;
@@ -910,6 +951,695 @@ fn cut_tooltip(event: &mut ScreenTooltipEvent<'_>) {
     push_lines(event.lines, &cut_lines(event.data));
 }
 
+// --- Augmenting table ----------------------------------------------------------
+
+/// The augmenting menu type: Java's `AugmentingMenu`.
+pub const AUGMENTING: &str = "apotheosis:augmenting";
+/// Its slots: the affixed piece, the sigils of enhancement.
+const AUG_GEAR: usize = 0;
+const AUG_SIGILS: usize = 1;
+const AUG_SLOTS: usize = 2;
+const AUG_SIGIL: &str = "apotheosis:sigil_of_enhancement";
+/// Java's `AdventureConfig` defaults (`upgradeSigilCost`, `upgradeLevelCost`,
+/// `rerollSigilCost`, `rerollLevelCost`).
+pub const UPGRADE_SIGILS: u32 = 2;
+pub const UPGRADE_LEVELS: i32 = 225;
+pub const REROLL_SIGILS: u32 = 1;
+pub const REROLL_LEVELS: i32 = 175;
+/// The affix rows one page shows.
+pub const AUG_ROWS: usize = 6;
+/// Its data slots: flags, count, selected, first row, both costs, then each
+/// row's `AFFIXES` index + 1 and its level in hundredths.
+const AUG_DATA: usize = 8 + 2 * AUG_ROWS;
+const AUG_VALID: i32 = 1;
+const AUG_UPGRADE: i32 = 2;
+const AUG_REROLL: i32 = 4;
+const AUG_PREV: i32 = 8;
+const AUG_NEXT: i32 = 16;
+/// The block entity's `nbt` key holding the selected affix, so the selection
+/// survives the screen closing.
+const AUG_SELECTED_KEY: &str = "augmenting_selected";
+
+fn augmenting_selected(nbt: &Compound) -> usize {
+    match nbt.get(&AUG_SELECTED_KEY.into()) {
+        Some(Tag::Int(selected)) if *selected > 0 => *selected as usize,
+        _ => 0,
+    }
+}
+
+fn set_augmenting_selected(nbt: &mut Compound, selected: usize) {
+    nbt.insert(AUG_SELECTED_KEY.into(), Tag::Int(selected as i32));
+}
+
+/// The affixes a piece carries, sorted by id as Java's `computeItemAffixes`.
+pub fn affixes_of(stack: &ItemStack) -> Vec<Instance> {
+    let mut instances = affixes::instances(stack);
+    instances.sort_by(|a, b| a.affix.id.cmp(b.affix.id));
+    instances
+}
+
+/// Java's `Affix.STANDARD_MAX_LEVEL`-bounded upgrade: a quarter of a level,
+/// never past 1.0. `None` at or above the cap, so an overcharged affix (a Sigil
+/// of Malice raised it) cannot be upgraded.
+pub fn upgrade(level: f64) -> Option<f64> {
+    if level < 1.0 {
+        Some((level + 0.25).min(1.0))
+    } else {
+        None
+    }
+}
+
+/// Java's `canAugment`: a level-dependent affix below the standard cap.
+pub fn can_upgrade(instance: &Instance, tier: Tier) -> bool {
+    instance.level_dependent(tier) && upgrade(instance.level_at(tier)).is_some()
+}
+
+/// Two affixes are compatible unless either names the other in Java's
+/// `exclusive_set`.
+pub fn compatible(a: &Affix, b: &Affix) -> bool {
+    a.id != b.id && !a.exclusive.contains(&b.id) && !b.exclusive.contains(&a.id)
+}
+
+/// Java's `getAlternativeAffixes`: every affix of `pool` of the same type as
+/// `chosen`, with a value at `tier`, that stays compatible with the piece's
+/// other affixes; the chosen one is never in it.
+pub fn reroll_candidates(
+    pool: &[&'static Affix],
+    chosen: &Affix,
+    remaining: &[&'static Affix],
+    tier: Tier,
+) -> Vec<&'static Affix> {
+    let rarity = affixes::rarity_index(tier);
+    pool.iter()
+        .copied()
+        .filter(|candidate| candidate.id != chosen.id)
+        .filter(|candidate| candidate.affix_type == chosen.affix_type)
+        .filter(|candidate| candidate.values[rarity].is_some())
+        .filter(|candidate| remaining.iter().all(|other| compatible(candidate, other)))
+        .collect()
+}
+
+/// The affixes a reroll of `chosen` may draw at the piece's own rarity.
+pub fn alternatives(stack: &ItemStack, chosen: &Instance) -> Vec<&'static Affix> {
+    let Some(tier) = sockets::tier_of(stack) else {
+        return Vec::new();
+    };
+    let class = attributes::class_of(&stack.item);
+    let remaining: Vec<&'static Affix> = affixes_of(stack)
+        .iter()
+        .map(|instance| instance.affix)
+        .filter(|affix| affix.id != chosen.affix.id)
+        .collect();
+    reroll_candidates(&affixes::pool(class, tier), chosen.affix, &remaining, tier)
+}
+
+/// Java's `TieredWeights.getWeight(tier, luck)` for an affix, clamped at 0.
+pub fn weight_at(affix: &Affix, world: WorldTier, luck: f32) -> i64 {
+    affix.weights[world.index()].map_or(0, |weight| {
+        let bonus = (luck * weight.quality + 0.5).floor() as i64;
+        (i64::from(weight.weight) + bonus).max(0)
+    })
+}
+
+/// Picks a candidate by weight; when every weight is zero (Java's
+/// `WeightedRandom` finding nothing), uniformly instead.
+pub fn choose_weighted(
+    candidates: &[&'static Affix],
+    weights: &[i64],
+    rng: &mut Rng,
+) -> Option<usize> {
+    if candidates.is_empty() {
+        return None;
+    }
+    let total: u64 = (0..candidates.len())
+        .map(|i| weights.get(i).copied().unwrap_or(0).max(0) as u64)
+        .sum();
+    if total == 0 {
+        return Some(rng.below(candidates.len() as u64) as usize);
+    }
+    let mut pick = rng.below(total);
+    for i in 0..candidates.len() {
+        let weight = weights.get(i).copied().unwrap_or(0).max(0) as u64;
+        if pick < weight {
+            return Some(i);
+        }
+        pick -= weight;
+    }
+    Some(candidates.len() - 1)
+}
+
+/// Vanilla's total experience needed to reach `level` (`Player.getXpNeededForLevel`'s running sum).
+fn total_xp(level: i32) -> i64 {
+    let level = i64::from(level.max(0));
+    if level <= 16 {
+        level * level + 6 * level
+    } else if level <= 31 {
+        (5 * level * level - 81 * level + 720) / 2
+    } else {
+        (9 * level * level - 325 * level + 4440) / 2
+    }
+}
+
+/// Vanilla's experience the next level of `level` takes.
+fn xp_to_next(level: i32) -> i64 {
+    let level = i64::from(level.max(0));
+    if level >= 30 {
+        9 * level - 158
+    } else if level >= 15 {
+        5 * level - 38
+    } else {
+        2 * level + 7
+    }
+}
+
+/// The highest level `xp` points reach, at most `cap`.
+fn level_for_xp(xp: i64, cap: i32) -> i32 {
+    let mut low = 0;
+    let mut high = cap.max(0);
+    while low < high {
+        let mid = (low + high + 1) / 2;
+        if total_xp(mid) <= xp {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    low
+}
+
+/// The levels `give_levels` must take off to mirror Java's charge of
+/// `cost` levels' worth of experience points (`EnchantmentUtils.chargeExperience`
+/// with `getTotalExperienceForLevel`): the level the player is left on is the
+/// one their remaining points reach, which is not simply `level - cost` (the
+/// total grows faster than that). The progress bar is kept, as `give_levels`
+/// does; only the level matches Java exactly.
+pub fn levels_charged(level: i32, progress: f32, cost: i32) -> i32 {
+    let level = level.max(0);
+    let points = total_xp(level)
+        + (f64::from(progress.clamp(0.0, 1.0)) * xp_to_next(level) as f64).round() as i64;
+    let remaining = (points - total_xp(cost.max(0))).max(0);
+    (level - level_for_xp(remaining, level)).max(0)
+}
+
+/// What a transaction takes from the player: the sigils and the levels, free
+/// in creative. `None` when the player is short of either, so nothing happens.
+pub fn charge(
+    sigil_cost: u32,
+    level_cost: i32,
+    sigils: u32,
+    xp_level: i32,
+    xp_progress: f32,
+    creative: bool,
+) -> Option<(u32, i32)> {
+    if creative {
+        return Some((0, 0));
+    }
+    if sigils < sigil_cost || xp_level < level_cost {
+        return None;
+    }
+    Some((sigil_cost, levels_charged(xp_level, xp_progress, level_cost)))
+}
+
+/// What an upgrade of `selected` would do: its new level, and the sigils and
+/// levels it takes. `None` for an affix that cannot be upgraded or a player
+/// who cannot pay.
+pub fn upgrade_plan(
+    stack: &ItemStack,
+    selected: usize,
+    sigils: u32,
+    xp_level: i32,
+    xp_progress: f32,
+    creative: bool,
+) -> Option<(usize, f64, u32, i32)> {
+    let tier = sockets::tier_of(stack)?;
+    let instances = affixes_of(stack);
+    let instance = instances.get(selected)?;
+    let next = upgrade(instance.level_at(tier)).filter(|_| instance.level_dependent(tier))?;
+    let (sigils, levels) = charge(
+        UPGRADE_SIGILS,
+        UPGRADE_LEVELS,
+        sigils,
+        xp_level,
+        xp_progress,
+        creative,
+    )?;
+    Some((selected, next, sigils, levels))
+}
+
+/// What a reroll of `selected` would do: the affix drawn and the level it lands
+/// at, plus what it takes.
+#[derive(Clone, Copy, Debug)]
+pub struct Reroll {
+    pub affix: &'static Affix,
+    pub level: f64,
+    pub sigils: u32,
+    pub levels: i32,
+}
+
+/// Java's reroll: one alternative of the same type, drawn by its weight for the
+/// player's world tier and luck (uniformly when they all weigh nothing), at a
+/// level in `[0, 1)`.
+pub fn reroll_plan(
+    stack: &ItemStack,
+    selected: usize,
+    world: WorldTier,
+    luck: f32,
+    sigils: u32,
+    xp_level: i32,
+    xp_progress: f32,
+    creative: bool,
+    rng: &mut Rng,
+) -> Option<Reroll> {
+    let instances = affixes_of(stack);
+    let chosen = instances.get(selected)?;
+    let candidates = alternatives(stack, chosen);
+    if candidates.is_empty() {
+        return None;
+    }
+    let (sigils, levels) = charge(
+        REROLL_SIGILS,
+        REROLL_LEVELS,
+        sigils,
+        xp_level,
+        xp_progress,
+        creative,
+    )?;
+    let weights: Vec<i64> = candidates
+        .iter()
+        .map(|affix| weight_at(affix, world, luck))
+        .collect();
+    let index = choose_weighted(&candidates, &weights, rng)?;
+    Some(Reroll {
+        affix: candidates[index],
+        level: affixes::roll_level(rng),
+        sigils,
+        levels,
+    })
+}
+
+/// The piece with affix `selected` raised to `next`; every other affix and
+/// every other piece of data is left as it was.
+pub fn upgraded(stack: &ItemStack, selected: usize, next: f64) -> Option<ItemStack> {
+    let tier = sockets::tier_of(stack)?;
+    let mut instances = affixes_of(stack);
+    instances.get_mut(selected)?.set_level(tier, next);
+    let mut upgraded = stack.clone();
+    affixes::rewrite(&mut upgraded, tier, &instances);
+    Some(upgraded)
+}
+
+/// The piece with affix `selected` replaced by `affix` at `level`, its affixes
+/// kept sorted by id as Java keeps them.
+pub fn rerolled(
+    stack: &ItemStack,
+    selected: usize,
+    affix: &'static Affix,
+    level: f64,
+) -> Option<ItemStack> {
+    let tier = sockets::tier_of(stack)?;
+    let value = affixes::value_at(affix, tier, level)?;
+    let mut instances = affixes_of(stack);
+    *instances.get_mut(selected)? = Instance {
+        affix,
+        level: Some(level),
+        value,
+    };
+    instances.sort_by(|a, b| a.affix.id.cmp(b.affix.id));
+    let mut rerolled = stack.clone();
+    affixes::rewrite(&mut rerolled, tier, &instances);
+    Some(rerolled)
+}
+
+/// The affixes of the piece in the gear slot, clamped to what `selected` may
+/// be (0 for an empty piece).
+pub fn clamp_selection(items: &[Option<ItemStack>], selected: usize) -> usize {
+    let count = items
+        .get(AUG_GEAR)
+        .and_then(|slot| slot.as_ref())
+        .map_or(0, |stack| affixes_of(stack).len());
+    if count == 0 { 0 } else { selected.min(count - 1) }
+}
+
+/// The data slots, from the slots and the selected affix.
+pub fn augmenting_data(items: &[Option<ItemStack>], selected: usize) -> [i32; AUG_DATA] {
+    let mut data = [0; AUG_DATA];
+    let Some(stack) = items.get(AUG_GEAR).and_then(|slot| slot.as_ref()) else {
+        return data;
+    };
+    let Some(tier) = sockets::tier_of(stack) else {
+        return data;
+    };
+    let instances = affixes_of(stack);
+    if instances.is_empty() {
+        return data;
+    }
+    let selected = selected.min(instances.len() - 1);
+    let first = selected / AUG_ROWS * AUG_ROWS;
+    let chosen = &instances[selected];
+    let mut flags = AUG_VALID;
+    if can_upgrade(chosen, tier) {
+        flags |= AUG_UPGRADE;
+    }
+    if !alternatives(stack, chosen).is_empty() {
+        flags |= AUG_REROLL;
+    }
+    if first > 0 {
+        flags |= AUG_PREV;
+    }
+    if first + AUG_ROWS < instances.len() {
+        flags |= AUG_NEXT;
+    }
+    data[0] = flags;
+    data[1] = instances.len() as i32;
+    data[2] = selected as i32;
+    data[3] = first as i32;
+    data[4] = UPGRADE_SIGILS as i32;
+    data[5] = UPGRADE_LEVELS;
+    data[6] = REROLL_SIGILS as i32;
+    data[7] = REROLL_LEVELS;
+    for (row, instance) in instances.iter().skip(first).take(AUG_ROWS).enumerate() {
+        let index = AFFIXES
+            .iter()
+            .position(|affix| affix.id == instance.affix.id)
+            .map_or(0, |at| at as i32 + 1);
+        data[8 + 2 * row] = index;
+        data[9 + 2 * row] = (instance.level_at(tier) * 100.0).round() as i32;
+    }
+    data
+}
+
+fn take_sigils(items: &mut [Option<ItemStack>], count: u32) {
+    if count == 0 {
+        return;
+    }
+    if let Some(stack) = &mut items[AUG_SIGILS] {
+        stack.count = stack.count.saturating_sub(count);
+        if stack.count == 0 {
+            items[AUG_SIGILS] = None;
+        }
+    }
+}
+
+fn augmenting_button(host: &mut dyn Host, event: &mut MenuButtonEvent<'_>) {
+    if event.entity.items.len() < AUG_SLOTS {
+        return;
+    }
+    let Some(player) = host.acting_player() else {
+        return;
+    };
+    let creative = player.game_mode == 1;
+    let Some(stack) = event.entity.items[AUG_GEAR].clone() else {
+        return;
+    };
+    let count = affixes_of(&stack).len();
+    if count == 0 {
+        return;
+    }
+    let mut selected = augmenting_selected(&event.entity.nbt).min(count - 1);
+    let first = selected / AUG_ROWS * AUG_ROWS;
+    if (0..AUG_ROWS as i32).contains(&event.id) {
+        selected = (first + event.id as usize).min(count - 1);
+        set_augmenting_selected(&mut event.entity.nbt, selected);
+        event.entity.data = augmenting_data(&event.entity.items, selected).to_vec();
+        return;
+    }
+    match event.id {
+        6 if first > 0 => {
+            selected = first.saturating_sub(AUG_ROWS);
+        }
+        7 if first + AUG_ROWS < count => {
+            selected = (first + AUG_ROWS).min(count - 1);
+        }
+        8 => {
+            let sigils = count_of(event.entity.items.get(AUG_SIGILS), Some(AUG_SIGIL));
+            let Some((picked, next, sigils, levels)) = upgrade_plan(
+                &stack,
+                selected,
+                sigils,
+                player.xp_level,
+                player.xp_progress,
+                creative,
+            ) else {
+                return;
+            };
+            let Some(piece) = upgraded(&stack, picked, next) else {
+                return;
+            };
+            // Everything is checked and built: charge last, so a refused
+            // payment leaves the piece and the sigils untouched.
+            if levels > 0 && !host.give_levels(player.uuid, -levels) {
+                return;
+            }
+            take_sigils(&mut event.entity.items, sigils);
+            event.entity.items[AUG_GEAR] = Some(piece);
+        }
+        9 => {
+            let sigils = count_of(event.entity.items.get(AUG_SIGILS), Some(AUG_SIGIL));
+            let mut rng = Rng::new(sockets::next_roll());
+            let Some(plan) = reroll_plan(
+                &stack,
+                selected,
+                tiers::tier_of(player.uuid),
+                0.0,
+                sigils,
+                player.xp_level,
+                player.xp_progress,
+                creative,
+                &mut rng,
+            ) else {
+                return;
+            };
+            let Some(piece) = rerolled(&stack, selected, plan.affix, plan.level) else {
+                return;
+            };
+            if plan.levels > 0 && !host.give_levels(player.uuid, -plan.levels) {
+                return;
+            }
+            take_sigils(&mut event.entity.items, plan.sigils);
+            event.entity.items[AUG_GEAR] = Some(piece);
+        }
+        _ => return,
+    }
+    let selected = clamp_selection(&event.entity.items, selected);
+    set_augmenting_selected(&mut event.entity.nbt, selected);
+    event.entity.data = augmenting_data(&event.entity.items, selected).to_vec();
+}
+
+/// Java's slots: one affixed piece, sigils of enhancement.
+pub fn augmenting_slot_rule(slot: usize, stack: &ItemStack) -> Option<(bool, Option<u32>)> {
+    match slot {
+        AUG_GEAR => Some((sockets::has_affixes(stack), Some(1))),
+        AUG_SIGILS => Some((&*stack.item == AUG_SIGIL, None)),
+        _ => None,
+    }
+}
+
+const AUG_TEXTURE: &str = "apotheosis:gui/augmenting";
+const AUG_HEIGHT: f32 = 222.0;
+const AUG_INVENTORY_Y: f32 = 140.0;
+/// Java's slots: the piece (16, 16), the sigils (16, 41).
+const AUG_LAYOUT: [[f32; 2]; AUG_SLOTS] = [[16.0, 16.0], [16.0, 41.0]];
+/// Java's buttons, at (60, 111) and (112, 111), 29 by 13, drawn 2px larger; the
+/// list takes their left-hand space.
+const AUG_UPGRADE_BUTTON: [f32; 2] = [60.0, 111.0];
+const AUG_REROLL_BUTTON: [f32; 2] = [108.0, 111.0];
+const AUG_BUTTON_SIZE: [f32; 2] = [32.0, 14.0];
+/// The page arrows, right of the list.
+const AUG_PREV_BUTTON: [f32; 2] = [160.0, 39.0];
+const AUG_NEXT_BUTTON: [f32; 2] = [160.0, 100.0];
+const AUG_ARROW_SIZE: [f32; 2] = [12.0, 10.0];
+const AUG_LIST_X: f32 = 42.0;
+const AUG_LIST_WIDTH: f32 = 117.0;
+const AUG_ROW_HEIGHT: f32 = 11.0;
+
+fn aug_row_y(row: usize) -> f32 {
+    39.0 + AUG_ROW_HEIGHT * row as f32
+}
+
+fn aug_row_at(at: [f32; 2]) -> Option<usize> {
+    (0..AUG_ROWS).find(|&row| {
+        at[0] >= AUG_LIST_X
+            && at[0] < AUG_LIST_X + AUG_LIST_WIDTH
+            && at[1] >= aug_row_y(row)
+            && at[1] < aug_row_y(row) + AUG_ROW_HEIGHT
+    })
+}
+
+fn inside(at: [f32; 2], corner: [f32; 2], size: [f32; 2]) -> bool {
+    at[0] >= corner[0]
+        && at[0] < corner[0] + size[0]
+        && at[1] >= corner[1]
+        && at[1] < corner[1] + size[1]
+}
+
+fn augmenting_screen() -> NativeScreen {
+    NativeScreen {
+        width: WIDTH,
+        height: AUG_HEIGHT,
+        slots: AUG_LAYOUT.iter().map(|slot| Some(*slot)).collect(),
+        inventory_y: AUG_INVENTORY_Y,
+        inventory_x: 8.0,
+        own_labels: false,
+        own_background: true,
+    }
+}
+
+fn augmenting_draw(host: &dyn Host, event: &mut ScreenDrawEvent<'_>) {
+    let [ox, oy] = event.origin;
+    let java = host.sprite(
+        event.batch,
+        AUG_TEXTURE,
+        [0.0, 0.0, WIDTH, AUG_HEIGHT],
+        [ox, oy, WIDTH, AUG_HEIGHT],
+    );
+    if !java {
+        draw_panel(host, event.batch, event.origin, AUG_HEIGHT, &AUG_LAYOUT, AUG_INVENTORY_Y);
+    }
+    let flags = get(event.data, 0);
+    let count = get(event.data, 1).max(0) as usize;
+    let selected = get(event.data, 2).max(0) as usize;
+    let first = get(event.data, 3).max(0) as usize;
+    for row in 0..AUG_ROWS {
+        let index = first + row;
+        if index >= count {
+            continue;
+        }
+        let y = aug_row_y(row);
+        if index == selected {
+            host.fill(
+                event.batch,
+                [ox + AUG_LIST_X - 1.0, oy + y - 1.0, AUG_LIST_WIDTH + 2.0, AUG_ROW_HEIGHT],
+                0x60C9_FF20,
+            );
+        }
+        let affix = get(event.data, 8 + 2 * row) - 1;
+        if let Some(affix) = usize::try_from(affix).ok().and_then(|at| AFFIXES.get(at)) {
+            host.text(event.batch, affix.name, [ox + AUG_LIST_X + 3.0, oy + y + 1.0], 0xFFFF80, true);
+        }
+        let level = get(event.data, 9 + 2 * row).max(0) as f32 / 100.0;
+        let text = format!("{level:.2}");
+        let width = host.text_width(&text);
+        host.text(
+            event.batch,
+            &text,
+            [ox + AUG_LIST_X + AUG_LIST_WIDTH - width - 2.0, oy + y + 1.0],
+            0xB0B0B0,
+            true,
+        );
+    }
+    if flags & AUG_PREV != 0 {
+        host.text(event.batch, "<", [ox + AUG_PREV_BUTTON[0], oy + AUG_PREV_BUTTON[1]], 0xFFFFFF, true);
+    }
+    if flags & AUG_NEXT != 0 {
+        host.text(event.batch, ">", [ox + AUG_NEXT_BUTTON[0], oy + AUG_NEXT_BUTTON[1]], 0xFFFFFF, true);
+    }
+    let buttons = [
+        (AUG_UPGRADE_BUTTON, AUG_UPGRADE, 4, 5, "Up"),
+        (AUG_REROLL_BUTTON, AUG_REROLL, 6, 7, "Re"),
+    ];
+    for (corner, flag, sigil_slot, level_slot, label) in buttons {
+        let ready = flags & flag != 0;
+        let [x, y] = corner;
+        let src = [184.0, if ready { 133.0 } else { 150.0 }, 33.0, 17.0];
+        if !(java && host.sprite(event.batch, AUG_TEXTURE, src, [ox + x - 2.0, oy + y - 2.0, 33.0, 17.0])) {
+            host.fill(
+                event.batch,
+                [ox + x, oy + y, AUG_BUTTON_SIZE[0], AUG_BUTTON_SIZE[1]],
+                if ready { 0xFF6A_6070 } else { 0xFF1A_181D },
+            );
+            host.text(
+                event.batch,
+                label,
+                [ox + x + 9.0, oy + y + 3.0],
+                if ready { 0xFFFFFF } else { 0x606060 },
+                true,
+            );
+        }
+        let cost = format!("{}x {}", get(event.data, sigil_slot), get(event.data, level_slot));
+        host.text(event.batch, &cost, [ox + x, oy + y + 17.0], if ready { 0xA0FFA0 } else { 0x808080 }, true);
+    }
+}
+
+fn augmenting_click(event: &ScreenClickEvent<'_>) -> Option<i32> {
+    if event.right || get(event.data, 0) & AUG_VALID == 0 {
+        return None;
+    }
+    let flags = get(event.data, 0);
+    if flags & AUG_PREV != 0 && inside(event.at, AUG_PREV_BUTTON, AUG_ARROW_SIZE) {
+        return Some(6);
+    }
+    if flags & AUG_NEXT != 0 && inside(event.at, AUG_NEXT_BUTTON, AUG_ARROW_SIZE) {
+        return Some(7);
+    }
+    if flags & AUG_UPGRADE != 0 && inside(event.at, AUG_UPGRADE_BUTTON, AUG_BUTTON_SIZE) {
+        return Some(8);
+    }
+    if flags & AUG_REROLL != 0 && inside(event.at, AUG_REROLL_BUTTON, AUG_BUTTON_SIZE) {
+        return Some(9);
+    }
+    let first = get(event.data, 3).max(0) as usize;
+    let count = get(event.data, 1).max(0) as usize;
+    match aug_row_at(event.at) {
+        Some(row) if first + row < count => Some(row as i32),
+        _ => None,
+    }
+}
+
+/// What a button says: Java's inactive reasons, else its name and both costs.
+fn augment_lines(data: &[i32], reroll: bool) -> Vec<Line> {
+    if get(data, 0) & AUG_VALID == 0 {
+        return vec![line("button.apotheosis.augmenting.no_selection", "No Affix Selected", "§c", vec![])];
+    }
+    let flag = if reroll { AUG_REROLL } else { AUG_UPGRADE };
+    if get(data, 0) & flag == 0 {
+        let (key, fallback) = if reroll {
+            ("button.apotheosis.augmenting.no_alternatives", "No Alternative Affixes")
+        } else {
+            ("button.apotheosis.augmenting.max_level", "Already Max Level")
+        };
+        return vec![line(key, fallback, "§c", vec![])];
+    }
+    let (key, fallback, sigils, levels) = if reroll {
+        (
+            "button.apotheosis.augmenting.reroll",
+            "Reroll Selected Affix",
+            get(data, 6),
+            get(data, 7),
+        )
+    } else {
+        (
+            "button.apotheosis.augmenting.upgrade",
+            "Upgrade Selected Affix",
+            get(data, 4),
+            get(data, 5),
+        )
+    };
+    vec![
+        line(key, fallback, "§e§n", vec![]),
+        line(
+            "button.apotheosis.augmenting.upgrade.cost",
+            "Cost: %sx %s",
+            "§7",
+            vec![Arg::Num(sigils), Arg::Item(AUG_SIGIL)],
+        ),
+        line(
+            "button.apotheosis.augmenting.upgrade.exp_cost",
+            "Experience Cost: %s Levels",
+            "§7",
+            vec![Arg::Num(levels)],
+        ),
+    ]
+}
+
+fn augmenting_tooltip(event: &mut ScreenTooltipEvent<'_>) {
+    let reroll = inside(event.at, AUG_REROLL_BUTTON, AUG_BUTTON_SIZE);
+    let upgrade = inside(event.at, AUG_UPGRADE_BUTTON, AUG_BUTTON_SIZE);
+    if !reroll && !upgrade {
+        return;
+    }
+    push_lines(event.lines, &augment_lines(event.data, reroll));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1215,5 +1945,230 @@ mod tests {
         assert_eq!(menu_of("apotheosis:gem_cutting_table"), Some(CUTTING));
         assert!(on_cut_button([140.0, 50.0]));
         assert!(!on_cut_button([130.0, 50.0]));
+    }
+
+    // --- Augmenting table -----------------------------------------------------
+
+    fn affix(path: &str) -> &'static Affix {
+        AFFIXES
+            .iter()
+            .find(|affix| affix.path == path)
+            .unwrap_or_else(|| panic!("missing Java affix {path}"))
+    }
+
+    /// A piece carrying exactly `levels`, by affix path, at `tier`.
+    fn affixed(item: &str, tier: Tier, levels: &[(&str, f64)]) -> ItemStack {
+        let mut stack = ItemStack::new(item, 1);
+        sockets::after_affixes(&mut stack, tier, &mut Rng::new(11));
+        let instances: Vec<Instance> = levels
+            .iter()
+            .map(|(path, level)| {
+                let affix = affix(path);
+                Instance {
+                    affix,
+                    level: Some(*level),
+                    value: affixes::value_at(affix, tier, *level).unwrap(),
+                }
+            })
+            .collect();
+        affixes::rewrite(&mut stack, tier, &instances);
+        stack
+    }
+
+    fn level_on(stack: &ItemStack, path: &str) -> f64 {
+        affixes_of(stack)
+            .iter()
+            .find(|instance| instance.affix.path == path)
+            .map(|instance| instance.level_at(sockets::tier_of(stack).unwrap()))
+            .unwrap_or_else(|| panic!("no affix {path}"))
+    }
+
+    #[test]
+    fn an_upgrade_is_a_quarter_level_capped_at_one() {
+        assert_eq!(upgrade(0.0), Some(0.25));
+        assert_eq!(upgrade(0.5), Some(0.75));
+        assert_eq!(upgrade(0.9), Some(1.0));
+        assert_eq!(upgrade(1.0), None);
+        assert_eq!(upgrade(1.2), None, "an overcharged affix cannot be upgraded");
+    }
+
+    #[test]
+    fn a_level_independent_affix_is_refused() {
+        // elastic's common range is 0.5..0.5, so its level changes nothing.
+        let boots = affixed("minecraft:diamond_boots", Tier::Common, &[("armor/attribute/elastic", 0.0)]);
+        let instance = &affixes_of(&boots)[0];
+        assert!(!instance.level_dependent(Tier::Common));
+        assert!(!can_upgrade(instance, Tier::Common));
+        assert_eq!(upgrade_plan(&boots, 0, 2, 225, 0.0, false), None);
+        assert_eq!(upgrade_plan(&boots, 0, 2, 225, 0.0, true), None);
+    }
+
+    #[test]
+    fn a_piece_already_at_or_above_the_cap_cannot_be_upgraded() {
+        let sword = affixed("minecraft:diamond_sword", Tier::Rare, &[("melee/attribute/berserking", 1.0)]);
+        assert_eq!(upgrade_plan(&sword, 0, 2, 225, 0.0, false), None);
+        let overcharged = affixed("minecraft:diamond_sword", Tier::Rare, &[("melee/attribute/berserking", 1.2)]);
+        assert_eq!(upgrade_plan(&overcharged, 0, 2, 225, 0.0, false), None);
+    }
+
+    #[test]
+    fn an_upgrade_raises_the_selected_affix_and_keeps_the_rest() {
+        let mut sword = affixed(
+            "minecraft:diamond_sword",
+            Tier::Rare,
+            &[("melee/attribute/berserking", 0.5), ("melee/attribute/forceful", 0.25)],
+        );
+        sword.data_mut().enchantments = vec![(std::sync::Arc::from("minecraft:sharpness"), 3)];
+        let (selected, next, sigils, levels) = upgrade_plan(&sword, 0, 2, 225, 0.0, false).unwrap();
+        assert_eq!((sigils, levels), (2, 225));
+        let upgraded = upgraded(&sword, selected, next).unwrap();
+        assert_eq!(level_on(&upgraded, "melee/attribute/berserking"), 0.75);
+        assert_eq!(level_on(&upgraded, "melee/attribute/forceful"), 0.25, "other affixes untouched");
+        assert_eq!(upgraded.enchantments().len(), 1, "enchantments are kept");
+        assert_eq!(upgraded.enchantments()[0].1, 3);
+        assert_eq!(&*upgraded.item, "minecraft:diamond_sword");
+        assert_eq!(affixes_of(&upgraded).len(), 2);
+        assert_eq!(sockets::tier_of(&upgraded), Some(Tier::Rare));
+    }
+
+    #[test]
+    fn a_reroll_only_offers_compatible_affixes_of_the_same_type() {
+        let pool: Vec<&'static Affix> = vec![
+            affix("melee/attribute/berserking"),
+            affix("melee/attribute/vampiric"),
+            affix("melee/attribute/forceful"),
+            affix("melee/attribute/graceful"),
+            affix("melee/mob_effect/weakening"),
+        ];
+        // Rerolling forceful while vampiric stays: berserking and vampiric are
+        // exclusive, and the effect affix is of another type.
+        let candidates = reroll_candidates(
+            &pool,
+            affix("melee/attribute/forceful"),
+            &[affix("melee/attribute/vampiric")],
+            Tier::Rare,
+        );
+        let ids: Vec<&str> = candidates.iter().map(|affix| affix.id).collect();
+        assert_eq!(ids, ["apotheosis:melee/attribute/graceful"], "only the compatible stat affix");
+        // The chosen affix is removed first, so its own exclusive partner may come back.
+        let again = reroll_candidates(&pool, affix("melee/attribute/vampiric"), &[], Tier::Rare);
+        assert!(again.iter().any(|affix| affix.id == "apotheosis:melee/attribute/berserking"));
+    }
+
+    #[test]
+    fn a_reroll_with_no_candidate_does_nothing() {
+        let pool = vec![affix("melee/attribute/berserking")];
+        // Only the chosen affix is in the pool, and it is never returned.
+        assert!(reroll_candidates(&pool, affix("melee/attribute/berserking"), &[], Tier::Rare).is_empty());
+        assert_eq!(choose_weighted(&[], &[], &mut Rng::new(1)), None);
+        let empty: Vec<&'static Affix> = Vec::new();
+        assert_eq!(choose_weighted(&empty, &[], &mut Rng::new(1)), None);
+    }
+
+    #[test]
+    fn zero_weights_fall_back_to_a_uniform_draw() {
+        let pool: Vec<&'static Affix> = vec![
+            affix("melee/attribute/berserking"),
+            affix("melee/attribute/forceful"),
+            affix("melee/attribute/graceful"),
+        ];
+        let mut seen = [false; 3];
+        for seed in 0..200 {
+            let index = choose_weighted(&pool, &[0, 0, 0], &mut Rng::new(seed)).unwrap();
+            seen[index] = true;
+        }
+        assert_eq!(seen, [true, true, true], "every candidate can be drawn");
+        for seed in 0..50 {
+            assert_eq!(choose_weighted(&pool, &[0, 7, 0], &mut Rng::new(seed)), Some(1));
+        }
+        // A weight at the player's tier scales with luck, as Java's does.
+        let forceful = affix("melee/attribute/forceful");
+        assert_eq!(weight_at(forceful, WorldTier::Haven, 0.0), 25);
+        assert!(weight_at(forceful, WorldTier::Haven, 100.0) > 25);
+        // A Pinnacle-only affix weighs nothing below Pinnacle.
+        let giant_slaying = affix("melee/attribute/giant_slaying");
+        assert_eq!(weight_at(giant_slaying, WorldTier::Haven, 0.0), 0);
+        assert_eq!(weight_at(giant_slaying, WorldTier::Pinnacle, 0.0), 15);
+    }
+
+    #[test]
+    fn a_reroll_replaces_the_selected_affix_and_keeps_the_piece() {
+        let sword = affixed(
+            "minecraft:diamond_sword",
+            Tier::Rare,
+            &[("melee/attribute/berserking", 0.5), ("melee/attribute/forceful", 0.25)],
+        );
+        let replacement = affix("melee/attribute/graceful");
+        let piece = rerolled(&sword, 0, replacement, 0.4).unwrap();
+        let affixes = affixes_of(&piece);
+        assert_eq!(affixes.len(), 2);
+        assert!(affixes.iter().any(|instance| instance.affix.id == replacement.id));
+        assert!(!affixes.iter().any(|instance| instance.affix.path == "melee/attribute/berserking"));
+        assert_eq!(level_on(&piece, "melee/attribute/forceful"), 0.25);
+        let sorted: Vec<&str> = affixes.iter().map(|instance| instance.affix.id).collect();
+        let mut ordered = sorted.clone();
+        ordered.sort();
+        assert_eq!(sorted, ordered, "affixes stay sorted by id");
+    }
+
+    #[test]
+    fn creative_pays_nothing_and_short_funds_pay_nothing() {
+        assert_eq!(charge(2, 225, 0, 0, 0.0, true), Some((0, 0)));
+        assert_eq!(charge(2, 225, 2, 225, 0.0, false), Some((2, 225)));
+        assert_eq!(charge(2, 225, 1, 225, 0.0, false), None, "not enough sigils");
+        assert_eq!(charge(2, 225, 2, 224, 0.0, false), None, "level below the cost");
+        let sword = affixed("minecraft:diamond_sword", Tier::Rare, &[("melee/attribute/berserking", 0.0)]);
+        assert_eq!(upgrade_plan(&sword, 0, 1, 225, 0.0, false), None);
+        assert_eq!(upgrade_plan(&sword, 0, 2, 224, 0.0, false), None);
+        assert_eq!(upgrade_plan(&sword, 0, 0, 0, 0.0, true), Some((0, 0.25, 0, 0)));
+    }
+
+    #[test]
+    fn the_level_charge_mirrors_java_charging_total_experience() {
+        assert_eq!(levels_charged(0, 0.0, 0), 0);
+        assert_eq!(levels_charged(10, 0.0, 0), 0);
+        // A player on exactly the required level loses every level.
+        assert_eq!(levels_charged(225, 0.0, 225), 225);
+        // A richer player keeps the levels the remaining points reach.
+        let kept = 300 - levels_charged(300, 0.0, 225);
+        assert!(kept > 75 && kept < 300, "left on level {kept}");
+        assert_eq!(total_xp(0), 0);
+        assert_eq!(total_xp(16), 352);
+        assert_eq!(total_xp(30), 1395);
+    }
+
+    #[test]
+    fn the_data_slots_list_six_affixes_and_their_costs() {
+        let sword = affixed("minecraft:diamond_sword", Tier::Rare, &[("melee/attribute/berserking", 0.5)]);
+        let items = [Some(sword), stack("apotheosis:sigil_of_enhancement", 4)];
+        let data = augmenting_data(&items, 0);
+        assert_eq!(data[0] & AUG_VALID, AUG_VALID);
+        assert_eq!(data[1], 1);
+        assert_eq!(data[2], 0);
+        assert_eq!(data[3], 0);
+        assert_eq!(&data[4..8], &[2, 225, 1, 175]);
+        let index = AFFIXES.iter().position(|affix| affix.path == "melee/attribute/berserking").unwrap();
+        assert_eq!(data[8], index as i32 + 1);
+        assert_eq!(data[9], 50, "half a level in hundredths");
+        assert_eq!(augmenting_data(&[None, None], 0)[0], 0);
+    }
+
+    #[test]
+    fn the_augmenting_layout_and_rules_follow_java() {
+        assert_eq!(menu_of("apotheosis:augmenting_table"), Some(AUGMENTING));
+        let piece = affixed("minecraft:diamond_sword", Tier::Rare, &[("melee/attribute/forceful", 0.1)]);
+        assert_eq!(augmenting_slot_rule(0, &piece), Some((true, Some(1))));
+        assert_eq!(augmenting_slot_rule(0, &ItemStack::new("minecraft:stone", 1)), Some((false, Some(1))));
+        assert_eq!(
+            augmenting_slot_rule(1, &ItemStack::new("apotheosis:sigil_of_enhancement", 1)),
+            Some((true, None))
+        );
+        assert_eq!(augmenting_slot_rule(1, &piece), Some((false, None)));
+        assert_eq!(augmenting_slot_rule(2, &piece), None);
+        assert_eq!(aug_row_at([60.0, 40.0]), Some(0));
+        assert_eq!(aug_row_at([60.0, 50.0]), Some(1));
+        assert_eq!(aug_row_at([60.0, 110.0]), None);
+        assert!(inside([65.0, 115.0], AUG_UPGRADE_BUTTON, AUG_BUTTON_SIZE));
+        assert!(!inside([55.0, 115.0], AUG_UPGRADE_BUTTON, AUG_BUTTON_SIZE));
     }
 }

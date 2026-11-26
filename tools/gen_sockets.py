@@ -171,6 +171,38 @@ MESSAGES = {
         "That piece is already ancient.",
         "Cette pièce est déjà ancienne.",
     ),
+    "block.apotheosis.augmenting_table.desc": (
+        "Uses Sigils of Enhancement to augment individual affixes",
+        "Utilise des sceaux d'amélioration pour augmenter chaque affixe",
+    ),
+    "button.apotheosis.augmenting.upgrade": (
+        "Upgrade Selected Affix",
+        "Améliorer l'affixe sélectionné",
+    ),
+    "button.apotheosis.augmenting.reroll": (
+        "Reroll Selected Affix",
+        "Relancer l'affixe sélectionné",
+    ),
+    "button.apotheosis.augmenting.no_selection": (
+        "No Affix Selected",
+        "Aucun affixe sélectionné",
+    ),
+    "button.apotheosis.augmenting.max_level": (
+        "Already Max Level",
+        "Niveau maximal déjà atteint",
+    ),
+    "button.apotheosis.augmenting.no_alternatives": (
+        "No Alternative Affixes",
+        "Aucun affixe de remplacement",
+    ),
+    "button.apotheosis.augmenting.upgrade.cost": (
+        "Cost: %sx %s",
+        "Coût : %sx %s",
+    ),
+    "button.apotheosis.augmenting.upgrade.exp_cost": (
+        "Experience Cost: %s Levels",
+        "Coût en expérience : %s niveaux",
+    ),
     "apotheosis.cut.no_dust": (
         "The gem cutting table needs %s gem dust and the purity materials.",
         "La table de taille demande %s poussière de gemme.",
@@ -323,6 +355,8 @@ TABLES = [
      0x5B5F63, 0xC2CBD2),
     ("reforging_table", "Reforging Table", "Table de recréation",
      0x6B4A2A, 0xE8C36A),
+    ("augmenting_table", "Augmenting Table", "Table d'augmentation",
+     0x3A3536, 0xE0B84A),
 ]
 
 TABLE_RECIPES = {
@@ -356,6 +390,16 @@ TABLE_RECIPES = {
         "pattern": ["GGG", "GSG", "SSS"],
         "key": {"G": "minecraft:gold_ingot", "S": ID + ":mysterious_scrap_metal"},
         "result": {"id": ID + ":reforging_table"},
+    },
+    # Java's data/apotheosis/recipe/augmenting_table.json, verbatim.
+    "augmenting_table": {
+        "type": "minecraft:crafting_shaped",
+        "category": "misc",
+        "group": "apotheosis",
+        "pattern": [" N ", "GEG", "PPP"],
+        "key": {"N": "minecraft:nether_star", "G": ID + ":godforged_pearl",
+                "E": "minecraft:enchanting_table", "P": "minecraft:polished_blackstone"},
+        "result": {"id": ID + ":augmenting_table"},
     },
 }
 
@@ -486,6 +530,24 @@ TABLE_EMBLEMS = {
         "....xxxxxxxx....",
         "................",
         "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+    ],
+    "augmenting_table": [
+        "................",
+        "................",
+        ".......x........",
+        "....x..x..x.....",
+        ".....x.x.x......",
+        "......xxx.......",
+        "...xxxxxxxxx....",
+        "......xxx.......",
+        ".....x.x.x......",
+        "....x..x..x.....",
+        ".......x........",
         "................",
         "................",
         "................",
