@@ -568,7 +568,9 @@ impl Hooks for Apotheosis {
     fn tooltip(&self, _host: &dyn Host, event: &mut TooltipEvent<'_>) {
         attributes::tooltip(event);
         spawners::on_tooltip(event);
-        if let Some((gem, purity)) = gems::of_stack(event.stack) {
+        if let Some((gem, purity)) = gems::of_stack(event.stack)
+            && gems::generic_gem(&event.stack.item)
+        {
             for line in gems::description(gem, purity) {
                 let colour = line.colour;
                 event.lines.push((

@@ -815,6 +815,11 @@ pub fn tooltip(event: &mut TooltipEvent<'_>) {
         return;
     }
     if gems::of_stack(event.stack).is_some() {
+        // A per-purity gem item's lore already says this; only the generic
+        // gem has no lore of its own.
+        if !gems::generic_gem(&event.stack.item) {
+            return;
+        }
         let purity = purity_of(event.stack);
         event.lines.push((
             Text::translate_with_fallback(

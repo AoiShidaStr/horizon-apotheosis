@@ -25,6 +25,14 @@ use crate::sockets::Purity;
 /// custom data; still recognised, and used for a purity below a gem's floor,
 /// which has no item of its own.
 pub const ITEM: &str = "apotheosis:gem";
+
+/// Whether `item_id` is the generic gem (`ITEM`), the one item whose tooltip
+/// lines the native side writes.  A per-purity gem item declares the same
+/// lines in its `minecraft:lore`, so writing them again would show them twice.
+pub fn generic_gem(item_id: &str) -> bool {
+    item_id == ITEM
+}
+
 /// The custom-data key holding the gem's type id.
 pub const GEM_KEY: &str = "apotheosis:gem";
 /// The custom-data key holding the gem's purity, shared with `sockets`.
@@ -547,6 +555,17 @@ pub fn roll(dimension: &str, boss: bool, rng: &mut crate::Rng) -> (&'static Gem,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_generic_gem_gets_native_tooltip_lines() {
+        assert!(generic_gem(ITEM));
+        assert!(generic_gem("apotheosis:gem"));
+        // A per-purity item carries those lines in its lore already.
+        assert!(!generic_gem("apotheosis:gem_solar_normal"));
+        assert!(!generic_gem("apotheosis:gem_ballast_cracked"));
+        assert!(!generic_gem("apotheosis:gem_dust"));
+        assert!(!generic_gem("minecraft:diamond"));
+    }
 
     #[test]
     fn the_catalogue_is_the_java_gems_outside_twilight() {
