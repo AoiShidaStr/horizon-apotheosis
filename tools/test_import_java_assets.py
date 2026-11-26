@@ -195,6 +195,62 @@ class LanguageTests(unittest.TestCase):
         self.assertEqual(fr["block.apotheosis.reforging_table"], "Table Java")
 
 
+    def test_gem_item_names_come_from_java_texts(self):
+        items = java.CONTENT / "assets" / java.OUR_NS / "items"
+        items.mkdir(parents=True)
+        for name in (
+            "gem_solar_cracked", "gem_solar_normal", "gem_brawlers_flawed",
+            "gem_verdant_ruin_perfect",
+        ):
+            (items / f"{name}.json").write_text("{}", encoding="utf-8")
+        lang = java.CONTENT / "assets" / java.OUR_NS / "lang"
+        fr_port = json.loads((lang / "fr_fr.json").read_text(encoding="utf-8"))
+        fr_port["item.apotheosis.gem_verdant_ruin_perfect"] = "Notre gemme"
+        (lang / "fr_fr.json").write_text(json.dumps(fr_port), encoding="utf-8")
+        en = json.loads(self.source.files["assets/apotheosis/lang/en_us.json"])
+        en.update({
+            "item.apotheosis.gem.apotheosis:core/solar": "Solar Gem",
+            "item.apotheosis.gem.apotheosis:core/brawlers": "Brawler's Gem",
+            "item.apotheosis.gem.apotheosis:overworld/verdant_ruin":
+                "Gem of the Verdant Ruin",
+            "item.apotheosis.gem.cracked": "Cracked %s",
+            "item.apotheosis.gem.flawed": "Flawed %s",
+            "item.apotheosis.gem.normal": "%s",
+            "item.apotheosis.gem.perfect": "Perfect %s",
+        })
+        self.source.files["assets/apotheosis/lang/en_us.json"] = json.dumps(en)
+        # Java's fr_fr names the gems but has no per-purity format of that
+        # name (only rarity-keyed ones), and no verdant_ruin gem.
+        self.source.files["assets/apotheosis/lang/fr_fr.json"] = json.dumps({
+            "item.apotheosis.gem.apotheosis:core/solar": "Gemme Solaire",
+            "item.apotheosis.gem.apotheosis:core/brawlers": "Gemme du Bagarreur",
+            "item.apotheosis.gem.apotheosis:common": "%s Fêlé",
+        })
+        self.importer.import_lang()
+        files = self.importer.files
+        en = json.loads(files["assets/apotheosis/lang/en_us.json"])
+        fr = json.loads(files["assets/apotheosis/lang/fr_fr.json"])
+        self.assertEqual(en["item.apotheosis.gem_solar_cracked"], "Cracked Solar Gem")
+        self.assertEqual(en["item.apotheosis.gem_solar_normal"], "Solar Gem")
+        self.assertEqual(
+            en["item.apotheosis.gem_brawlers_flawed"], "Flawed Brawler's Gem"
+        )
+        self.assertEqual(
+            en["item.apotheosis.gem_verdant_ruin_perfect"],
+            "Perfect Gem of the Verdant Ruin",
+        )
+        self.assertEqual(fr["item.apotheosis.gem_solar_cracked"], "Gemme Solaire fêlée")
+        self.assertEqual(fr["item.apotheosis.gem_solar_normal"], "Gemme Solaire")
+        self.assertEqual(
+            fr["item.apotheosis.gem_brawlers_flawed"],
+            "Gemme imparfaite du Bagarreur",
+        )
+        # No Java French name: the port's own French stays.
+        self.assertEqual(
+            fr["item.apotheosis.gem_verdant_ruin_perfect"], "Notre gemme"
+        )
+
+
 class GemOverlayTests(unittest.TestCase):
     def test_overlay_never_ships_the_java_gem_item(self):
         with tempfile.TemporaryDirectory() as temp:

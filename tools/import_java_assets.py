@@ -550,10 +550,55 @@ class Importer:
                     if key != "comment_id"
                 }
             )
+            table.update(self.gem_item_names(java, locale))
             self.put_json(
                 f"assets/{OUR_NS}/lang/{locale}.json", table, sort_keys=True
             )
         return {locale: len(base[locale]) for locale in LOCALES}
+
+    def gem_item_names(
+        self, java: dict[str, dict], locale: str
+    ) -> dict[str, str]:
+        """`item.apotheosis.gem_<texture>_<purity>` from Java's own texts, for
+        each gem item the port declares.
+
+        English: Java's `item.apotheosis.gem.<purity>` format applied to the
+        gem's Java name.  Java's fr_fr has no such format, so the French name
+        is Java's French gem name worded with the port's purity rule
+        (`gen_java_gems.french_item_name`).  A gem Java does not name in that
+        locale keeps the port's own text."""
+        import gen_java_gems
+
+        prefix = "item.apotheosis.gem.apotheosis:"
+        gem_ids = {
+            key.removeprefix("item.apotheosis.gem.").rsplit("/", 1)[-1]:
+                key.removeprefix("item.apotheosis.gem.")
+            for key in (*java["en_us"], *java[locale])
+            if key.startswith(prefix) and "/" in key
+        }
+        items = CONTENT / "assets" / OUR_NS / "items"
+        names: dict[str, str] = {}
+        for path in sorted(items.glob("gem_*.json")):
+            if path.stem not in PORT_GEM_ITEMS:
+                continue
+            stem, purity = path.stem.rsplit("_", 1)
+            gem_id = gem_ids.get(stem.removeprefix("gem_"))
+            if gem_id is None:
+                continue
+            name = java[locale].get(f"item.apotheosis.gem.{gem_id}")
+            if name is None:
+                continue
+            if locale == "fr_fr":
+                value = gen_java_gems.french_item_name(
+                    name, gen_java_gems.PURITIES.index(purity)
+                )
+            else:
+                form = java[locale].get(f"item.apotheosis.gem.{purity}")
+                if form is None:
+                    continue
+                value = form.replace("%s", name, 1)
+            names[f"item.{OUR_NS}.{path.stem}"] = value
+        return names
 
     def build(self) -> dict[str, int]:
         block_names = sorted(
