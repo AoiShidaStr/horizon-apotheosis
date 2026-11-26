@@ -400,63 +400,6 @@ const BOSS_GEAR: [&str; 5] = [
     "minecraft:bow",
 ];
 
-/// `minecraft:custom_data` key recording the attribute values the last affix
-/// pass wrote, so a reroll takes them back instead of stacking them.
-const AFFIX_ATTRS_KEY: &str = "apotheosis:affix_attrs";
-
-/// Every lore line this module writes is a translated `apotheosis.affix.*`
-/// line: that prefix is how a reroll tells its own lines from someone else's.
-const AFFIX_LORE_PREFIX: &str = "apotheosis.affix.";
-
-/// The id of a `minecraft:attribute_modifiers` entry, when it names one.
-fn modifier_id(entry: &Tag) -> Option<String> {
-    match entry.get("id")? {
-        Tag::String(id) => Some(id.to_string_lossy()),
-        _ => None,
-    }
-}
-
-/// Whether a modifier entry was written by an affix pass of this module. The
-/// ids are the Java affix ids; socket modifiers use `apotheosis:socket_*` and
-/// are left to `sockets`.
-fn is_affix_modifier(entry: &Tag) -> bool {
-    modifier_id(entry)
-        .is_some_and(|id| java_affixes::AFFIXES.iter().any(|affix| affix.id == id))
-}
-
-/// Whether a lore line was written by an affix pass of this module.
-fn is_affix_lore(entry: &Tag) -> bool {
-    matches!(
-        entry.get("translate"),
-        Some(Tag::String(key)) if key.to_string_lossy().starts_with(AFFIX_LORE_PREFIX)
-    )
-}
-
-/// The modifiers and lore already on `stack`, minus this module's own entries:
-/// anything a datapack, another mod or the player wrote survives a reforge.
-fn foreign_entries(stack: &ItemStack) -> (Vec<Tag>, Vec<Tag>) {
-    let modifiers = match stack
-        .data()
-        .and_then(|data| data.other("minecraft:attribute_modifiers"))
-    {
-        Some(Tag::List(entries)) => entries
-            .iter()
-            .filter(|entry| !is_affix_modifier(entry))
-            .cloned()
-            .collect(),
-        _ => Vec::new(),
-    };
-    let lore = match stack.data().and_then(|data| data.other("minecraft:lore")) {
-        Some(Tag::List(lines)) => lines
-            .iter()
-            .filter(|line| !is_affix_lore(line))
-            .cloned()
-            .collect(),
-        _ => Vec::new(),
-    };
-    (modifiers, lore)
-}
-
 /// Rolls `tier`'s affixes onto `stack`: real `minecraft:attribute_modifiers`, a
 /// lore that says them, Java's prefix/suffix name, and the rarity that colours
 /// the name. Only affixes this port can actually pay out enter the pool; the
@@ -470,8 +413,7 @@ pub(crate) fn apply_affixes(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) {
     let count = tier.affixes();
     // Strip last pass's attributes even if this roll ends up empty, so they can
     // never be read twice.
-    attributes::attach_recorded(stack, &[], AFFIX_ATTRS_KEY);
-    let (mut modifiers, mut lore) = foreign_entries(stack);
+    attributes::attach_recorded(stack, &[], affixes::AFFIX_ATTRS_KEY);
     if count == 0 {
         return;
     }
@@ -480,44 +422,30 @@ pub(crate) fn apply_affixes(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) {
     if candidates.is_empty() {
         return;
     }
-    // The item's own modifiers come first: writing the component replaces the
-    // defaults, so an affixed sword would otherwise lose its base damage. A
-    // piece rolled before already carries them, so only add the missing ones.
-    for entry in attributes::base_modifiers(&stack.item) {
-        let id = modifier_id(&entry);
-        if id.is_none() || !modifiers.iter().any(|kept| modifier_id(kept) == id) {
-            modifiers.push(entry);
-        }
-    }
-    modifiers.reserve(count);
-    let mut custom = Vec::with_capacity(count);
-    lore.reserve(count);
-    let mut chosen: Vec<&'static java_affixes::Affix> = Vec::with_capacity(count);
+    // A fresh roll draws a level in [0, 1) for each affix, so a dropped or
+    // reforged piece is never overcharged; `rewrite` recomputes the amount
+    // from that level.
+    let mut picked: Vec<affixes::Instance> = Vec::with_capacity(count);
     for _ in 0..count.min(candidates.len()) {
         let pick = rng.below(candidates.len() as u64) as usize;
         let affix = candidates.swap_remove(pick);
-        let Some(amount) = affixes::amount(affix, tier, rng) else {
+        let level = affixes::roll_level(rng);
+        let Some(value) = affixes::value_at(affix, tier, level) else {
             continue;
         };
-        let (Some(attribute), Some(operation)) = (affix.attribute, affix.operation) else {
+        if affix.attribute.is_none() || affix.operation.is_none() {
             continue;
-        };
-        modifiers.push(Tag::compound([
-            ("type", string(attribute)),
-            ("id", string(affix.id)),
-            ("amount", Tag::Double(amount.to_bits())),
-            ("operation", string(operation)),
-            ("slot", string(affixes::slot(class))),
-        ]));
-        lore.push(affixes::stat_line(affix, tier, amount));
-        if let Some(attr) = affix.attr {
-            custom.push((attr, amount));
         }
-        chosen.push(affix);
+        picked.push(affixes::Instance {
+            affix,
+            level: Some(level),
+            value,
+        });
     }
-    if chosen.is_empty() {
+    if picked.is_empty() {
         return;
     }
+    let chosen: Vec<&'static java_affixes::Affix> = picked.iter().map(|instance| instance.affix).collect();
     // A reroll replaces the name our last roll wrote, but never a player's; a
     // kept name still carries the tier's colour, as Java's rarity component
     // gives it, so a mythic piece stays orange after an anvil rename.
@@ -529,12 +457,8 @@ pub(crate) fn apply_affixes(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) {
         .as_ref()
         .is_some_and(|name| !affixes::is_generated_name(name));
     let name = affixes::item_name_component(&stack.item, tier, &chosen);
+    affixes::rewrite(stack, tier, &picked);
     let data = stack.data_mut();
-    data.set_other(
-        "minecraft:attribute_modifiers",
-        (!modifiers.is_empty()).then_some(Tag::List(modifiers)),
-    );
-    data.set_other("minecraft:lore", (!lore.is_empty()).then_some(Tag::List(lore)));
     if keep_name {
         if let Some(kept) = kept_name {
             data.set_other(
@@ -549,7 +473,6 @@ pub(crate) fn apply_affixes(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) {
     // Vanilla's component stops at epic; this one keeps the five Java rarities
     // (and this port's ancient).
     data.set_other("apotheosis:rarity", Some(string(tier.id())));
-    attributes::attach_recorded(stack, &custom, AFFIX_ATTRS_KEY);
     // Effect affixes are extra, never replacements: the attribute lines and
     // their count stay as they were, and the effects follow Java's rarity
     // counts.
@@ -1188,9 +1111,18 @@ mod tests {
             lore.contains(&foreign_lore),
             "the foreign lore line was erased"
         );
+        let affix_lines = lore
+            .iter()
+            .filter(|line| {
+                matches!(
+                    line.get("translate"),
+                    Some(Tag::String(key))
+                        if key.to_string_lossy().starts_with("apotheosis.affix.")
+                )
+            })
+            .count();
         assert_eq!(
-            lore.iter().filter(|line| is_affix_lore(line)).count(),
-            3,
+            affix_lines, 3,
             "rare: two stat lines and one effect line, replaced not stacked"
         );
         let Some(Tag::List(modifiers)) = data.other("minecraft:attribute_modifiers") else {
@@ -1201,7 +1133,10 @@ mod tests {
             "the foreign modifier was erased"
         );
         assert_eq!(
-            modifiers.iter().filter(|entry| is_affix_modifier(entry)).count(),
+            modifiers
+                .iter()
+                .filter(|entry| affixes::is_affix_modifier(entry))
+                .count(),
             2,
             "the affix modifiers replace each other"
         );
