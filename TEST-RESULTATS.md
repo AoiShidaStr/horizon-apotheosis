@@ -62,3 +62,7 @@ Différences avec le Java qui restent (limites de Horizon a85af177, API 415) :
 - les trois choix de reforge montrent la rareté et le coût, pas l'aperçu de l'objet ; le recyclage n'a pas d'aperçu grisé (l'infobulle donne les fourchettes) ;
 - les objets posés restent dans la table quand on ferme l'écran, comme dans un four ;
 - le sertissage, les sceaux d'emplacement, de retrait et de dé-nommage se font encore au clic droit et non dans la table de forgeron : le crochet de forge de Horizon ne transmet pas le contenu des cases et n'a pas d'événement à la prise du résultat.
+
+### Infobulle des gemmes (2026-11-26)
+
+Au survol, une gemme affiche l'infobulle de Java : nom dans la couleur de sa pureté, « S'adapte à : » et les types d'équipement, « Lorsqu'emboîté dans : » et le bonus par type (vérifié sur la Gemme Tyrannique : +2 recul d'attaque, +3 robustesse, +30 % robustesse sur bouclier, +17,5 % vie maximale, −10 % vol de vie), plus une ligne propre au port qui rappelle que le sertissage se fait au clic droit. Défauts trouvés et corrigés : le client ignore le lore et la couleur déclarés sur un objet (l'infobulle est donc écrite par le crochet natif) ; toutes les lignes d'infobulle du mod étaient invisibles (couleur sans alpha, Horizon attend de l'ABGR opaque) ; un bonus multiplicateur s'affichait « +0.30 » au lieu de « +30 % ».
