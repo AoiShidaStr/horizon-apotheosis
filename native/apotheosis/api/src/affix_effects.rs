@@ -2,11 +2,19 @@
 //! Invader boss.
 //!
 //! Clean-room: ids and public numbers come from Apotheosis' data files; no
-//! Apotheosis source or texture is copied. Effect affixes are extra affixes:
-//! they never replace an attribute affix, so an item's attribute line count is
-//! unchanged. They roll from epic up (the tiers where upstream's effect
-//! affixes appear most), live in `minecraft:custom_data`
-//! (`apotheosis:effects`), and are read back at the hooks that pay them out.
+//! Apotheosis source or texture is copied. The catalogue (`java_affixes`)
+//! carries Java's per-rarity rolls for every effect affix this port can pay
+//! out: duration, amplifier, chance, targets, cooldown and roll count. A piece
+//! rolls the ones its rarity guarantees as extra affixes (`effect_counts`), so
+//! an item's attribute line count is unchanged; the rolls are written to
+//! `minecraft:custom_data`
+//! (`apotheosis:effects`) and read back at the hook that pays it out.
+//!
+//! `supported` in the catalogue means a hook here can pay the affix. A bow's
+//! `arrow_target` needs the projectile hit, which this API gives no host for,
+//! so only the trident half of those affixes is paid; `break_self`,
+//! `stoneforming`, `radial` and Apothic's own effects never enter the pool.
+//! See the README for the list.
 //!
 //! Bosses use the two spawn hooks in order: `entity_join_level` names the
 //! entity id before `mob_spawned` says the spawn was natural, so joins wait in
@@ -14,256 +22,201 @@
 //! or in the Nether/End may become an invader: a generated name, more health,
 //! affixed high-rarity gear, the `apotheosis:boss` tag, and an announcement.
 
+use crate::affixes::roll_range;
 use crate::attributes::{self, ItemClass};
+use crate::java_affixes::{Affix, AFFIXES};
 use crate::{BOSS_TIERS, Rng, Tier, apply_affixes, one};
 use horizon_client::mod_api::{
-    Compound, EntityJoinLevelEvent, EquipmentSlot, Flow, Host, ItemStack, ItemDamagedEvent,
-    LivingIncomingDamageV2Event, LootDropsEvent, MobSpawnedEvent, NativeEffect, NativeHeightmap,
-    ProjectileLaunchEvent, Tag, Text, serde_json,
+    Compound, EntityJoinLevelEvent, EquipmentSlot, Flow, Host, ItemDamagedEvent, ItemStack,
+    LivingIncomingDamageV2Event, LootDropsEvent, MobSpawnedEvent, NativeEffect, NativeHeightmap, Tag,
+    Text, serde_json,
 };
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// `minecraft:custom_data` key holding this port's effect affix rolls.
 const EFFECTS_KEY: &str = "apotheosis:effects";
 
+/// `minecraft:custom_data` key recording the enchantment levels the last effect
+/// affix added, so the next pass takes them back before adding its own.
+const EFFECT_ENCHANTS_KEY: &str = "apotheosis:effect_enchants";
+
+/// The port's own durability affix. Apotheosis 8.9's data has no `durable`
+/// affix, so it is not in the generated catalogue; it stays here for the gear
+/// rolled before the catalogue reached this slice.
+const DURABLE_ID: &str = "apotheosis:durable";
+
 /// What an effect affix does when it is paid out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
-    Venomous,
-    Withering,
-    Weakening,
-    Ensnaring,
-    Blinding,
+    MobEffect,
+    DamageReduction,
+    Enchantment,
     Execution,
     Cleaving,
     Thunderstruck,
     Retreating,
-    Durable,
     Telepathic,
-    Spectral,
-    Magical,
     Festive,
+    Durable,
 }
 
-/// An effect affix. `base` is the value at epic (a fraction for chances, ticks
-/// for effects, targets for cleaving); higher tiers scale it by `Tier::scale`.
-pub struct EffectAffix {
-    pub id: &'static str,
-    pub name_key: &'static str,
-    pub name: &'static str,
-    pub kind: Kind,
-    /// The item classes it may roll on (`attributes::MELEE` and the like).
-    pub classes: u16,
-    /// The lowest tier it appears at.
-    pub min_tier: Tier,
-    pub base: f64,
-    /// The lore line's English fallback, `{}` filled with the rolled value.
-    pub desc: &'static str,
-}
-
-const fn effect(
+/// One entry of the effect pool: a catalogue affix, or the port's durable.
+pub struct Entry {
     id: &'static str,
-    name: &'static str,
     kind: Kind,
+    affix: Option<&'static Affix>,
+    /// Indices into `Tier` (common..mythic), as the catalogue spells them.
+    rarities: &'static [u8],
+    /// The item classes it may roll on (`attributes::MELEE` and the like).
     classes: u16,
-    min_tier: Tier,
-    base: f64,
-    desc: &'static str,
-) -> EffectAffix {
-    EffectAffix {
-        id,
-        name_key: "",
-        name,
-        kind,
-        classes,
-        min_tier,
-        base,
-        desc,
+}
+
+impl Entry {
+    /// Java's `affix_type` (`basic_effect` or `ability`). The port's own durable
+    /// affix is not in the Java data and fills a basic slot.
+    fn affix_type(&self) -> &'static str {
+        self.affix.map_or("basic_effect", |affix| affix.affix_type)
     }
 }
 
-/// The effect affixes this port knows, by upstream id.
-pub const EFFECT_AFFIXES: [EffectAffix; 14] = [
-    effect(
-        "venomous",
-        "Venomous",
-        Kind::Venomous,
-        attributes::MELEE,
-        Tier::Epic,
-        120.0,
-        "Poison for {} s",
-    ),
-    effect(
-        "withering",
-        "Withering",
-        Kind::Withering,
-        attributes::MELEE,
-        Tier::Epic,
-        80.0,
-        "Wither for {} s",
-    ),
-    effect(
-        "weakening",
-        "Weakening",
-        Kind::Weakening,
-        attributes::MELEE,
-        Tier::Epic,
-        120.0,
-        "Weakness for {} s",
-    ),
-    effect(
-        "ensnaring",
-        "Ensnaring",
-        Kind::Ensnaring,
-        attributes::MELEE,
-        Tier::Epic,
-        80.0,
-        "Slowness for {} s",
-    ),
-    effect(
-        "blinding",
-        "Blinding",
-        Kind::Blinding,
-        attributes::HELMET,
-        Tier::Epic,
-        60.0,
-        "Blinds attackers for {} s",
-    ),
-    effect(
-        "executing",
-        "Executing",
-        Kind::Execution,
-        attributes::MELEE,
-        Tier::Epic,
-        0.10,
-        "Executes foes below {}% health",
-    ),
-    effect(
-        "cleaving",
-        "Cleaving",
-        Kind::Cleaving,
-        attributes::MELEE,
-        Tier::Epic,
-        2.0,
-        "Hits {} nearby foes",
-    ),
-    effect(
-        "thunderstruck",
-        "Thunderstruck",
-        Kind::Thunderstruck,
-        attributes::MELEE,
-        Tier::Epic,
-        4.0,
-        "{}% chance of lightning",
-    ),
-    effect(
-        "retreating",
-        "Retreating",
-        Kind::Retreating,
-        attributes::SHIELD,
-        Tier::Epic,
-        1.0,
-        "Knocks you back when hit",
-    ),
-    effect(
-        "durable",
-        "Durable",
-        Kind::Durable,
-        attributes::ARMOR | attributes::MELEE | attributes::TOOL | attributes::RANGED,
-        Tier::Epic,
-        0.15,
-        "{}% less wear",
-    ),
-    effect(
-        "telepathic",
-        "Telepathic",
-        Kind::Telepathic,
-        attributes::MELEE | attributes::RANGED | attributes::TOOL,
-        Tier::Epic,
-        1.0,
-        "Drops go to your inventory",
-    ),
-    effect(
-        "spectral",
-        "Spectral",
-        Kind::Spectral,
-        attributes::RANGED,
-        Tier::Epic,
-        0.20,
-        "{}% chance of a spectral arrow",
-    ),
-    effect(
-        "magical",
-        "Magical",
-        Kind::Magical,
-        attributes::RANGED,
-        Tier::Epic,
-        0.25,
-        "Arrows pierce armour as magic",
-    ),
-    effect(
-        "festive",
-        "Festive",
-        Kind::Festive,
-        attributes::MELEE,
-        Tier::Epic,
-        0.03,
-        "{}% chance of extra loot",
-    ),
-];
-
-/// The affix's translation key, `apotheosis.affix.<id>`.
-pub fn name_key(affix: &EffectAffix) -> String {
-    if affix.name_key.is_empty() {
-        format!("apotheosis.affix.{}", affix.id)
-    } else {
-        affix.name_key.to_string()
+/// The effect affixes Java's rarity data guarantees at `tier`: the number of
+/// `basic_effect` rules and `ability` rules in `data/apotheosis/rarities/*.json`
+/// (common 0/0, uncommon 0/0, rare 1/0, epic 1/1, mythic 2/1). Ancient is this
+/// port's extension and reuses mythic's row. The chanced extra rules are not
+/// modelled, so a piece never rolls more than this.
+pub fn effect_counts(tier: Tier) -> (usize, usize) {
+    match tier {
+        Tier::Common | Tier::Uncommon => (0, 0),
+        Tier::Rare => (1, 0),
+        Tier::Epic => (1, 1),
+        Tier::Mythic | Tier::Ancient => (2, 1),
     }
 }
 
-/// The lore line's translation key, `apotheosis.affix.<id>.desc`.
-pub fn desc_key(affix: &EffectAffix) -> String {
-    format!("apotheosis.affix.{}.desc", affix.id)
+/// The effect kind of a catalogue affix, when a hook can pay it.
+pub fn kind_of(affix: &Affix) -> Option<Kind> {
+    if !affix.supported {
+        return None;
+    }
+    Some(match affix.kind {
+        "mob_effect" => Kind::MobEffect,
+        "damage_reduction" => Kind::DamageReduction,
+        "enchantment" => Kind::Enchantment,
+        "executing" => Kind::Execution,
+        "cleaving" => Kind::Cleaving,
+        "thunderstruck" => Kind::Thunderstruck,
+        "retreating" => Kind::Retreating,
+        "telepathic" => Kind::Telepathic,
+        "festive" => Kind::Festive,
+        _ => return None,
+    })
 }
 
-/// The rolled magnitude at `tier`: ticks for effects, a fraction for chances,
-/// a target count for cleaving.
-pub fn value_at(affix: &EffectAffix, tier: Tier) -> f64 {
-    let raw = affix.base * tier.scale();
-    match affix.kind {
-        Kind::Venomous | Kind::Withering | Kind::Weakening | Kind::Ensnaring | Kind::Blinding => {
-            (raw / 20.0).round() * 20.0
+/// Every effect affix this port rolls, in catalogue order, plus `durable`.
+fn catalogue() -> &'static [Entry] {
+    static ENTRIES: OnceLock<Vec<Entry>> = OnceLock::new();
+    ENTRIES.get_or_init(|| {
+        let mut entries: Vec<Entry> = AFFIXES
+            .iter()
+            .filter_map(|affix| {
+                Some(Entry {
+                    id: affix.id,
+                    kind: kind_of(affix)?,
+                    affix: Some(affix),
+                    rarities: affix.rarities,
+                    classes: crate::affixes::classes(affix),
+                })
+            })
+            .collect();
+        entries.push(Entry {
+            id: DURABLE_ID,
+            kind: Kind::Durable,
+            affix: None,
+            rarities: &[3, 4],
+            classes: attributes::ARMOR
+                | attributes::MELEE
+                | attributes::TOOL
+                | attributes::RANGED
+                | attributes::SHIELD,
+        });
+        entries
+    })
+}
+
+/// One rolled effect affix: Java's numbers, drawn once when the piece rolls.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Roll {
+    /// Ticks, for a timed effect.
+    pub duration: f64,
+    pub amplifier: u8,
+    /// Ticks between two payouts of this affix on the same entity.
+    pub cooldown: u32,
+    pub chance: f64,
+    pub targets: f64,
+    pub rolls: u32,
+    /// The plain-value magnitude of the affix (a threshold, damage, ...).
+    pub value: f64,
+}
+
+/// Draws one affix's roll for `tier` from the catalogue's Java ranges.
+fn draw(affix: &Affix, tier: Tier, rng: &mut Rng) -> Roll {
+    let index = tier.rarity_index().min(4);
+    let mut roll = Roll::default();
+    if let Some(effect) = affix.effects.get(index).copied().flatten() {
+        if let Some(range) = effect.duration {
+            roll.duration = roll_range(range, rng).round();
         }
-        Kind::Execution | Kind::Durable | Kind::Spectral | Kind::Festive => {
-            ((raw.min(1.0)) * 100.0).round() / 100.0
+        if let Some(range) = effect.amplifier {
+            roll.amplifier = roll_range(range, rng).round().clamp(0.0, 9.0) as u8;
         }
-        Kind::Cleaving | Kind::Thunderstruck => raw.round(),
-        Kind::Retreating | Kind::Telepathic | Kind::Magical => raw,
+        if let Some(range) = effect.chance {
+            roll.chance = roll_range(range, rng).clamp(0.0, 1.0);
+        }
+        if let Some(range) = effect.targets {
+            roll.targets = roll_range(range, rng).round().max(1.0);
+        }
+        roll.cooldown = effect.cooldown;
+        roll.rolls = effect.rolls;
     }
+    if let Some(range) = affix.values.get(index).copied().flatten() {
+        roll.value = roll_range(range, rng);
+    }
+    roll
 }
 
-/// The value as a lore string: seconds, percent or a count.
-fn display(affix: &EffectAffix, value: f64) -> String {
-    match affix.kind {
-        Kind::Venomous | Kind::Withering | Kind::Weakening | Kind::Ensnaring | Kind::Blinding => {
-            format!("{:.0}", value / 20.0)
-        }
-        Kind::Execution | Kind::Durable | Kind::Spectral | Kind::Festive
-        | Kind::Thunderstruck => format!("{:.0}", value * 100.0),
-        Kind::Cleaving => format!("{value:.0}"),
-        Kind::Retreating | Kind::Telepathic | Kind::Magical => String::new(),
-    }
-}
-
-/// Picks an effect affix for `class` at `tier`, if one is available.
-fn choose(class: ItemClass, tier: Tier, rng: &mut Rng) -> Option<&'static EffectAffix> {
-    let pool: Vec<&'static EffectAffix> = EFFECT_AFFIXES
+/// The effect affixes an item of `class` at `tier` can roll, for README checks.
+pub fn available(class: ItemClass, tier: Tier) -> Vec<&'static str> {
+    catalogue()
         .iter()
-        .filter(|a| tier >= a.min_tier && attributes::accepts(a.classes, class))
+        .filter(|entry| {
+            entry.rarities.contains(&(tier.rarity_index() as u8))
+                && attributes::accepts(entry.classes, class)
+        })
+        .map(|entry| entry.id)
+        .collect()
+}
+
+/// Picks an effect affix of `affix_type` for `class` at `tier`, if one is
+/// available that the piece does not already carry.
+fn choose(
+    class: ItemClass,
+    tier: Tier,
+    affix_type: &str,
+    taken: &[&'static str],
+    rng: &mut Rng,
+) -> Option<&'static Entry> {
+    let pool: Vec<&'static Entry> = catalogue()
+        .iter()
+        .filter(|entry| {
+            entry.affix_type() == affix_type
+                && !taken.contains(&entry.id)
+                && entry.rarities.contains(&(tier.rarity_index() as u8))
+                && attributes::accepts(entry.classes, class)
+        })
         .collect();
     if pool.is_empty() {
         return None;
@@ -271,26 +224,263 @@ fn choose(class: ItemClass, tier: Tier, rng: &mut Rng) -> Option<&'static Effect
     Some(pool[rng.below(pool.len() as u64) as usize])
 }
 
-/// Adds one effect affix to a piece being affixed: its lore line, and its
-/// roll in `minecraft:custom_data`. Called by `apply_affixes` at epic and
-/// above, after the attribute affixes, so their count is untouched.
-pub fn add_effect_affix(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) -> Option<&'static str> {
-    let class = attributes::class_of(&stack.item);
-    // One effect affix on most high-tier pieces; ancient always gets one.
-    let chance = if tier >= Tier::Ancient { 100 } else { 55 };
-    if !rng.chance(chance) {
-        return None;
-    }
-    let affix = choose(class, tier, rng)?;
-    let value = value_at(affix, tier);
-    let text = display(affix, value);
-    let fallback = if text.is_empty() {
-        affix.desc.to_string()
+/// `7` for 7%, `12.5` for a twelfth of a point over.
+fn percent(value: f64) -> String {
+    let pct = value * 100.0;
+    if (pct - pct.round()).abs() < 0.05 {
+        format!("{pct:.0}")
     } else {
-        affix.desc.replace("{}", &text)
-    };
+        format!("{pct:.1}")
+    }
+}
 
-    // Lore, after the attribute lines.
+/// `6` for six seconds, `7.5` when the roll kept a half tick.
+fn seconds(ticks: f64) -> String {
+    let value = ticks / 20.0;
+    if (value - value.round()).abs() < 0.05 {
+        format!("{value:.0}")
+    } else {
+        format!("{value:.1}")
+    }
+}
+
+fn roman(amplifier: u8) -> &'static str {
+    ["", " II", " III", " IV", " V", " VI", " VII", " VIII", " IX", " X"]
+        .get(usize::from(amplifier))
+        .copied()
+        .unwrap_or("")
+}
+
+/// A vanilla effect's translation key and English fallback. The key is the
+/// game's own `effect.<namespace>.<path>`, so the effect name translates like
+/// any other component rather than staying English in the lore.
+fn effect_name(effect: &str, amplifier: u8) -> (String, String) {
+    let path = effect.rsplit(':').next().unwrap_or(effect);
+    let fallback = match path {
+        "blindness" => "Blindness",
+        "poison" => "Poison",
+        "weakness" => "Weakness",
+        "slowness" => "Slowness",
+        "wither" => "Wither",
+        "speed" => "Speed",
+        "resistance" => "Resistance",
+        "instant_health" => "Instant Health",
+        "levitation" => "Levitation",
+        "haste" => "Haste",
+        _ => path,
+    };
+    (
+        format!("effect.{}", effect.replacen(':', ".", 1)),
+        format!("{fallback}{}", roman(amplifier)),
+    )
+}
+
+/// An effect as a translatable argument: the game's own effect key, with the
+/// amplifier as vanilla's `enchantment.level.*` line after it.
+fn effect_arg(effect: &str, amplifier: u8) -> Tag {
+    let (key, fallback) = effect_name(effect, amplifier);
+    let mut fields: Vec<(&'static str, Tag)> = vec![
+        ("translate", string(&key)),
+        ("fallback", string(&fallback)),
+    ];
+    if amplifier > 0 {
+        fields.push((
+            "extra",
+            Tag::List(vec![
+                string(" "),
+                Tag::compound([
+                    (
+                        "translate",
+                        string(&format!("enchantment.level.{}", amplifier + 1)),
+                    ),
+                    ("fallback", string(roman(amplifier).trim())),
+                ]),
+            ]),
+        ));
+    }
+    Tag::compound(fields)
+}
+
+/// The English text of a lore argument, for the fallback string.
+fn arg_text(arg: &Tag) -> String {
+    match arg {
+        Tag::String(text) => text.to_string_lossy(),
+        Tag::Compound(fields) => match fields
+            .get(&"fallback".into())
+            .or_else(|| fields.get(&"text".into()))
+        {
+            Some(Tag::String(text)) => text.to_string_lossy(),
+            _ => String::new(),
+        },
+        _ => String::new(),
+    }
+}
+
+/// A damage class's name key and English fallback.
+fn damage_name(kind: &str) -> (String, String) {
+    let fallback = match kind {
+        "explosion" => "Explosion",
+        "physical" => "Physical",
+        "projectile" => "Projectile",
+        "fall" => "Fall",
+        "lightning" => "Lightning",
+        "magic" => "Magic",
+        _ => kind,
+    };
+    (format!("apotheosis.damage.{kind}"), fallback.to_string())
+}
+
+fn fill(template: &str, args: &[String]) -> String {
+    let mut text = template.to_string();
+    for arg in args {
+        if let Some(at) = text.find("%s") {
+            text.replace_range(at..at + 2, arg);
+        }
+    }
+    text
+}
+
+/// The lore line, its English fallback, and the values the language file
+/// fills in. The keys are this port's own; Java's line is computed, not keyed.
+fn description(entry: &Entry, roll: Roll) -> (String, String, Vec<Tag>) {
+    let generic = |kind: &str, template: &str, args: Vec<Tag>| {
+        let text: Vec<String> = args.iter().map(arg_text).collect();
+        (
+            format!("apotheosis.affix.effect.{kind}"),
+            fill(template, &text),
+            args,
+        )
+    };
+    let literal = |value: String| Tag::String(value.as_str().into());
+    match entry.kind {
+        Kind::MobEffect => {
+            let effect = entry.affix.and_then(|a| a.effect).unwrap_or("minecraft:unknown");
+            generic(
+                "effect",
+                "%s for %s s",
+                vec![
+                    effect_arg(effect, roll.amplifier),
+                    literal(seconds(roll.duration)),
+                ],
+            )
+        }
+        Kind::DamageReduction => {
+            let kind = entry.affix.and_then(|a| a.damage_kind).unwrap_or("physical");
+            let (_, name) = damage_name(kind);
+            generic(
+                "reduction",
+                "-%s%% %s damage",
+                vec![literal(percent(roll.value)), literal(name)],
+            )
+        }
+        Kind::Execution => generic(
+            "executing",
+            "Executes below %s%% health",
+            vec![literal(percent(roll.value))],
+        ),
+        Kind::Cleaving => generic(
+            "cleaving",
+            "%s%% chance to hit %s foes",
+            vec![
+                literal(percent(roll.chance)),
+                literal(format!("{:.0}", roll.targets)),
+            ],
+        ),
+        Kind::Thunderstruck => generic(
+            "thunderstruck",
+            "Lightning for %s damage",
+            vec![literal(format!("{:.0}", roll.value))],
+        ),
+        Kind::Festive => generic(
+            "festive",
+            "%s%% chance of extra loot",
+            vec![literal(percent(roll.chance))],
+        ),
+        Kind::Durable => generic(
+            "durable",
+            "%s%% less wear",
+            vec![literal(percent(roll.value))],
+        ),
+        Kind::Enchantment => {
+            let enchantment = entry.affix.and_then(|a| a.enchantment).unwrap_or("minecraft:fortune");
+            let path = enchantment.rsplit(':').next().unwrap_or(enchantment);
+            let fallback = if path == "fortune" { "Fortune" } else { path };
+            generic(
+                "enchantment",
+                "+%s %s",
+                vec![
+                    literal(format!("{:.0}", roll.value)),
+                    literal(fallback.to_string()),
+                ],
+            )
+        }
+        Kind::Retreating => (
+            "apotheosis.affix.effect.retreating".into(),
+            "Knocks attackers back on block".into(),
+            Vec::new(),
+        ),
+        Kind::Telepathic => (
+            "apotheosis.affix.effect.telepathic".into(),
+            "Drops go to your inventory".into(),
+            Vec::new(),
+        ),
+    }
+}
+
+/// Adds the effect affixes Java's rarity guarantees for `tier`, each with its
+/// lore line and its roll in `minecraft:custom_data`. Called by `apply_affixes`
+/// after the attribute affixes, so their count is untouched.
+pub fn add_effect_affix(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) -> Vec<&'static str> {
+    let class = attributes::class_of(&stack.item);
+    // A reroll drops the previous effects: their lore, rolls and damage
+    // reductions, and the enchantment levels they added.
+    clear_effects(stack);
+    attributes::clear_reduction(stack);
+    let (basic, abilities) = effect_counts(tier);
+    let mut added: Vec<&'static str> = Vec::with_capacity(basic + abilities);
+    for affix_type in std::iter::repeat_n("basic_effect", basic)
+        .chain(std::iter::repeat_n("ability", abilities))
+    {
+        let Some(entry) = choose(class, tier, affix_type, &added, rng) else {
+            // No supported affix of that kind for this class and tier: a tool
+            // has no supported ability at all, for instance.
+            continue;
+        };
+        let roll = match entry.affix {
+            Some(affix) => draw(affix, tier, rng),
+            None => Roll {
+                value: (0.15 * tier.scale()).min(0.5),
+                ..Roll::default()
+            },
+        };
+        let (key, fallback, args) = description(entry, roll);
+
+        // The enchantment affix is permanent, not a hit effect: it adds levels
+        // to the item's own component, which the game then applies itself.
+        if entry.kind == Kind::Enchantment {
+            if let Some(affix) = entry.affix {
+                add_enchantment(stack, affix.enchantment.unwrap_or("minecraft:fortune"), roll.value);
+            }
+        }
+        // Damage reduction is read from the armour cache, not from a hit hook.
+        if entry.kind == Kind::DamageReduction {
+            if let Some(affix) = entry.affix {
+                attributes::attach_reduction(
+                    stack,
+                    affix.damage_kind.unwrap_or("physical"),
+                    roll.value,
+                );
+            }
+        }
+        store(stack, entry.id, roll);
+        append_lore(stack, &key, &fallback, &args);
+        added.push(entry.id);
+    }
+    added
+}
+
+/// Appends one effect line after the attribute lines.
+fn append_lore(stack: &mut ItemStack, key: &str, fallback: &str, args: &[Tag]) {
     let mut lore = match stack
         .data()
         .and_then(|data| data.other("minecraft:lore"))
@@ -299,39 +489,67 @@ pub fn add_effect_affix(stack: &mut ItemStack, tier: Tier, rng: &mut Rng) -> Opt
         _ => Vec::new(),
     };
     lore.push(Tag::compound([
-        (
-            "translate",
-            string(&format!("apotheosis.affix.{}.desc", affix.id)),
-        ),
-        ("fallback", string(&fallback)),
+        ("translate", string(key)),
+        ("fallback", string(fallback)),
         ("color", string("#55FF55")),
         ("italic", Tag::Byte(0)),
-        ("with", Tag::List(vec![string(&text)])),
+        ("with", Tag::List(args.to_vec())),
     ]));
     stack
         .data_mut()
         .set_other("minecraft:lore", Some(Tag::List(lore)));
+}
 
-    // The roll, for the hooks.
-    let mut custom = match stack.data().and_then(|data| data.other("minecraft:custom_data")) {
-        Some(Tag::Compound(compound)) => compound.clone(),
-        _ => Compound::new(),
-    };
+/// Writes one roll into the stack's `minecraft:custom_data`.
+fn store(stack: &mut ItemStack, id: &str, roll: Roll) {
+    let mut custom = custom_data(stack);
     let mut effects = match custom.get(&EFFECTS_KEY.into()) {
         Some(Tag::Compound(compound)) => compound.clone(),
         _ => Compound::new(),
     };
-    effects.insert(affix.id.into(), Tag::Double(value.to_bits()));
+    effects.insert(
+        id.into(),
+        Tag::compound([
+            ("duration", Tag::Double(roll.duration.to_bits())),
+            ("amplifier", Tag::Byte(roll.amplifier as i8)),
+            ("cooldown", Tag::Int(roll.cooldown as i32)),
+            ("chance", Tag::Double(roll.chance.to_bits())),
+            ("targets", Tag::Double(roll.targets.to_bits())),
+            ("rolls", Tag::Int(roll.rolls as i32)),
+            ("value", Tag::Double(roll.value.to_bits())),
+        ]),
+    );
     custom.insert(EFFECTS_KEY.into(), Tag::Compound(effects));
     stack
         .data_mut()
         .set_other("minecraft:custom_data", Some(Tag::Compound(custom)));
-    Some(affix.id)
 }
 
-/// The effect affix rolls an item carries, by id.
-pub fn effects_of(stack: &ItemStack) -> HashMap<&'static str, f64> {
-    let mut found = HashMap::new();
+fn custom_data(stack: &ItemStack) -> Compound {
+    match stack
+        .data()
+        .and_then(|data| data.other("minecraft:custom_data"))
+    {
+        Some(Tag::Compound(compound)) => compound.clone(),
+        _ => Compound::new(),
+    }
+}
+
+/// Drops the effect rolls a previous affix pass wrote, and the enchantment
+/// levels that pass added.
+fn clear_effects(stack: &mut ItemStack) {
+    remove_effect_enchantments(stack);
+    let mut custom = custom_data(stack);
+    if custom.remove(&EFFECTS_KEY.into()).is_some() {
+        stack
+            .data_mut()
+            .set_other("minecraft:custom_data", Some(Tag::Compound(custom)));
+    }
+}
+
+/// The effect affix rolls an item carries.
+pub fn effects_of(stack: &ItemStack) -> Vec<(&'static Entry, Roll)> {
+    let mut found = Vec::new();
     let Some(Tag::Compound(custom)) = stack.data().and_then(|data| data.other("minecraft:custom_data"))
     else {
         return found;
@@ -339,12 +557,109 @@ pub fn effects_of(stack: &ItemStack) -> HashMap<&'static str, f64> {
     let Some(Tag::Compound(effects)) = custom.get(&EFFECTS_KEY.into()) else {
         return found;
     };
-    for affix in &EFFECT_AFFIXES {
-        if let Some(value) = number(effects.get(&affix.id.into())) {
-            found.insert(affix.id, value);
-        }
+    for entry in catalogue() {
+        let Some(Tag::Compound(roll)) = effects.get(&entry.id.into()) else {
+            continue;
+        };
+        found.push((
+            entry,
+            Roll {
+                duration: number(roll.get(&"duration".into())).unwrap_or(0.0),
+                amplifier: number(roll.get(&"amplifier".into())).unwrap_or(0.0) as u8,
+                cooldown: number(roll.get(&"cooldown".into())).unwrap_or(0.0) as u32,
+                chance: number(roll.get(&"chance".into())).unwrap_or(0.0),
+                targets: number(roll.get(&"targets".into())).unwrap_or(0.0),
+                rolls: number(roll.get(&"rolls".into())).unwrap_or(0.0) as u32,
+                value: number(roll.get(&"value".into())).unwrap_or(0.0),
+            },
+        ));
     }
     found
+}
+
+/// Adds whole levels of `id` to the item's own enchantments, the typed
+/// component the game reads for Fortune and Looting, and records them so the
+/// next pass can take them back without touching the item's own levels.
+fn add_enchantment(stack: &mut ItemStack, id: &str, levels: f64) {
+    let add = levels.round().max(0.0) as u32;
+    if add == 0 {
+        return;
+    }
+    let mut table: Vec<(std::sync::Arc<str>, u32)> = stack.enchantments().to_vec();
+    match table.iter_mut().find(|(key, _)| &**key == id) {
+        Some((_, level)) => *level += add,
+        None => table.push((std::sync::Arc::from(id), add)),
+    }
+    stack.data_mut().enchantments = table;
+    let mut custom = custom_data(stack);
+    let mut recorded = match custom.get(&EFFECT_ENCHANTS_KEY.into()) {
+        Some(Tag::Compound(compound)) => compound.clone(),
+        _ => Compound::new(),
+    };
+    let before = number(recorded.get(&id.into())).unwrap_or(0.0) as u32;
+    recorded.insert(id.into(), Tag::Int((before + add) as i32));
+    custom.insert(EFFECT_ENCHANTS_KEY.into(), Tag::Compound(recorded));
+    stack
+        .data_mut()
+        .set_other("minecraft:custom_data", Some(Tag::Compound(custom)));
+}
+
+/// Takes back the enchantment levels the last effect affix added, leaving the
+/// item's own enchantments (or another module's) where they were.
+fn remove_effect_enchantments(stack: &mut ItemStack) {
+    let mut custom = custom_data(stack);
+    let Some(Tag::Compound(recorded)) = custom.remove(&EFFECT_ENCHANTS_KEY.into()) else {
+        return;
+    };
+    let mut table: Vec<(std::sync::Arc<str>, u32)> = stack.enchantments().to_vec();
+    for (id, value) in recorded.iter() {
+        let Tag::Int(level) = value else {
+            continue;
+        };
+        let key = id.to_string_lossy();
+        if let Some(index) = table.iter().position(|(name, _)| &**name == key.as_str()) {
+            let left = table[index]
+                .1
+                .saturating_sub(u32::try_from(*level).unwrap_or(0));
+            if left == 0 {
+                table.remove(index);
+            } else {
+                table[index].1 = left;
+            }
+        }
+    }
+    stack.data_mut().enchantments = table;
+    stack
+        .data_mut()
+        .set_other("minecraft:custom_data", Some(Tag::Compound(custom)));
+}
+
+/// Per-entity, per-affix cooldowns, in the ticks Java's data names.
+static COOLDOWNS: OnceLock<Mutex<HashMap<(u32, &'static str), Instant>>> = OnceLock::new();
+
+fn cooldowns() -> &'static Mutex<HashMap<(u32, &'static str), Instant>> {
+    COOLDOWNS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Whether `source` may pay `id` now; records the payout when it may. A zero
+/// cooldown means every hit.
+fn ready(source: u32, id: &'static str, ticks: u32) -> bool {
+    if ticks == 0 {
+        return true;
+    }
+    let wait = Duration::from_millis(u64::from(ticks) * 50);
+    let mut map = cooldowns()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    map.retain(|_, at| at.elapsed() < Duration::from_secs(120));
+    if map
+        .get(&(source, id))
+        .is_some_and(|at| at.elapsed() < wait)
+    {
+        return false;
+    }
+    map.insert((source, id), Instant::now());
+    true
 }
 
 fn number(tag: Option<&Tag>) -> Option<f64> {
@@ -468,71 +783,133 @@ pub fn on_hit(host: &mut dyn Host, event: &mut LivingIncomingDamageV2Event<'_>) 
         ((u64::from(victim) << 32) | u64::from(attacker))
             ^ u64::from(event.amount.to_bits()).rotate_left(13),
     );
+    let trident = event
+        .weapon
+        .is_some_and(|weapon| attributes::class_of(&weapon.item) == ItemClass::Trident);
 
     if let Some(weapon) = event.weapon {
-        let effects = effects_of(weapon);
-        if !effects.is_empty() {
-            for (id, value) in &effects {
-                match *id {
-                    "venomous" => add_effect(host, victim, "minecraft:poison", *value as i32, 0),
-                    "withering" => add_effect(host, victim, "minecraft:wither", *value as i32, 0),
-                    "weakening" => add_effect(host, victim, "minecraft:weakness", *value as i32, 0),
-                    "ensnaring" => add_effect(host, victim, "minecraft:slowness", *value as i32, 0),
-                    "executing" => {
+        for (entry, roll) in effects_of(weapon) {
+            let target = match entry.affix.and_then(|affix| affix.effect_target) {
+                Some("attack_target") => Some(victim),
+                Some("arrow_target") if trident => Some(victim),
+                Some("attack_self") | Some("arrow_self") => Some(attacker),
+                _ => None,
+            };
+            match entry.kind {
+                Kind::MobEffect => {
+                    if let Some(target) = target {
+                        pay_effect(host, entry, roll, attacker, target, &mut rng);
+                    }
+                }
+                Kind::Execution => {
+                    if rng.chance((roll.chance * 100.0).round() as u64) {
                         if let Some((current, max)) = health(host, victim) {
                             let after = current - event.amount;
-                            if after > 0.0 && f64::from(after) <= f64::from(max) * value {
+                            if after > 0.0 && f64::from(after) <= f64::from(max) * roll.value {
                                 event.amount = current + 1.0;
                             }
                         }
                     }
-                    "cleaving" => cleave(host, event, attacker, victim, *value),
-                    "thunderstruck" => {
-                        if rng.chance((value * 100.0).clamp(0.0, 100.0) as u64) {
-                            let at = event.victim_position;
-                            let _ = host.lightning_bolt(host.dimension(), at, false);
-                            let _ = host.hurt_entity(
-                                host.dimension(),
-                                victim,
-                                5.0,
-                                "minecraft:lightning_bolt",
-                                Some(attacker),
-                            );
-                        }
-                    }
-                    "magical" => {
-                        // Armour and enchantment reduction is not replayed;
-                        // the magic share lands as extra damage instead.
-                        event.amount += event.amount * *value as f32;
-                    }
-                    _ => {}
                 }
+                Kind::Cleaving => {
+                    if rng.chance((roll.chance * 100.0).round() as u64) {
+                        cleave(host, event, attacker, victim, roll.targets);
+                    }
+                }
+                Kind::Thunderstruck => {
+                    // Java's data carries the damage, not a chance: the strike
+                    // is this port's own one-in-five.
+                    if rng.chance(20) {
+                        let at = event.victim_position;
+                        let _ = host.lightning_bolt(host.dimension(), at, false);
+                        let _ = host.hurt_entity(
+                            host.dimension(),
+                            victim,
+                            roll.value as f32,
+                            "minecraft:lightning_bolt",
+                            Some(attacker),
+                        );
+                    }
+                }
+                _ => {}
             }
         }
     }
 
-    // The victim's own gear: a helmet may blind the attacker, a shield may
-    // throw the holder back.
-    if let Some(helmet) = player_slot(host, victim, EquipmentSlot::Head) {
-        if let Some(value) = effects_of(&helmet).get("blinding").copied() {
-            add_effect(host, attacker, "minecraft:blindness", value as i32, 0);
+    // The victim's own gear: armour pays `hurt_*` effects, a shield in the off
+    // hand the `block_*` ones (there is no block event: the README says so).
+    let mut gear: Vec<(EquipmentSlot, ItemStack)> = Vec::new();
+    for slot in [
+        EquipmentSlot::Head,
+        EquipmentSlot::Chest,
+        EquipmentSlot::Legs,
+        EquipmentSlot::Feet,
+        EquipmentSlot::OffHand,
+    ] {
+        if let Some(stack) = player_slot(host, victim, slot) {
+            gear.push((slot, stack));
         }
     }
-    if let Some(offhand) = player_slot(host, victim, EquipmentSlot::OffHand) {
-        if effects_of(&offhand).contains_key("retreating") {
-            let away = [
-                event.victim_position[0] - event.source_position.unwrap_or(event.victim_position)[0],
-                0.0,
-                event.victim_position[2] - event.source_position.unwrap_or(event.victim_position)[2],
-            ];
-            let length = (away[0] * away[0] + away[2] * away[2]).sqrt().max(1.0e-4);
-            if let Some(entity) = host.entity(victim) {
-                let _ = host.entity_push(
-                    entity,
-                    [away[0] / length * 0.6, 0.25, away[2] / length * 0.6],
-                );
+    for (_slot, stack) in gear {
+        for (entry, roll) in effects_of(&stack) {
+            match entry.affix.and_then(|affix| affix.effect_target) {
+                Some("hurt_attacker") => {
+                    pay_effect(host, entry, roll, victim, attacker, &mut rng);
+                }
+                Some("hurt_self") | Some("block_self") => {
+                    pay_effect(host, entry, roll, victim, victim, &mut rng);
+                }
+                Some("block_attacker") => {
+                    pay_effect(host, entry, roll, victim, attacker, &mut rng);
+                }
+                _ => {}
+            }
+            if entry.kind == Kind::Retreating {
+                retreat(host, event, victim);
             }
         }
+    }
+}
+
+/// Applies one `mob_effect` affix: chance, then cooldown, then the effect at
+/// the rolled duration and amplifier.
+fn pay_effect(
+    host: &mut dyn Host,
+    entry: &Entry,
+    roll: Roll,
+    source: u32,
+    target: u32,
+    rng: &mut Rng,
+) {
+    if roll.chance > 0.0 && !rng.chance((roll.chance * 100.0).round() as u64) {
+        return;
+    }
+    if !ready(source, entry.id, roll.cooldown) {
+        return;
+    }
+    let effect = entry.affix.and_then(|affix| affix.effect).unwrap_or("minecraft:poison");
+    add_effect(
+        host,
+        target,
+        effect,
+        (roll.duration as i32).max(1),
+        roll.amplifier,
+    );
+}
+
+/// Retreating: pushes the holder away from the attacker.
+fn retreat(host: &mut dyn Host, event: &LivingIncomingDamageV2Event<'_>, victim: u32) {
+    let away = [
+        event.victim_position[0] - event.source_position.unwrap_or(event.victim_position)[0],
+        0.0,
+        event.victim_position[2] - event.source_position.unwrap_or(event.victim_position)[2],
+    ];
+    let length = (away[0] * away[0] + away[2] * away[2]).sqrt().max(1.0e-4);
+    if let Some(entity) = host.entity(victim) {
+        let _ = host.entity_push(
+            entity,
+            [away[0] / length * 0.6, 0.25, away[2] / length * 0.6],
+        );
     }
 }
 
@@ -586,8 +963,10 @@ pub fn item_damaged(host: &mut dyn Host, event: &mut ItemDamagedEvent<'_>) -> Fl
         if stack.item.as_ref() != event.item {
             continue;
         }
-        if let Some(value) = effects_of(&stack).get("durable").copied() {
-            best = best.max(value);
+        for (entry, roll) in effects_of(&stack) {
+            if entry.kind == Kind::Durable {
+                best = best.max(roll.value);
+            }
         }
     }
     if best > 0.0 {
@@ -597,57 +976,21 @@ pub fn item_damaged(host: &mut dyn Host, event: &mut ItemDamagedEvent<'_>) -> Fl
     Flow::Continue
 }
 
-/// Spectral: a bow's arrows may split off a free spectral arrow, as upstream's
-/// `SpectralShotAffix` does. Magical is paid out in the damage hook.
-pub fn projectile_launch(host: &mut dyn Host, event: &mut ProjectileLaunchEvent<'_>) {
-    let Some(player) = event.player else {
-        return;
-    };
-    if !event.kind.contains("arrow") {
-        return;
-    }
-    let Some(weapon) = host.player_equipment(player, EquipmentSlot::MainHand) else {
-        return;
-    };
-    let Some(value) = effects_of(&weapon).get("spectral").copied() else {
-        return;
-    };
-    let mut rng = roll(u64::from(event.entity) ^ player as u64);
-    if !rng.chance((value * 100.0).clamp(0.0, 100.0) as u64) {
-        return;
-    }
-    let Some(entity) = host.entity(event.entity) else {
-        return;
-    };
-    let Some(pos) = host.entity_position(entity) else {
-        return;
-    };
-    let motion = host
-        .entity_velocity(entity)
-        .unwrap_or([0.0, 0.0, 0.0])
-        .map(|v| (v * 1000.0).round() / 1000.0);
-    let motion = format!("[{},{},{}]", motion[0], motion[1], motion[2]);
-    let line = format!(
-        "summon minecraft:spectral_arrow {} {} {} {{Motion:{},pickup:2b}}",
-        pos[0], pos[1], pos[2], motion
-    );
-    let _ = host.run_command(&line);
-}
-
 /// Telepathic: a tool or weapon with the affix hands its block or kill drops
 /// straight to the player. Festive: a weapon may double the gear a kill drops.
 pub fn loot_drops(host: &mut dyn Host, event: &mut LootDropsEvent<'_>) {
     let Some(player) = event.context.player else {
         return;
     };
+    let has = |stack: &ItemStack, kind: Kind| effects_of(stack).iter().any(|(e, _)| e.kind == kind);
     let telepathic = event
         .context
         .tool
-        .map(|tool| effects_of(tool).contains_key("telepathic"))
+        .map(|tool| has(tool, Kind::Telepathic))
         .unwrap_or(false)
         || host
             .player_equipment(player, EquipmentSlot::MainHand)
-            .map(|stack| effects_of(&stack).contains_key("telepathic"))
+            .map(|stack| has(&stack, Kind::Telepathic))
             .unwrap_or(false);
     if telepathic && !event.drops.is_empty() {
         let drops = std::mem::take(event.drops);
@@ -665,7 +1008,10 @@ pub fn loot_drops(host: &mut dyn Host, event: &mut LootDropsEvent<'_>) {
     let Some(weapon) = host.player_equipment(player, EquipmentSlot::MainHand) else {
         return;
     };
-    let Some(value) = effects_of(&weapon).get("festive").copied() else {
+    let Some((_, rolled)) = effects_of(&weapon)
+        .into_iter()
+        .find(|(entry, _)| entry.kind == Kind::Festive)
+    else {
         return;
     };
     let seed = event
@@ -675,7 +1021,7 @@ pub fn loot_drops(host: &mut dyn Host, event: &mut LootDropsEvent<'_>) {
         .unwrap_or_default()
         ^ player as u64;
     let mut rng = roll(seed);
-    if rng.chance((value * 100.0).clamp(0.0, 100.0) as u64) {
+    if rng.chance((rolled.chance * 100.0).round() as u64) {
         // Gear only: a doubled gem would inflate the boss table.
         let extra: Vec<ItemStack> = event
             .drops
@@ -748,13 +1094,38 @@ fn take_join(event: &MobSpawnedEvent<'_>) -> Option<u32> {
     found.map(|index| joins.remove(index).entity)
 }
 
-/// The chance a natural spawn becomes an invader, per dimension.
+/// The chance, in 1000, that a natural spawn becomes an invader: Java's
+/// `invader_spawn_rules.json` at the first world tier that has invaders
+/// (frontier): 1.8% in the overworld and the end, 2.5% in the nether.
 fn chance(dimension: &str) -> u64 {
     match dimension {
-        "minecraft:the_nether" => 2,
-        "minecraft:the_end" => 2,
-        _ => 2,
+        "minecraft:the_nether" => 25,
+        _ => 18,
     }
+}
+
+/// Java's `bossSpawnCooldown`: 3600 ticks (three minutes) between two natural
+/// invaders. Java keeps it per player and their neighbours; Horizon's spawn
+/// event names no player, so this port keeps one per dimension.
+const INVADER_COOLDOWN: Duration = Duration::from_secs(3600 / 20);
+
+static LAST_INVADER: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+
+/// Whether `dimension` may have an invader at `now`; if so, starts its
+/// cooldown.
+fn invader_ready(dimension: &str, now: Instant) -> bool {
+    let mut last = LAST_INVADER
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if last
+        .get(dimension)
+        .is_some_and(|then| now.duration_since(*then) < INVADER_COOLDOWN)
+    {
+        return false;
+    }
+    last.insert(dimension.to_string(), now);
+    true
 }
 
 /// Whether the spawn is on the surface: at or above the column's highest
@@ -788,7 +1159,7 @@ pub fn mob_spawned(host: &mut dyn Host, event: &MobSpawnedEvent<'_>) {
         return;
     }
     let mut rng = roll(u64::from(entity) ^ event.pos[0].to_bits().rotate_left(9));
-    if !rng.chance(chance(event.dimension)) {
+    if rng.below(1000) >= chance(event.dimension) || !invader_ready(event.dimension, Instant::now()) {
         return;
     }
     become_boss(host, event.dimension, entity, event.kind, &mut rng);
@@ -984,60 +1355,142 @@ pub fn boss_tiers() -> &'static [(Tier, u64)] {
     &BOSS_TIERS
 }
 
-/// The effect affixes an item of `class` can roll, for README checks and tests.
-pub fn available(class: ItemClass, tier: Tier) -> Vec<&'static str> {
-    EFFECT_AFFIXES
-        .iter()
-        .filter(|a| tier >= a.min_tier && attributes::accepts(a.classes, class))
-        .map(|a| a.id)
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn affix(path: &str) -> &'static Affix {
+        AFFIXES
+            .iter()
+            .find(|affix| affix.path == path)
+            .unwrap_or_else(|| panic!("no {path}"))
+    }
+
+    /// The reported bug: the lore showed the effect as a bare English word
+    /// ("Weakness"), so a client's language never translated it. The argument
+    /// must be the game's own `effect.minecraft.*` key.
     #[test]
-    fn every_effect_affix_names_and_describes_itself() {
-        for affix in &EFFECT_AFFIXES {
-            assert!(!affix.name.is_empty());
-            assert!(name_key(affix).starts_with("apotheosis.affix."));
-            assert!(desc_key(affix).ends_with(".desc"));
-            assert!(affix.base > 0.0);
-        }
+    fn an_effect_lore_line_carries_the_vanilla_effect_key() {
+        let entry = catalogue()
+            .iter()
+            .find(|entry| {
+                entry.kind == Kind::MobEffect
+                    && entry.affix.and_then(|affix| affix.effect).is_some()
+            })
+            .expect("a mob-effect affix");
+        let (_, _, args) = description(
+            entry,
+            Roll {
+                amplifier: 1,
+                duration: 140.0,
+                ..Roll::default()
+            },
+        );
+        let key = args.iter().find_map(|arg| match arg {
+            Tag::Compound(fields) => match fields.get(&"translate".into()) {
+                Some(Tag::String(key)) => Some(key.to_string_lossy()),
+                _ => None,
+            },
+            _ => None,
+        });
+        let effect = entry.affix.and_then(|affix| affix.effect).unwrap();
+        let expected = format!("effect.{}", effect.replacen(':', ".", 1));
+        assert_eq!(key.as_deref(), Some(expected.as_str()));
+        assert!(expected.starts_with("effect.minecraft."), "{expected}");
     }
 
     #[test]
-    fn effect_ids_are_unique_and_absent_from_attribute_affixes() {
-        let mut seen = std::collections::HashSet::new();
-        for affix in &EFFECT_AFFIXES {
-            assert!(seen.insert(affix.id), "{} twice", affix.id);
-            assert!(
-                !crate::AFFIXES.iter().any(|a| a.id == affix.id),
-                "{} is both an attribute and an effect affix",
-                affix.id
-            );
+    fn every_effect_affix_is_in_the_catalogue_and_rolls() {
+        for entry in catalogue() {
+            assert!(entry.id.starts_with("apotheosis:"), "{}", entry.id);
+            if let Some(affix) = entry.affix {
+                assert!(kind_of(affix).is_some(), "{}", affix.id);
+                assert!(matches!(affix.kind, "mob_effect" | "damage_reduction" | "enchantment")
+                    || matches!(
+                        affix.kind,
+                        "executing" | "cleaving" | "thunderstruck" | "retreating"
+                            | "telepathic" | "festive"
+                    ));
+            }
         }
     }
 
     #[test]
     fn effect_affixes_respect_their_item_classes() {
-        assert!(available(ItemClass::Bow, Tier::Epic).contains(&"spectral"));
-        assert!(!available(ItemClass::Bow, Tier::Epic).contains(&"cleaving"));
-        assert!(available(ItemClass::Helmet, Tier::Epic).contains(&"blinding"));
-        assert!(!available(ItemClass::Sword, Tier::Epic).contains(&"blinding"));
-        assert!(available(ItemClass::Shield, Tier::Epic).contains(&"retreating"));
-        assert!(available(ItemClass::Sword, Tier::Rare).is_empty());
+        assert!(available(ItemClass::Helmet, Tier::Epic).contains(&"apotheosis:armor/mob_effect/blinding"));
+        assert!(!available(ItemClass::Sword, Tier::Epic).contains(&"apotheosis:armor/mob_effect/blinding"));
+        assert!(available(ItemClass::Shield, Tier::Epic).contains(&"apotheosis:shield/retreating"));
+        assert!(available(ItemClass::Shield, Tier::Uncommon).contains(&"apotheosis:shield/mob_effect/venomous"));
+        assert!(!available(ItemClass::Sword, Tier::Uncommon).contains(&"apotheosis:shield/mob_effect/venomous"));
+        assert!(available(ItemClass::Sword, Tier::Rare).contains(&"apotheosis:generic/telepathic"));
+        assert!(!available(ItemClass::Sword, Tier::Epic).contains(&"apotheosis:shield/mob_effect/withering"));
+        assert!(!available(ItemClass::Bow, Tier::Epic).contains(&"apotheosis:melee/cleaving"));
+        assert!(available(ItemClass::Sword, Tier::Epic).contains(&"apotheosis:durable"));
     }
 
     #[test]
-    fn values_follow_the_tier() {
-        let venomous = EFFECT_AFFIXES.iter().find(|a| a.id == "venomous").unwrap();
-        assert_eq!(value_at(venomous, Tier::Epic), 240.0);
-        assert!(value_at(venomous, Tier::Mythic) > value_at(venomous, Tier::Epic));
-        let executing = EFFECT_AFFIXES.iter().find(|a| a.id == "executing").unwrap();
-        assert!((value_at(executing, Tier::Epic) - 0.20).abs() < 1.0e-9);
-        assert!(value_at(executing, Tier::Mythic) <= 1.0);
+    fn rolls_follow_the_java_ranges() {
+        let venomous = affix("shield/mob_effect/venomous");
+        for seed in 0..40 {
+            let mut rng = Rng::new(seed);
+            let roll = draw(venomous, Tier::Epic, &mut rng);
+            // Epic: 120..200 by 20, amplifier 0..1, cooldown 120.
+            assert!((120.0..=200.0).contains(&roll.duration), "{roll:?}");
+            assert_eq!(roll.duration % 20.0, 0.0);
+            assert!(roll.amplifier <= 1, "{roll:?}");
+            assert_eq!(roll.cooldown, 120);
+        }
+        let blinding = affix("armor/mob_effect/blinding");
+        let mut rng = Rng::new(1);
+        assert_eq!(draw(blinding, Tier::Mythic, &mut rng).cooldown, 200);
+        let cleaving = affix("melee/cleaving");
+        let roll = draw(cleaving, Tier::Epic, &mut rng);
+        assert!((0.3..=0.5).contains(&roll.chance));
+        assert!((2.0..=5.0).contains(&roll.targets));
+        let executing = affix("melee/executing");
+        let roll = draw(executing, Tier::Mythic, &mut rng);
+        assert!((0.15..=0.25).contains(&roll.value));
+        let reduction = affix("armor/dmg_reduction/feathery");
+        let roll = draw(reduction, Tier::Mythic, &mut rng);
+        assert!((0.15..=0.4).contains(&roll.value));
+    }
+
+    /// The effect affixes of one kind an item carries.
+    fn count_kind(stack: &ItemStack, kind: &str) -> usize {
+        effects_of(stack)
+            .iter()
+            .filter(|(entry, _)| entry.affix_type() == kind)
+            .count()
+    }
+
+    #[test]
+    fn effect_counts_follow_java_rarities() {
+        assert_eq!(effect_counts(Tier::Common), (0, 0));
+        assert_eq!(effect_counts(Tier::Uncommon), (0, 0));
+        assert_eq!(effect_counts(Tier::Rare), (1, 0));
+        assert_eq!(effect_counts(Tier::Epic), (1, 1));
+        assert_eq!(effect_counts(Tier::Mythic), (2, 1));
+        assert_eq!(effect_counts(Tier::Ancient), (2, 1));
+    }
+
+    #[test]
+    fn a_piece_rolls_the_effects_its_rarity_guarantees() {
+        for seed in 0..12 {
+            let mut rare = one("minecraft:diamond_sword");
+            apply_affixes(&mut rare, Tier::Rare, &mut Rng::new(seed));
+            assert_eq!(count_kind(&rare, "basic_effect"), 1, "rare/seed {seed}");
+            assert_eq!(count_kind(&rare, "ability"), 0, "rare/seed {seed}");
+
+            let mut epic = one("minecraft:diamond_sword");
+            apply_affixes(&mut epic, Tier::Epic, &mut Rng::new(seed));
+            assert_eq!(count_kind(&epic, "basic_effect"), 1, "epic/seed {seed}");
+            assert_eq!(count_kind(&epic, "ability"), 1, "epic/seed {seed}");
+
+            let mut mythic = one("minecraft:diamond_sword");
+            apply_affixes(&mut mythic, Tier::Mythic, &mut Rng::new(seed));
+            assert_eq!(count_kind(&mythic, "basic_effect"), 2, "mythic/seed {seed}");
+            assert_eq!(count_kind(&mythic, "ability"), 1, "mythic/seed {seed}");
+        }
     }
 
     #[test]
@@ -1053,27 +1506,62 @@ mod tests {
         let Some(Tag::List(lore)) = data.other("minecraft:lore") else {
             panic!("no lore");
         };
-        assert!(lore.len() >= modifiers.len() + 1);
-        assert!(lore.len() <= modifiers.len() + 2, "one effect affix at most");
+        // Five stat lines and ancient's three effect lines.
+        assert_eq!(lore.len(), modifiers.len() + 3);
     }
 
     #[test]
-    fn effect_rolls_round_trip_through_custom_data() {
+    fn a_reroll_clears_the_previous_effects() {
         let mut stack = one("minecraft:diamond_sword");
-        let mut rng = Rng::new(3);
-        // Roll until the piece takes an effect affix (55% at epic).
-        for _ in 0..40 {
-            stack = one("minecraft:diamond_sword");
+        let mut rng = Rng::new(11);
+        apply_affixes(&mut stack, Tier::Ancient, &mut rng);
+        assert_eq!(effects_of(&stack).len(), 3);
+        // A second ancient roll replaces the three, never stacks three more.
+        apply_affixes(&mut stack, Tier::Ancient, &mut rng);
+        assert_eq!(effects_of(&stack).len(), 3);
+        // And a rare reroll drops the extra effects instead of keeping them.
+        apply_affixes(&mut stack, Tier::Rare, &mut rng);
+        assert_eq!(effects_of(&stack).len(), 1);
+    }
+
+    #[test]
+    fn a_reroll_does_not_stack_the_enchantment_levels() {
+        // The item's own Fortune II is not this module's to remove.
+        let mut stack = one("minecraft:diamond_pickaxe");
+        stack.data_mut().enchantments = vec![(std::sync::Arc::from("minecraft:fortune"), 2)];
+        for seed in 0..40 {
+            let mut rng = Rng::new(seed);
             apply_affixes(&mut stack, Tier::Epic, &mut rng);
-            if !effects_of(&stack).is_empty() {
-                break;
-            }
+            let added: u32 = effects_of(&stack)
+                .iter()
+                .filter(|(entry, _)| entry.kind == Kind::Enchantment)
+                .map(|(_, roll)| roll.value.round().max(0.0) as u32)
+                .sum();
+            assert_eq!(
+                stack.enchantment_level("minecraft:fortune"),
+                2 + added,
+                "seed {seed}: the last pass's levels stayed"
+            );
         }
-        let effects = effects_of(&stack);
-        assert!(!effects.is_empty(), "no effect affix in forty pieces");
-        for (_, value) in effects {
-            assert!(value > 0.0);
-        }
+    }
+
+    #[test]
+    fn clearing_the_effects_takes_back_only_the_added_levels() {
+        let mut stack = one("minecraft:diamond_pickaxe");
+        stack.data_mut().enchantments = vec![(std::sync::Arc::from("minecraft:fortune"), 2)];
+        add_enchantment(&mut stack, "minecraft:fortune", 3.0);
+        assert_eq!(stack.enchantment_level("minecraft:fortune"), 5);
+        clear_effects(&mut stack);
+        assert_eq!(stack.enchantment_level("minecraft:fortune"), 2);
+    }
+
+    #[test]
+    fn the_enchantment_affix_writes_real_levels() {
+        let mut stack = one("minecraft:diamond_pickaxe");
+        add_enchantment(&mut stack, "minecraft:fortune", 3.0);
+        assert_eq!(stack.enchantment_level("minecraft:fortune"), 3);
+        add_enchantment(&mut stack, "minecraft:fortune", 1.0);
+        assert_eq!(stack.enchantment_level("minecraft:fortune"), 4);
     }
 
     #[test]
@@ -1110,5 +1598,24 @@ mod tests {
     fn base_names_read_as_words() {
         assert_eq!(base_name("minecraft:wither_skeleton").1, "Wither Skeleton");
         assert_eq!(base_name("minecraft:zombie").1, "Zombie");
+    }
+}
+
+#[cfg(test)]
+mod invader_rate_tests {
+    use super::{chance, invader_ready, INVADER_COOLDOWN};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn invaders_follow_java_rates_and_cooldown() {
+        assert_eq!(chance("minecraft:overworld"), 18);
+        assert_eq!(chance("minecraft:the_end"), 18);
+        assert_eq!(chance("minecraft:the_nether"), 25);
+        let t0 = Instant::now();
+        let dim = "test:invader_cooldown";
+        assert!(invader_ready(dim, t0));
+        assert!(!invader_ready(dim, t0 + Duration::from_secs(60)));
+        assert!(invader_ready(dim, t0 + INVADER_COOLDOWN));
+        assert!(invader_ready("test:other_dimension", t0));
     }
 }

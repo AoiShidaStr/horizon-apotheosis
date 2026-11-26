@@ -4,7 +4,7 @@
 # only: no injections, so no Horizon source line is patched.
 [mod]
 id = "apotheosis"
-version = "0.5.0"
+version = "0.6.0"
 
 # The Horizon revision this bundle was written and checked against.
 [compatibility]

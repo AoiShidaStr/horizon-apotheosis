@@ -26,10 +26,10 @@
 //! - `tick`: the queued reads, writes and messages run where commands may (API 1).
 
 use horizon_client::mod_api::{
-    Flow, Host, ItemStack, LootDropsEvent, PlaceBlockEvent, Tag, Text, TooltipEvent,
+    BlockStateId, Flow, Host, ItemStack, LootDropsEvent, PlaceBlockEvent, Tag, Text, TooltipEvent,
     UseItemOnEvent,
 };
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 /// The vanilla spawner block, and the block entity type it saves under.
@@ -37,6 +37,11 @@ pub const SPAWNER: &str = "minecraft:spawner";
 const BLOCK_ENTITY_ID: &str = "minecraft:mob_spawner";
 const CUSTOM_DATA: &str = "minecraft:custom_data";
 const BLOCK_ENTITY_DATA: &str = "minecraft:block_entity_data";
+/// The key under which a spawner item also carries its data in
+/// `minecraft:custom_data`: Horizon's network encoding of a stack sends
+/// `custom_data` but not `block_entity_data`, so only this copy reaches a
+/// client (tooltip, inventory) and survives a round trip through one.
+const CARRIED: &str = "apoth_spawner";
 /// The tag the probe item entity carries, so it is found again.
 const PROBE: &str = "apoth_spawner_probe";
 /// The key the probe item carries its own name under: a read can leave a probe
@@ -349,104 +354,240 @@ pub enum Selector {
     Wool,
 }
 
-/// What a modifier does to a spawner.
+/// One change a modifier makes to a spawner.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Effect {
     /// Adds `step` to a stat, clamped to the stat's bounds.
     Number { stat: Stat, step: f32 },
+    /// Writes a value into a stat, clamped to the stat's bounds. The four tier
+    /// runes work this way: they replace the core stats outright.
+    Set { stat: Stat, value: f32 },
     /// Turns a flag on.
     Flag(Flag),
+    /// Turns a flag off. Only the inverter does this.
+    Unset(Flag),
 }
 
-/// One of Apothic Spawners' modifiers: the item, the stat and the step.
+/// One of Apothic Spawners' modifiers: the item, the stat changes it makes, and
+/// the changes its inverter makes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Modifier {
     pub selector: Selector,
-    pub effect: Effect,
+    pub effects: &'static [Effect],
+    pub inverse: &'static [Effect],
 }
 
 impl Modifier {
-    /// The stat it moves, if it moves one.
+    /// The stat it moves first, if it moves one.
     pub fn stat(&self) -> Option<Stat> {
-        match self.effect {
-            Effect::Number { stat, .. } => Some(stat),
-            Effect::Flag(_) => None,
-        }
+        self.effects.iter().find_map(|effect| match *effect {
+            Effect::Number { stat, .. } | Effect::Set { stat, .. } => Some(stat),
+            Effect::Flag(_) | Effect::Unset(_) => None,
+        })
     }
 
-    /// The step it takes, in the increasing direction.
+    /// The step or value it writes first, in the increasing direction.
     pub fn step(&self) -> f32 {
-        match self.effect {
-            Effect::Number { step, .. } => step,
-            Effect::Flag(_) => 0.0,
+        match self.effects.first() {
+            Some(Effect::Number { step, .. }) => *step,
+            Some(Effect::Set { value, .. }) => *value,
+            _ => 0.0,
         }
     }
 }
 
-const fn num(selector: Selector, stat: Stat, step: f32) -> Modifier {
-    Modifier {
-        selector,
-        effect: Effect::Number { stat, step },
-    }
-}
-
-const fn flag(selector: Selector, flag: Flag) -> Modifier {
-    Modifier {
-        selector,
-        effect: Effect::Flag(flag),
-    }
+/// Build a modifier in a `const` context: the effect lists are promoted to
+/// `'static`, which a `const fn` returning `&[..]` cannot do.
+macro_rules! modifier {
+    ($selector:expr, [$($effect:expr),* $(,)?]) => {
+        Modifier {
+            selector: $selector,
+            effects: &[$($effect),*],
+            inverse: &[],
+        }
+    };
+    ($selector:expr, [$($effect:expr),* $(,)?], [$($inverse:expr),* $(,)?]) => {
+        Modifier {
+            selector: $selector,
+            effects: &[$($effect),*],
+            inverse: &[$($inverse),*],
+        }
+    };
 }
 
 /// The modifiers of Apothic Spawners, item by item and value by value, as its
 /// `spawner_modifiers` recipes define them.
-pub const MODIFIERS: [Modifier; 16] = [
-    // Sugar and a clock: the spawner's own delays, shorter.
-    num(Selector::Item("minecraft:sugar"), Stat::MinDelay, -10.0),
-    num(Selector::Item("minecraft:clock"), Stat::MaxDelay, -20.0),
-    // A wave holds more mobs, and the spawner allows more of them nearby.
-    num(
+///
+/// The sixteen catalyst recipes are the ones Apothic Spawners ships (sugar, a
+/// clock, wool and so on). Apotheosis overrides eleven of those stats with the
+/// stat runes below, at its own values (`initial_health` is -0.16 a rune, not
+/// -0.05 a catalyst), and adds the four tier runes. Both families apply; only
+/// the runes have an inverse recipe, so a catalyst held with quartz does
+/// nothing, exactly as in Java where the catalyst inverse files are disabled.
+pub const MODIFIERS: [Modifier; 31] = [
+    // The sixteen catalyst recipes Apothic Spawners ships.
+    modifier!(
+        Selector::Item("minecraft:sugar"),
+        [Effect::Number { stat: Stat::MinDelay, step: -10.0 }]
+    ),
+    modifier!(
+        Selector::Item("minecraft:clock"),
+        [Effect::Number { stat: Stat::MaxDelay, step: -20.0 }]
+    ),
+    modifier!(
         Selector::Item("minecraft:fermented_spider_eye"),
-        Stat::SpawnCount,
-        2.0,
+        [Effect::Number { stat: Stat::SpawnCount, step: 2.0 }]
     ),
-    num(
+    modifier!(
         Selector::Item("minecraft:ghast_tear"),
-        Stat::MaxNearby,
-        2.0,
+        [Effect::Number { stat: Stat::MaxNearby, step: 2.0 }]
     ),
-    // A player has to come closer, and mobs appear further out.
-    num(
+    modifier!(
         Selector::Item("minecraft:prismarine_crystals"),
-        Stat::PlayerRange,
-        4.0,
+        [Effect::Number { stat: Stat::PlayerRange, step: 4.0 }]
     ),
-    num(Selector::Item("minecraft:piston"), Stat::SpawnRange, 2.0),
-    // Frailer mobs, and the spawner's own echo (up to three).
-    num(
+    modifier!(
+        Selector::Item("minecraft:piston"),
+        [Effect::Number { stat: Stat::SpawnRange, step: 2.0 }]
+    ),
+    modifier!(
         Selector::Item("minecraft:pointed_dripstone"),
-        Stat::InitialHealth,
-        -0.05,
+        [Effect::Number { stat: Stat::InitialHealth, step: -0.05 }]
     ),
-    num(
+    modifier!(
         Selector::Item("minecraft:echo_shard"),
-        Stat::Echoing,
-        1.0,
+        [Effect::Number { stat: Stat::Echoing, step: 1.0 }]
     ),
-    // The flags.
-    flag(
+    modifier!(
         Selector::Item("minecraft:nether_star"),
-        Flag::IgnorePlayers,
+        [Effect::Flag(Flag::IgnorePlayers)]
     ),
-    flag(
+    modifier!(
         Selector::Item("minecraft:soul_lantern"),
-        Flag::IgnoreLight,
+        [Effect::Flag(Flag::IgnoreLight)]
     ),
-    flag(Selector::Item("minecraft:conduit"), Flag::IgnoreConditions),
-    flag(Selector::Item("minecraft:chorus_fruit"), Flag::NoAi),
-    flag(Selector::Wool, Flag::Silent),
-    flag(Selector::Item("minecraft:comparator"), Flag::RedstoneControl),
-    flag(Selector::Item("minecraft:turtle_egg"), Flag::Youthful),
-    flag(Selector::Item("minecraft:campfire"), Flag::Burning),
+    modifier!(
+        Selector::Item("minecraft:conduit"),
+        [Effect::Flag(Flag::IgnoreConditions)]
+    ),
+    modifier!(
+        Selector::Item("minecraft:chorus_fruit"),
+        [Effect::Flag(Flag::NoAi)]
+    ),
+    modifier!(
+        Selector::Wool,
+        [Effect::Flag(Flag::Silent)]
+    ),
+    modifier!(
+        Selector::Item("minecraft:comparator"),
+        [Effect::Flag(Flag::RedstoneControl)]
+    ),
+    modifier!(
+        Selector::Item("minecraft:turtle_egg"),
+        [Effect::Flag(Flag::Youthful)]
+    ),
+    modifier!(
+        Selector::Item("minecraft:campfire"),
+        [Effect::Flag(Flag::Burning)]
+    ),
+    // The eleven stat runes Apotheosis overrides those stats with, at its own
+    // values. Only these have an inverse recipe.
+    modifier!(
+        Selector::Item("apotheosis:burning_spawner_rune"),
+        [Effect::Flag(Flag::Burning)],
+        [Effect::Unset(Flag::Burning)]
+    ),
+    modifier!(
+        Selector::Item("apotheosis:echoing_spawner_rune"),
+        [Effect::Number { stat: Stat::Echoing, step: 1.0 }],
+        [Effect::Number { stat: Stat::Echoing, step: -1.0 }]
+    ),
+    modifier!(
+        Selector::Item("apotheosis:ignore_conditions_spawner_rune"),
+        [Effect::Flag(Flag::IgnoreConditions)],
+        [Effect::Unset(Flag::IgnoreConditions)]
+    ),
+    modifier!(
+        Selector::Item("apotheosis:ignore_light_spawner_rune"),
+        [Effect::Flag(Flag::IgnoreLight)],
+        [Effect::Unset(Flag::IgnoreLight)]
+    ),
+    modifier!(
+        Selector::Item("apotheosis:ignore_players_spawner_rune"),
+        [Effect::Flag(Flag::IgnorePlayers)],
+        [Effect::Unset(Flag::IgnorePlayers)]
+    ),
+    modifier!(
+        Selector::Item("apotheosis:initial_health_spawner_rune"),
+        [Effect::Number { stat: Stat::InitialHealth, step: -0.16 }],
+        [Effect::Number { stat: Stat::InitialHealth, step: 0.16 }]
+    ),
+    modifier!(
+        Selector::Item("apotheosis:no_ai_spawner_rune"),
+        [Effect::Flag(Flag::NoAi)],
+        [Effect::Unset(Flag::NoAi)]
+    ),
+    modifier!(
+        Selector::Item("apotheosis:redstone_control_spawner_rune"),
+        [Effect::Flag(Flag::RedstoneControl)],
+        [Effect::Unset(Flag::RedstoneControl)]
+    ),
+    modifier!(
+        Selector::Item("apotheosis:silent_spawner_rune"),
+        [Effect::Flag(Flag::Silent)],
+        [Effect::Unset(Flag::Silent)]
+    ),
+    modifier!(
+        Selector::Item("apotheosis:spawn_range_spawner_rune"),
+        [Effect::Number { stat: Stat::SpawnRange, step: 2.0 }],
+        [Effect::Number { stat: Stat::SpawnRange, step: -2.0 }]
+    ),
+    modifier!(
+        Selector::Item("apotheosis:youthful_spawner_rune"),
+        [Effect::Flag(Flag::Youthful)],
+        [Effect::Unset(Flag::Youthful)]
+    ),
+    // The four tier runes: they write the five core stats, and cannot be inverted.
+    modifier!(
+        Selector::Item("apotheosis:frontier_spawner_upgrade_rune"),
+        [
+            Effect::Set { stat: Stat::MinDelay, value: 150.0 },
+            Effect::Set { stat: Stat::MaxDelay, value: 600.0 },
+            Effect::Set { stat: Stat::SpawnCount, value: 7.0 },
+            Effect::Set { stat: Stat::MaxNearby, value: 12.0 },
+            Effect::Set { stat: Stat::PlayerRange, value: 24.0 }
+        ]
+    ),
+    modifier!(
+        Selector::Item("apotheosis:ascent_spawner_upgrade_rune"),
+        [
+            Effect::Set { stat: Stat::MinDelay, value: 100.0 },
+            Effect::Set { stat: Stat::MaxDelay, value: 400.0 },
+            Effect::Set { stat: Stat::SpawnCount, value: 10.0 },
+            Effect::Set { stat: Stat::MaxNearby, value: 18.0 },
+            Effect::Set { stat: Stat::PlayerRange, value: 32.0 }
+        ]
+    ),
+    modifier!(
+        Selector::Item("apotheosis:summit_spawner_upgrade_rune"),
+        [
+            Effect::Set { stat: Stat::MinDelay, value: 50.0 },
+            Effect::Set { stat: Stat::MaxDelay, value: 200.0 },
+            Effect::Set { stat: Stat::SpawnCount, value: 13.0 },
+            Effect::Set { stat: Stat::MaxNearby, value: 24.0 },
+            Effect::Set { stat: Stat::PlayerRange, value: 40.0 }
+        ]
+    ),
+    modifier!(
+        Selector::Item("apotheosis:pinnacle_spawner_upgrade_rune"),
+        [
+            Effect::Set { stat: Stat::MinDelay, value: 20.0 },
+            Effect::Set { stat: Stat::MaxDelay, value: 20.0 },
+            Effect::Set { stat: Stat::SpawnCount, value: 16.0 },
+            Effect::Set { stat: Stat::MaxNearby, value: 32.0 },
+            Effect::Set { stat: Stat::PlayerRange, value: 48.0 }
+        ]
+    ),
 ];
 
 /// The off-hand inverter of Apothic Spawners.
@@ -461,26 +602,48 @@ pub fn modifier_for(item: &str) -> Option<&'static Modifier> {
 }
 
 /// How a click on a spawner with `modifier` changes `stats`. `inverse` is the
-/// inverter in the off hand: it takes the step back, and does nothing to a
-/// flag (a flag is only ever turned on, as in Apothic Spawners).
+/// inverter in the off hand: it runs the modifier's inverse recipe, which the
+/// catalyst modifiers do not have and the runes do.
 ///
 /// Answers whether anything changed.
 pub fn apply(stats: &mut Stats, modifier: &Modifier, inverse: bool) -> bool {
-    match modifier.effect {
-        Effect::Number { stat, step } => {
-            let before = stats.get(stat);
-            let delta = if inverse { -step } else { step };
-            stats.set(stat, before + delta);
-            stats.get(stat) != before
-        }
-        Effect::Flag(flag) => {
-            if inverse || stats.flag(flag) {
-                return false;
+    let effects = if inverse {
+        modifier.inverse
+    } else {
+        modifier.effects
+    };
+    let mut changed = false;
+    for effect in effects {
+        changed |= match *effect {
+            Effect::Number { stat, step } => {
+                let before = stats.get(stat);
+                stats.set(stat, before + step);
+                stats.get(stat) != before
             }
-            stats.set_flag(flag, true);
-            true
-        }
+            Effect::Set { stat, value } => {
+                let before = stats.get(stat);
+                stats.set(stat, value);
+                stats.get(stat) != before
+            }
+            Effect::Flag(flag) => {
+                if stats.flag(flag) {
+                    false
+                } else {
+                    stats.set_flag(flag, true);
+                    true
+                }
+            }
+            Effect::Unset(flag) => {
+                if stats.flag(flag) {
+                    stats.set_flag(flag, false);
+                    true
+                } else {
+                    false
+                }
+            }
+        };
     }
+    changed
 }
 
 // ---------------------------------------------------------------------------
@@ -617,9 +780,15 @@ pub fn mergeable(tag: &Tag) -> String {
 // Items
 // ---------------------------------------------------------------------------
 
-/// The silk-touch level of a tool: `minecraft:enchantments`' `levels` map, as
-/// 1.21 writes it, or a plain `minecraft:silk_touch` key on an older one.
+/// The silk-touch level of a tool. Horizon reads `minecraft:enchantments` into
+/// the stack's own enchantment list, so that is where it is looked up; a stack
+/// that kept the component as a raw tag (`levels` map, or a plain
+/// `minecraft:silk_touch` key) is read as well.
 pub fn silk_touch(stack: &ItemStack) -> i32 {
+    let typed = stack.enchantment_level("minecraft:silk_touch") as i32;
+    if typed > 0 {
+        return typed;
+    }
     let Some(data) = stack.data() else {
         return 0;
     };
@@ -652,10 +821,23 @@ pub fn spawner_item(tag: &Tag) -> ItemStack {
             );
         }
     }
+    let mut custom = Tag::Compound(Default::default());
+    if let Tag::Compound(entries) = &mut custom {
+        entries.insert(CARRIED.into(), data.clone());
+    }
+    stack.data_mut().set_other(CUSTOM_DATA, Some(custom));
     stack
         .data_mut()
         .set_other(BLOCK_ENTITY_DATA, Some(data));
     stack
+}
+
+/// The data a spawner item carries: its `block_entity_data`, or else the copy
+/// in its `custom_data` (the one a stack keeps after a trip over the network).
+pub fn carried_data(stack: &ItemStack) -> Option<&Tag> {
+    let data = stack.data()?;
+    data.other(BLOCK_ENTITY_DATA)
+        .or_else(|| data.other(CUSTOM_DATA).and_then(|custom| custom.get(CARRIED)))
 }
 
 // ---------------------------------------------------------------------------
@@ -732,7 +914,7 @@ pub fn tooltip(stats: &Stats) -> Vec<(Text, u32)> {
     let mut lines = Vec::with_capacity(7);
     let mut line = |key: &str, fallback: &str, args: &[Text], colour: u32| {
         let text = Text::translate_with_fallback(key, fallback, args);
-        lines.push((text.with_color(colour), colour));
+        lines.push((text.with_color(colour), crate::tip_colour(colour)));
     };
     line(
         "apotheosis.spawner.tooltip.mob",
@@ -809,7 +991,7 @@ pub fn on_tooltip(event: &mut TooltipEvent<'_>) {
     if event.stack.item.as_ref() != SPAWNER {
         return;
     }
-    let Some(data) = event.stack.data().and_then(|d| d.other(BLOCK_ENTITY_DATA)) else {
+    let Some(data) = carried_data(event.stack) else {
         return;
     };
     event.lines.extend(tooltip(&Stats::from_tag(data)));
@@ -850,6 +1032,10 @@ struct Cached {
 
 static QUEUE: Mutex<Vec<Queued>> = Mutex::new(Vec::new());
 static CACHED: Mutex<Vec<Cached>> = Mutex::new(Vec::new());
+/// The block state id of a spawner, learnt from the first click on one: a
+/// break's drops name the state, not the block, and a player's break always
+/// follows a left click. A spawner has no properties, so it has one state.
+static SPAWNER_STATE: AtomicU32 = AtomicU32::new(u32::MAX);
 static TICKS: AtomicU64 = AtomicU64::new(0);
 /// How many probes have been made, so each one can be named.
 static PROBES: AtomicU64 = AtomicU64::new(0);
@@ -911,10 +1097,7 @@ pub fn placed_data(dimension: &str, pos: [i32; 3], stack: &ItemStack) -> Option<
     if stack.item.as_ref() != SPAWNER {
         return None;
     }
-    stack
-        .data()
-        .and_then(|d| d.other(BLOCK_ENTITY_DATA))
-        .cloned()
+    carried_data(stack).cloned()
 }
 
 /// What a probe found, or nothing when the spawner was gone or its chunk was
@@ -977,10 +1160,11 @@ pub fn on_use_item_on(host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Fl
 }
 
 /// A left click on a spawner: read its data now, so the break can drop it.
-pub fn on_left_click(host: &mut dyn Host, pos: [i32; 3]) -> Flow {
+pub fn on_left_click(host: &mut dyn Host, pos: [i32; 3], state: BlockStateId) -> Flow {
     if host.block(pos) != SPAWNER {
         return Flow::Continue;
     }
+    SPAWNER_STATE.store(state.0, Ordering::Relaxed);
     push(host.dimension(), pos, Job::Probe);
     Flow::Continue
 }
@@ -995,18 +1179,40 @@ pub fn on_place(host: &mut dyn Host, event: &PlaceBlockEvent<'_>) {
     push(host.dimension(), event.pos, Job::Restore(data));
 }
 
+/// The drop of a spawner broken at `dimension`/`pos`: with a silk-touch tool the
+/// spawner item, carrying the data that was read for it when the read finished
+/// and a plain spawner when it did not (a dig that ends before the next tick
+/// leaves no time for the read; Apothic Spawners drops the item all the same).
+/// Any other tool drops nothing. The read ends with the break either way, so
+/// the data never goes to another block.
+pub fn drop_for_break(dimension: &str, pos: [i32; 3], silk: i32) -> Option<ItemStack> {
+    let read = taken_by_break(dimension, pos, silk);
+    if silk < 1 {
+        return None;
+    }
+    Some(match read {
+        Some(tag) => spawner_item(&tag),
+        None => ItemStack::new(SPAWNER, 1),
+    })
+}
+
 /// A broken spawner that a silk-touch tool broke: it drops itself with its mob
 /// and its stats. A break with any other tool takes nothing and still ends the
 /// read, so the block that comes next at that position cannot inherit it.
+///
+/// Only the block state a left click saw on a spawner counts as one: the block
+/// is gone when the drops are told, and the state is all the event names.
 pub fn on_loot_drops(event: &mut LootDropsEvent<'_>) {
-    let Some((pos, _)) = event.context.block else {
+    let Some((pos, state)) = event.context.block else {
         return;
     };
+    if SPAWNER_STATE.load(Ordering::Relaxed) != state.0 {
+        return;
+    }
     let silk = event.context.tool.map(silk_touch).unwrap_or(0);
-    let Some(tag) = taken_by_break(event.context.dimension, pos, silk) else {
-        return;
-    };
-    event.drops.push(spawner_item(&tag));
+    if let Some(stack) = drop_for_break(event.context.dimension, pos, silk) {
+        event.drops.push(stack);
+    }
 }
 
 /// Once a tick: the queued reads, writes and messages, where commands may run.
@@ -1286,6 +1492,33 @@ mod tests {
             -0.05
         );
         assert_eq!(modifier_for("minecraft:echo_shard").unwrap().step(), 1.0);
+        // The stat runes, at Apotheosis' own values.
+        assert_eq!(
+            modifier_for("apotheosis:initial_health_spawner_rune")
+                .unwrap()
+                .step(),
+            -0.16
+        );
+        assert_eq!(
+            modifier_for("apotheosis:spawn_range_spawner_rune")
+                .unwrap()
+                .step(),
+            2.0
+        );
+        assert_eq!(
+            modifier_for("apotheosis:echoing_spawner_rune")
+                .unwrap()
+                .step(),
+            1.0
+        );
+        assert_eq!(
+            modifier_for("apotheosis:frontier_spawner_upgrade_rune")
+                .unwrap()
+                .effects
+                .len(),
+            5
+        );
+        assert_eq!(MODIFIERS.len(), 31);
         assert!(modifier_for("minecraft:diamond").is_none());
         assert!(modifier_for("minecraft:red_wool").is_some());
         assert!(modifier_for("minecraft:white_wool").is_some());
@@ -1317,26 +1550,70 @@ mod tests {
     }
 
     #[test]
-    fn a_step_stops_at_the_bound_and_the_inverter_takes_it_back() {
+    fn a_step_stops_at_the_bound_and_only_a_rune_has_an_inverse() {
         let sugar = modifier_for("minecraft:sugar").unwrap();
         let mut stats = Stats::default();
         stats.set(Stat::MinDelay, 20.0);
         assert!(!apply(&mut stats, sugar, false), "20 is the floor");
         assert_eq!(stats.get(Stat::MinDelay), 20.0);
-        assert!(apply(&mut stats, sugar, true));
-        assert_eq!(stats.get(Stat::MinDelay), 30.0);
+        // The catalyst inverse recipes are disabled in Java: quartz does nothing.
+        assert!(!apply(&mut stats, sugar, true));
+        assert_eq!(stats.get(Stat::MinDelay), 20.0);
 
         let clock = modifier_for("minecraft:clock").unwrap();
         stats.set(Stat::MaxDelay, 1600.0);
-        assert!(!apply(&mut stats, clock, true), "1600 is the ceiling");
         assert!(apply(&mut stats, clock, false));
         assert_eq!(stats.get(Stat::MaxDelay), 1580.0);
+        stats.set(Stat::MaxDelay, 20.0);
+        assert!(!apply(&mut stats, clock, false), "20 is the floor");
+        assert_eq!(stats.get(Stat::MaxDelay), 20.0);
 
-        let eye = modifier_for("minecraft:fermented_spider_eye").unwrap();
-        stats.set(Stat::SpawnCount, 16.0);
-        assert!(!apply(&mut stats, eye, false));
-        assert!(apply(&mut stats, eye, true));
-        assert_eq!(stats.get(Stat::SpawnCount), 14.0);
+        let spawn_range = modifier_for("apotheosis:spawn_range_spawner_rune").unwrap();
+        stats.set(Stat::SpawnRange, 32.0);
+        assert!(!apply(&mut stats, spawn_range, false));
+        assert!(apply(&mut stats, spawn_range, true));
+        assert_eq!(stats.get(Stat::SpawnRange), 30.0);
+
+        let echoing = modifier_for("apotheosis:echoing_spawner_rune").unwrap();
+        let mut stats = Stats::default();
+        assert!(apply(&mut stats, echoing, false));
+        assert_eq!(stats.get(Stat::Echoing), 1.0);
+        assert!(apply(&mut stats, echoing, true));
+        assert_eq!(stats.get(Stat::Echoing), 0.0);
+    }
+
+    #[test]
+    fn a_tier_rune_writes_the_five_core_stats_and_cannot_be_inverted() {
+        let cases = [
+            (
+                "apotheosis:frontier_spawner_upgrade_rune",
+                [150.0, 600.0, 7.0, 12.0, 24.0],
+            ),
+            (
+                "apotheosis:ascent_spawner_upgrade_rune",
+                [100.0, 400.0, 10.0, 18.0, 32.0],
+            ),
+            (
+                "apotheosis:summit_spawner_upgrade_rune",
+                [50.0, 200.0, 13.0, 24.0, 40.0],
+            ),
+            (
+                "apotheosis:pinnacle_spawner_upgrade_rune",
+                [20.0, 20.0, 16.0, 32.0, 48.0],
+            ),
+        ];
+        for (item, values) in cases {
+            let modifier = modifier_for(item).unwrap();
+            let mut stats = Stats::default();
+            assert!(apply(&mut stats, modifier, false), "{item} applies");
+            assert_eq!(stats.get(Stat::MinDelay), values[0]);
+            assert_eq!(stats.get(Stat::MaxDelay), values[1]);
+            assert_eq!(stats.get(Stat::SpawnCount), values[2]);
+            assert_eq!(stats.get(Stat::MaxNearby), values[3]);
+            assert_eq!(stats.get(Stat::PlayerRange), values[4]);
+            assert!(modifier.inverse.is_empty(), "{item} has no inverse recipe");
+            assert!(!apply(&mut stats, modifier, true));
+        }
     }
 
     #[test]
@@ -1345,11 +1622,19 @@ mod tests {
         let mut stats = Stats::default();
         assert!(apply(&mut stats, dripstone, false));
         assert_eq!(stats.get(Stat::InitialHealth), 0.95);
-        assert!(apply(&mut stats, dripstone, true));
-        assert_eq!(stats.get(Stat::InitialHealth), 1.0);
+        assert!(!apply(&mut stats, dripstone, true));
+        assert_eq!(stats.get(Stat::InitialHealth), 0.95);
         stats.set(Stat::InitialHealth, 0.20);
         assert!(!apply(&mut stats, dripstone, false));
         assert_eq!(stats.get(Stat::InitialHealth), 0.20);
+
+        // The rune takes more, and its inverse gives it back.
+        let rune = modifier_for("apotheosis:initial_health_spawner_rune").unwrap();
+        stats.set(Stat::InitialHealth, 0.52);
+        assert!(apply(&mut stats, rune, false));
+        assert!((stats.get(Stat::InitialHealth) - 0.36).abs() < 1e-6);
+        assert!(apply(&mut stats, rune, true));
+        assert!((stats.get(Stat::InitialHealth) - 0.52).abs() < 1e-6);
     }
 
     #[test]
@@ -1423,6 +1708,33 @@ mod tests {
     }
 
     #[test]
+    fn a_spawner_item_keeps_its_data_where_the_network_sends_it() {
+        // Horizon sends `custom_data` to a client and not `block_entity_data`.
+        let data = tag([("MinSpawnDelay", Tag::Int(40))]);
+        let stack = spawner_item(&data);
+        let custom = stack
+            .data()
+            .and_then(|d| d.other(CUSTOM_DATA))
+            .expect("custom data");
+        assert_eq!(
+            custom.get(CARRIED).and_then(|t| t.get("MinSpawnDelay")),
+            Some(&Tag::Int(40))
+        );
+    }
+
+    #[test]
+    fn a_spawner_item_that_lost_its_block_entity_data_still_restores_and_shows() {
+        let mut stack = spawner_item(&mob_spawner("minecraft:skeleton"));
+        stack.data_mut().set_other(BLOCK_ENTITY_DATA, None);
+        let data = placed_data("minecraft:overworld", [91, 92, 93], &stack).expect("restored");
+        assert_eq!(spawn_entity(&data).as_deref(), Some("minecraft:skeleton"));
+        assert_eq!(
+            carried_data(&stack).and_then(spawn_entity).as_deref(),
+            Some("minecraft:skeleton")
+        );
+    }
+
+    #[test]
     fn silk_touch_is_read_from_the_enchantments_component() {
         let mut stack = ItemStack::new("minecraft:diamond_pickaxe", 1);
         assert_eq!(silk_touch(&stack), 0);
@@ -1440,6 +1752,50 @@ mod tests {
             Some(tag([("levels", tag([("minecraft:fortune", Tag::Int(3))]))])),
         );
         assert_eq!(silk_touch(&plain), 0);
+    }
+
+    #[test]
+    fn silk_touch_is_read_from_the_enchantment_list_horizon_keeps() {
+        let mut stack = ItemStack::new("minecraft:iron_pickaxe", 1);
+        stack.data_mut().enchantments = vec![(std::sync::Arc::from("minecraft:silk_touch"), 1)];
+        assert_eq!(silk_touch(&stack), 1);
+        let mut other = ItemStack::new("minecraft:iron_pickaxe", 1);
+        other.data_mut().enchantments = vec![(std::sync::Arc::from("minecraft:fortune"), 3)];
+        assert_eq!(silk_touch(&other), 0);
+    }
+
+    #[test]
+    fn a_silk_break_drops_the_spawner_with_its_read_data() {
+        let (dimension, pos) = ("minecraft:overworld", [61, 62, 63]);
+        remember(dimension, pos, mob_spawner("minecraft:pig"), 3);
+        let stack = drop_for_break(dimension, pos, 1).expect("a spawner");
+        assert_eq!(&*stack.item, SPAWNER);
+        let data = stack
+            .data()
+            .and_then(|d| d.other(BLOCK_ENTITY_DATA))
+            .expect("its data");
+        assert_eq!(spawn_entity(data).as_deref(), Some("minecraft:pig"));
+        assert!(cached_drop(dimension, pos).is_none());
+    }
+
+    #[test]
+    fn a_silk_break_without_a_finished_read_still_drops_a_plain_spawner() {
+        let (dimension, pos) = ("minecraft:overworld", [71, 72, 73]);
+        let stack = drop_for_break(dimension, pos, 1).expect("a plain spawner");
+        assert_eq!(&*stack.item, SPAWNER);
+        assert_eq!(stack.count, 1);
+        assert!(stack.data().and_then(|d| d.other(BLOCK_ENTITY_DATA)).is_none());
+    }
+
+    #[test]
+    fn a_break_without_silk_touch_drops_nothing_and_leaves_no_data_behind() {
+        let (dimension, pos) = ("minecraft:overworld", [81, 82, 83]);
+        remember(dimension, pos, mob_spawner("minecraft:zombie"), 3);
+        assert!(drop_for_break(dimension, pos, 0).is_none());
+        // The next spawner there, broken with silk before its read ends, gets a
+        // plain item and not the zombie's data.
+        let stack = drop_for_break(dimension, pos, 1).expect("a plain spawner");
+        assert!(stack.data().and_then(|d| d.other(BLOCK_ENTITY_DATA)).is_none());
     }
 
     #[test]
@@ -1584,8 +1940,8 @@ mod tests {
         stats.set(Stat::MinDelay, 60.0);
         stats.set_flag(Flag::Burning, true);
         let lines = tooltip(&stats);
-        assert_eq!(lines[0].1, MOB_COLOUR);
-        assert_eq!(lines[1].1, STAT_COLOUR);
+        assert_eq!(lines[0].1, crate::tip_colour(MOB_COLOUR));
+        assert_eq!(lines[1].1, crate::tip_colour(STAT_COLOUR));
         let rendered = lines
             .iter()
             .map(|(text, _)| format!("{:?}", text.spans))
@@ -1598,7 +1954,7 @@ mod tests {
         // Neither line appears while health and echo are the vanilla ones.
         assert!(!rendered.contains("Echo"), "{rendered}");
         assert!(!rendered.contains("health"), "{rendered}");
-        assert_eq!(lines.last().expect("a flag line").1, FLAG_COLOUR);
+        assert_eq!(lines.last().expect("a flag line").1, crate::tip_colour(FLAG_COLOUR));
     }
 
     #[test]

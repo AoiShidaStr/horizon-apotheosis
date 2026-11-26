@@ -154,12 +154,12 @@ def web_pixels():
     return pixels
 
 
-def library_pixels():
+def library_pixels(glow_rgb=(0xC9, 0x8B, 0xF0)):
     """Draw the enchanting library: a dark shelf with a glowing open tome."""
     wood = (0x4A, 0x2F, 0x1F, 255)
     grain = (0x5E, 0x3D, 0x28, 255)
     book = (0x6E, 0x3F, 0x9E, 255)
-    glow = (0xC9, 0x8B, 0xF0, 255)
+    glow = glow_rgb + (255,)
     page = (0xEC, 0xE6, 0xF5, 255)
     gold = (0xD8, 0xB0, 0x4A, 255)
     clear = (0, 0, 0, 0)
@@ -253,6 +253,16 @@ MESSAGES = [
      "Pas de place pour le livre ; rien n'a été pris."),
     ("apotheosis.library.usage", "Hold an enchanted book to store it, or a book to take an enchantment out.",
      "Tenez un livre enchanté pour le déposer, ou un livre vierge pour retirer un enchantement."),
+    ("apotheosis.infusion.no_match", "Nothing in your hand can be infused here.",
+     "Rien dans votre main ne peut être infusé ici."),
+    ("apotheosis.infusion.single", "The table infuses one item at a time.",
+     "La table n'infuse qu'un objet à la fois."),
+    ("apotheosis.infusion.requirements", "Needs Eterna %s, Quanta %s and Arcana %s; the shelves give %s, %s and %s.",
+     "Requiert %s d'Eterna, %s de Quanta et %s d'Arcana ; les étagères fournissent %s, %s et %s."),
+    ("apotheosis.infusion.levels", "You need %s experience levels.",
+     "Il vous faut %s niveaux d'expérience."),
+    ("apotheosis.infusion.done", "Infused %s.",
+     "%s infusé."),
 ]
 
 
@@ -276,6 +286,41 @@ def write_png(path, pixels):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
         f.write(png)
+
+
+def table_pixels():
+    """Draw the Apothic enchanting table: obsidian frame, gold inlay, diamond."""
+    obsidian = (0x1B, 0x14, 0x2B, 255)
+    light = (0x2E, 0x24, 0x45, 255)
+    gold = (0xD8, 0xB0, 0x4A, 255)
+    ruby = (0xB0, 0x28, 0x3C, 255)
+    diamond = (0x6E, 0xE0, 0xE8, 255)
+    pixels = [[obsidian] * 16 for _ in range(16)]
+    for y in range(16):
+        for x in range(16):
+            if (x * 3 + y * 5) % 11 == 0:
+                pixels[y][x] = light
+    for x in range(16):
+        pixels[0][x] = gold
+        pixels[15][x] = gold
+    for y in range(16):
+        pixels[y][0] = gold
+        pixels[y][15] = gold
+    for y in range(4, 12):
+        pixels[y][7] = gold
+        pixels[y][8] = gold
+    for x in range(4, 12):
+        pixels[7][x] = gold
+        pixels[8][x] = gold
+    for x, y in ((6, 5), (7, 5), (9, 5), (10, 5),
+                 (5, 6), (6, 6), (7, 6), (8, 6), (9, 6), (10, 6),
+                 (6, 7), (9, 7), (6, 8), (9, 8),
+                 (5, 9), (6, 9), (7, 9), (8, 9), (9, 9), (10, 9),
+                 (6, 10), (7, 10), (9, 10), (10, 10)):
+        pixels[y][x] = ruby
+    for x, y in ((7, 7), (8, 7), (7, 8), (8, 8)):
+        pixels[y][x] = diamond
+    return pixels
 
 
 def main():
@@ -394,6 +439,103 @@ def main():
                  [library])
     if library not in entries:
         entries.append(library)
+
+    # Apothic Enchanting's remaining stat blocks and the Ender Library. Their
+    # recipes are the Java ones (calcite and budding amethyst around a
+    # bookshelf, gold and emerald around a deepshelf, prismarine around an
+    # infused seashelf, the Apothic table's own pattern), with the Java ids.
+    extra_blocks = [
+        ("filtering_shelf",
+         {"hardness": 1.75, "explosion_resistance": 1.75,
+          "sounds": "minecraft:stone", "requires_tool": True},
+         shelf_pixels(0x52D4C0), "Filtering Shelf", "Bibliothèque filtrante",
+         {"type": "minecraft:crafting_shaped", "category": "misc",
+          "pattern": ["PSP", "LLL", "PSP"],
+          "key": {"P": "minecraft:prismarine_bricks",
+                  "S": f"{ID}:infused_seashelf",
+                  "L": "minecraft:prismarine_brick_slab"},
+          "result": {"id": f"{ID}:filtering_shelf"}},
+         "pickaxe"),
+        ("geode_shelf",
+         {"hardness": 1.75, "explosion_resistance": 1.75,
+          "sounds": "minecraft:stone", "requires_tool": True},
+         shelf_pixels(0xA79A8C), "Geode Shelf", "Bibliothèque de géode",
+         {"type": "minecraft:crafting_shaped", "category": "misc",
+          "pattern": ["CCC", "CBC", "CUC"],
+          "key": {"C": "minecraft:calcite", "B": "minecraft:bookshelf",
+                  "U": "minecraft:budding_amethyst"},
+          "result": {"id": f"{ID}:geode_shelf"}},
+         "pickaxe"),
+        ("treasure_shelf",
+         {"hardness": 1.75, "explosion_resistance": 1.75,
+          "sounds": "minecraft:stone", "requires_tool": True},
+         shelf_pixels(0x1E4B3F), "Treasure Shelf", "Bibliothèque au trésor",
+         {"type": "minecraft:crafting_shaped", "category": "misc",
+          "pattern": ["SDS", "GTG", "SDS"],
+          "key": {"S": "minecraft:gold_block", "D": f"{ID}:deepshelf",
+                  "G": "minecraft:diamond", "T": "minecraft:emerald_block"},
+          "result": {"id": f"{ID}:treasure_shelf"}},
+         "pickaxe"),
+        ("ender_library",
+         {"hardness": 5.0, "explosion_resistance": 1200.0,
+          "sounds": "minecraft:chiseled_bookshelf", "requires_tool": False},
+         library_pixels((0x9C, 0x4B, 0xE8)), "Ender Library",
+         "Bibliothèque de l'Ender",
+         # Java obtains it by infusion from the library, never by crafting;
+         # this recipe is the port's survival route while the infusion step
+         # keeps the Java requirements (see tools/java_parity.md).
+         {"type": "minecraft:crafting_shaped", "category": "building",
+          "pattern": ["CBC", "BLB", "CBC"],
+          "key": {"C": "minecraft:ender_chest",
+                  "B": "minecraft:book", "L": f"{ID}:enchantment_library"},
+          "result": {"id": f"{ID}:ender_library"}},
+         "axe"),
+        ("apothic_enchanting_table",
+         {"hardness": 5.0, "explosion_resistance": 1200.0,
+          "sounds": "minecraft:enchanting_table", "requires_tool": True},
+         table_pixels(), "Apothic Enchanting Table",
+         "Table d'enchantement apothéotique",
+         {"type": "minecraft:crafting_shaped", "category": "misc",
+          "pattern": [" T ", "DOD", "OOO"],
+          "key": {"T": f"{ID}:scrap_tome", "D": "minecraft:diamond",
+                  "O": "minecraft:obsidian"},
+          "result": {"id": f"{ID}:apothic_enchanting_table"}},
+         "pickaxe"),
+    ]
+    for block, props, pixels, name_en, name_fr, recipe, tool in extra_blocks:
+        block_id = f"{ID}:{block}"
+        write_json(os.path.join(CONTENT, "data", ID, "horizon", "block", block + ".json"), {
+            "template": "minecraft:bookshelf" if block != "apothic_enchanting_table"
+            else "minecraft:obsidian",
+            "item": True,
+            "properties": props,
+        })
+        write_json(os.path.join(CONTENT, "assets", ID, "blockstates", block + ".json"), {
+            "variants": {"": {"model": f"{ID}:block/{block}"}},
+        })
+        write_json(os.path.join(CONTENT, "assets", ID, "models", "block", block + ".json"), {
+            "parent": "minecraft:block/cube_all", "textures": {"all": f"{ID}:block/{block}"},
+        })
+        write_json(os.path.join(CONTENT, "assets", ID, "items", block + ".json"), {
+            "model": {"type": "minecraft:model", "model": f"{ID}:block/{block}"},
+        })
+        write_png(os.path.join(CONTENT, "assets", ID, "textures", "block", block + ".png"), pixels)
+        write_json(os.path.join(CONTENT, "data", ID, "loot_table", "blocks", block + ".json"), {
+            "type": "minecraft:block", "pools": [{"rolls": 1, "bonus_rolls": 0,
+                "entries": [{"type": "minecraft:item", "name": block_id}]}],
+        })
+        write_json(os.path.join(CONTENT, "data", ID, "recipe", block + ".json"), recipe)
+        en[f"block.{ID}.{block}"] = name_en
+        fr[f"block.{ID}.{block}"] = name_fr
+        merge_values(os.path.join(CONTENT, "data", "minecraft", "tags", "block",
+                                 "mineable", tool + ".json"), [block_id])
+        if block_id not in entries:
+            entries.append(block_id)
+    # Geode and treasure shelves provide Eterna in Java, so the vanilla table
+    # may count them as power providers too (the filtering shelf gives none
+    # without books in it, and the tables are not shelves).
+    for block in ("geode_shelf", "treasure_shelf"):
+        merge_values(power_path, [f"{ID}:{block}"])
 
     for item_id, name_en, name_fr, stack, rarity, pixels, recipe in ITEMS:
         item = f"{ID}:{item_id}"

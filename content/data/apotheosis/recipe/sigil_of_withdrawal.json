@@ -1,16 +1,23 @@
 {
   "type": "minecraft:crafting_shaped",
   "category": "misc",
+  "group": "apotheosis",
   "pattern": [
-    " F ",
-    "FIF",
-    " F "
+    "GBG",
+    "ELE",
+    "GMG"
   ],
   "key": {
-    "F": "apotheosis:timeworn_fabric",
-    "I": "minecraft:iron_ingot"
+    "G": "apotheosis:gem_fused_slate",
+    "B": "minecraft:blaze_rod",
+    "E": {
+      "tag": "c:ender_pearls"
+    },
+    "L": "minecraft:lava_bucket",
+    "M": "apotheosis:gem_dust"
   },
   "result": {
-    "id": "apotheosis:sigil_of_withdrawal"
+    "id": "apotheosis:sigil_of_withdrawal",
+    "count": 4
   }
 }

@@ -1,0 +1,11 @@
+{
+  "template": "minecraft:amethyst_shard",
+  "max_stack_size": 64,
+  "rarity": "rare",
+  "components": {
+    "minecraft:item_name": {
+      "translate": "item.apotheosis.gem_warlord_normal",
+      "fallback": "Gem of the Warlord"
+    }
+  }
+}

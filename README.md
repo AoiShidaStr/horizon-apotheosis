@@ -3,88 +3,75 @@
 A clean-room Horizon port of [Apotheosis](https://github.com/Shadows-of-Fire/Apotheosis)
 by Shadows_of_Fire (MIT) and its 1.21 companions **Apothic Enchanting**,
 **Apothic Attributes** and **Apothic Spawners**, as the Saison 1 server ran them
-on NeoForge 1.21.1. Version 0.5.0 targets Horizon a85af177 (native hook API 415).
+on NeoForge 1.21.1 (Apotheosis 8.9.0, Apothic Enchanting 1.6.4, Apothic Attributes
+2.11.0, Apothic Spawners 1.4.0). Version 0.6.0 targets Horizon a85af177 (native
+hook API 415).
 
 | Part | Section |
 | --- | --- |
-| Gems, rarities, affixes from loot, `/apoth` | *Done* / *Missing* below |
+| The 21 Java gems, rarities, loot, `/apoth` | *Done* / *Missing* below |
 | Sockets, gem purity, sigils, reforging, salvaging, gem cutting | *Gemmes, sockets, reforge et recyclage* |
-| Apothic attributes, 40 affixes, affix effects, Apothic Invader bosses | *Apothic Attributes et affixes* |
-| Enchanting shelves and Eterna, tomes, Prismatic Web, Enchantment Library | *Apothic Enchanting* |
+| Apothic attributes, the 99 Java affixes (69 applied), Apothic Invader bosses | *Apothic Attributes et affixes* |
+| Shelves and Eterna, infusion, tomes, Prismatic Web, Enchantment and Ender Library | *Apothic Enchanting* |
 | Silk-touch spawners and Apothic spawner modifiers | *Apothic Spawners* |
 
-In-game test plan (French): [`TEST-EN-JEU.md`](TEST-EN-JEU.md). Nothing in this
-port has been played in game yet: every part is type-checked against Horizon
-a85af177 and covered by unit tests only.
+In-game test plan (French): [`TEST-EN-JEU.md`](TEST-EN-JEU.md); results of the
+2026-11-24 test on a dedicated server in Docker with a Horizon client:
+[`TEST-RESULTATS.md`](TEST-RESULTATS.md).
 
 > **Clean room.** Nothing here is copied from Apotheosis: neither code nor
-> art. The behaviour (tiers, gems, affixes, boss-only high tiers) comes from the
-> mod's public description; the code is this port's own, written against Horizon's
-> native hook API, and the textures are original generated 16x16 pixel art. Apotheosis' MIT
-> licence would allow reuse; this slice did not need it.
+> art. The code is this port's own, written against Horizon's native hook API.
+> The gem catalogue and the other game values come from the mod's data files
+> (MIT, values only). The Java textures, models and lang files are All Rights
+> Reserved: they never enter Git, `tools/import_java_assets.py` copies them into
+> the git-ignored `content-java/` layer at pack time, and the few textures this
+> port draws itself (gem dust) are generated 16x16 pixel art.
 
 ## Done
 
 - **Content mod `.hmod`** (`side = "both"`, id `apotheosis`) with creative
-  entries for twelve gems, gem dust, twelve decorative gem blocks, twenty-three
-  enchanting shelves and five rarity salvage materials. All of them are
-  craftable or salvageable in survival (see *Recipes* below).
-
-- **Content mod `.hmod`** (`side = "both"`, id `apotheosis`) with **65 creative
-  entries**: twelve gems, gem dust, twelve decorative gem blocks, twenty-three
-  enchanting shelves and four tome/cobweb items. All of them are craftable in
-  survival (see *Recipes* below).
-- **Twelve gems, two per tier** — `gem_ruby`, `gem_amber`, `gem_topaz`,
-  `gem_amethyst`, `gem_sapphire`, `gem_peridot`, `gem_jade`, `gem_citrine`,
-  `gem_onyx`, `gem_moonstone`, `gem_bloodstone`, `gem_opal` — as data-driven
-  items on `minecraft:amethyst_shard` that stack to 16, each with its own model,
-  generated 16x16 texture, en_us/fr_fr name and tooltip. Each gem's vanilla
-  rarity follows its tier (common → epic), so a ruby, a topaz and a sapphire
-  already differ in name colour; the four mythic and ancient gems carry
-  `minecraft:enchantment_glint_override`, so they shimmer in the inventory
-  before their tooltip is read.
+  entries for the gem item, gem dust, the enchanting shelves and the rarity
+  salvage materials. All of them are craftable or salvageable in survival (see
+  *Recipes* below).
+- **The real Apotheosis gems** — one item, `apotheosis:gem`, carrying its gem
+  type in `minecraft:custom_data` (`apotheosis:gem`) and its purity in
+  `apotheosis:gem_purity`, exactly as the mod stores them. The catalogue is
+  generated from Apotheosis 8.9.0's `data/apotheosis/gems/**`
+  (`tools/gen_java_gems.py` → `java_gems.rs`): 21 gems — the Twilight Forest
+  ones are left out, that mod is not installed — with their weights, purity
+  floors, dimension constraints and per-purity bonus values. A
+  `minecraft:select` model on `minecraft:custom_model_data` picks the imported
+  Java texture of the type (`apotheosis:item/gem_<name>`), and the name comes
+  from the Java translation key `item.apotheosis.gem.<type>`.
 - **Six tiers**, `Common`, `Uncommon`, `Rare`, `Epic`, `Mythic`, `Ancient`
   (`Tier` in `native/apotheosis/api/src/lib.rs`): the tier decides how many
   affixes an item rolls (0, 1, 2, 3, 4, 5) and how strong they are (×1 to ×4).
   Vanilla's `minecraft:rarity` component only names four of them; mythic and
   ancient are shown in the tooltip and in an affixed item's lore.
-- **Gems do something** (`modify_default_components`, API 79): each gem inserts
-  a real `minecraft:attribute_modifiers` entry in the **off-hand** slot, so the
-  game applies it through its own equipment code:
-
-  | gem | tier | off-hand bonus |
-  | --- | --- | --- |
-  | ruby | common | +1 attack damage |
-  | amber | common | +15% mining speed |
-  | topaz | uncommon | +0.01 movement speed (+10%) |
-  | amethyst | uncommon | +0.4 attack speed (+10%) |
-  | sapphire | rare | +2 max health |
-  | peridot | rare | +1 luck |
-  | jade | epic | +2 armor |
-  | citrine | epic | +0.5 attack knockback |
-  | onyx | mythic | +3 attack damage |
-  | moonstone | mythic | +3 max health |
-  | bloodstone | ancient | +4 max health |
-  | opal | ancient | +3 armor toughness |
-
-  Its tooltip (`tooltip`, API 12) shows the tier in the tier's colour and the
-  effect line, both translated (en_us/fr_fr).
+- **A gem does nothing until it is socketed**, as in Apotheosis: no off-hand
+  bonus, no default attribute. Its tooltip (`tooltip`, API 12) lists the bonus
+  it gives for each gear class at its purity, and a socketed gem's line appears
+  on the piece that holds it.
+- **Bonus types this port can apply**: `attribute` and `multi_attribute`
+  (each modifier with a supported attribute) and vanilla `enchantment`
+  (`existing_only` when the Java mode is not `global`). Every other type —
+  `durability`, `damage_reduction`, `mob_effect`, `all_stats`, `drop_transform`,
+  `radial`, `omnetic`, `mageslayer`, `bloody_arrow`, `leech_block`,
+  `anti_gravity_arrow`, and modded enchantments — is **recorded, not
+  substituted**, in the generated `unsupported`/`unsupported_attributes` fields
+  of `java_gems.rs`. Unsupported attributes are `prot_pierce`,
+  `current_hp_damage`, `ghost_health`, `generic.gravity`, `generic.scale`,
+  `generic.step_height`, `neoforge:swim_speed` and `player.*_interaction_range`.
+  The Apothic `add_multiplied_base`/`add_multiplied_total` operations are
+  carried as ordinary modifiers.
 - **Recipes for everything** (vanilla 26.3 data-pack format under
   `data/apotheosis/recipe/`):
   - **Gem dust** (`gem_dust`, a stack of 64) from one amethyst shard → 2 dust,
     and 1 gem (via the `apotheosis:gems` item tag) → 3 dust.
-  - **Each gem**: four gem dust around a themed vanilla catalyst (redstone for
-    ruby, honeycomb for amber, glowstone dust for topaz, amethyst shard for
-    amethyst, lapis for sapphire, emerald for peridot, prismarine shard for
-    jade, gold ingot for citrine, obsidian for onyx, quartz for moonstone,
-    magma cream for bloodstone, prismarine crystals for opal).
-  - **Each gem block**: 9 gems → 1 block, and 1 block → its 9 gems back.
-- **Twelve gem blocks** (`gem_block_<gem>`): decorative `minecraft:amethyst_block`
-  templates with generated faceted textures, hardness and blast resistance
-  rising with the tier, a **light level from 3 (common) to 8 (ancient)**, own
-  blockstate/model/item model, a self-drop loot table, and an entry in the
-  pickaxe tag. A Ruby Block is storage, light and decoration; the working
-  tables are blocks of their own.
+  - **Gem cutting** (`gem_cutting`) and the gem blocks do not exist in this
+    port: the Java gems are cut at the gem cutting table on Horizon, not
+    crafted. The dust recipe reads the `apotheosis:gems` tag, which now holds
+    the single `apotheosis:gem` item.
 - **Affixes on looted gear** (`loot_drops`, API 75): gear a mob drops (a
   zombie's sword, a skeleton's bow…) is rolled into a rarity and carries real
   `minecraft:attribute_modifiers`, a lore that names each affix, and the
@@ -92,22 +79,23 @@ a85af177 and covered by unit tests only.
   Attributes et affixes* below), each rolled only onto gear it can affect.
   Distinct affixes per item, scaled by tier; an affixed copy keeps the item's
   own base modifiers in front of the rolled ones.
-- **Gems from mobs**: an ordinary mob killed by a player has a 12% chance to
-  drop one of the four low gems (ruby, amber, topaz, amethyst). **High tiers
-  stay boss-only**: an ordinary mob's gear rolls uncommon → epic only
-  (55/30/15); a *wither*, *ender dragon*, *warden* or *elder guardian* rolls
-  rare → ancient (25/40/25/10) and always drops one high gem, cycling onyx,
-  moonstone, bloodstone, opal.
-- **Gems from vanilla chests** (`loot_table_load`, API 75): every
-  `minecraft:chests/*` table has an 8% chance to roll one weighted common or
-  uncommon gem. Mythic and ancient gems remain boss-only.
+- **Gems from mobs**: `gems::roll` picks a gem by dimension and Java weight,
+  then clamps the rolled purity to the gem's `min_purity`. Only monsters
+  (`apotheosis:is_monster`) can drop one: 4% for a player kill and 0.5% for a
+  kill with no player, as Java's two GLMs do. A *wither*, *ender dragon*,
+  *warden* or *elder guardian* always drops one, with the better purity table.
+- **Gems from chests** (`loot_table_load`, API 75): `minecraft:chests/*` tables
+  have Java's 25% chance, other domains' chests and Twilight Forest structures
+  20%, to roll the `apotheosis:chest_gems` pool. One generic entry's function
+  draws the gem type by Java weight in the table's dimension and rolls its
+  purity, so End and Nether chests give their own gems.
 - **Extra drops**: a boss always drops an affixed diamond piece (or a bow); an
-  ordinary mob killed by a player has a 4% chance to drop an affixed iron piece.
-- **`/apoth reforge`** (`register_commands`/`perform_command`, API 8): rolls
-  tier and affixes onto the plain piece of gear the player holds, for 3
-  experience levels; on an already-affixed piece it rerolls that piece instead.
-  `/apoth salvage` breaks an affixed piece into rarity materials; `/apoth`
-  alone explains both. Answers are translated.
+  ordinary monster killed by a player has a 4% chance to drop an affixed iron
+  piece. Passive entities drop neither gems nor affixed gear.
+- **`/apoth salvage`** (`register_commands`/`perform_command`, API 8) breaks
+  the affixed piece held into rarity materials; `/apoth` alone explains it.
+  Reforging has no player command, as in Java: it is done at the reforging
+  tables. Answers are translated.
 
 ## Gemmes, sockets, reforge et recyclage
 
@@ -123,44 +111,67 @@ a85af177 and covered by unit tests only.
   (`inventory_tick`, API 39, through `Host::carried_stack`) and its bonus
   becomes a real `minecraft:attribute_modifiers` entry on the piece
   (`apotheosis:socket_<n>_<gem>`, `add_value`, `hand` or `armor` slot), beside
-  the affixes' entries, so the game applies it when the piece is worn. An
-  unsocketed gem keeps the off-hand bonus the content mod gives it.
-- **Purity** Cracked, Chipped, Flawed, Normal, Flawless, Perfect (×0.2, ×0.4,
-  ×0.7, ×1, ×1.4, ×2 on the gem's bonus), rolled where the gem drops
-  (`loot_drops`): ordinary loot 30/40/20/8/2/1, boss gems 5/20/35/28/10/2.
-  Shown in the gem's tooltip. A gem in the main hand with 4 gem dust in the
-  off hand, right-clicked, is polished one step up (4 dust per step, Perfect
-  is the ceiling).
-- **Reforging an affixed piece**: `/apoth reforge` on an affixed piece held in
-  the main hand rerolls its rarity and affixes for 3 levels, keeping the piece
-  and the gems in its sockets; the work is done on the next inventory tick, so
-  the stack the command saw is the stack that is rewritten.
-- **Salvaging**: `/apoth salvage` on an affixed piece breaks it into 1–4 of its
-  rarity's material, gem dust (1–4 by rarity) and gives back every socketed
-  gem at the purity it had.
-- **Four sigils** (`sigil_of_socketing`, `sigil_of_withdrawal`,
-  `sigil_of_rebirth`, `sigil_of_enhancement`), each a stackable item with its
-  own 16×16 wax-seal texture, en_us/fr_fr name and description line, a shaped
-  recipe from the rarity materials (iron and gold, fabric and iron, crystal and
-  blaze powder, arcane sands and an emerald), and a place in the creative tab.
-  A sigil is used with the affixed piece in the **off hand** and the sigil in
-  the **main hand**, right click: socketing adds one socket up to the maximum,
-  withdrawal takes every socketed gem back out at the purity it had, rebirth
-  rerolls the piece's rarity and affixes (gems kept), enhancement moves the
-  rarity one step up (Common→…→Ancient) and rerolls at the new tier. The sigil
-  is used up on the next inventory tick, so a hand that changed costs nothing.
-- **Three working tables as blocks**, with Apotheosis' ids
-  (`gem_cutting_table`, `salvaging_table`, `reforging_table`): a real block
-  declaration (oak planks template, own top and side textures, `cube_bottom_top`
-  model), item, blockstate, block loot table, pickaxe tag, shaped recipe (iron
-  and amethyst around gem dust, iron and planks, gold and scrap metal), and the
-  creative tab. Right click with the piece in hand (`use_item_on`, API 13): the
-  reforging table does what `/apoth reforge` does (3 levels), the salvaging
-  table what `/apoth salvage` does, and the gem cutting table spends 4 gem dust
-  from the inventory to raise the held gem's purity one step
-  (`Host::take_items`, refunded if the dust is not all there). The click is
-  always claimed, so a misclick shows the table's hint instead of opening
-  something else.
+  the affixes' entries, so the game applies it when the piece is worn. A gem
+  that is not socketed has no effect, as in Apotheosis.
+- **Purity** Cracked, Chipped, Flawed, Normal, Flawless, Perfect, each gem's
+  bonus value read at the purity's index from its Java data (no invented
+  multiplier), rolled where the gem drops (`loot_drops`) from the Java purity
+  weights and above the gem's `min_purity`.
+  Shown in the gem's tooltip. Purity rises only at the gem cutting table's
+  menu, as in Java: the gem, a second one of the same type and purity, gem
+  dust and one of the Java `apotheosis:purity_upgrade` recipe's alternative
+  materials for the gem's current purity (1 dust and 3 scrap or 1 fabric for
+  a cracked gem, up to 9 dust and 27 crystal, 9 sands or 3 pearls for a
+  flawless one, which becomes perfect).
+- **Reforging** (`menus.rs`): the reforging table and the simple reforging
+  table open Java's screen: the piece, its rarity material, the sigils of
+  rebirth and three choices. Choice *i* needs the Java `recipe/reforging` row
+  for the material's rarity times *i*+1 (levels 2/5/15/30/50, material
+  1/2/2/2/3, sigils 0/1/2/4/5 for Common→Mythic) and charges *i*+1 levels;
+  free in creative, as in Java. The simple table stops at Rare. The piece
+  keeps its sockets and gems. Ancient is this port's extension and uses the
+  mythic row.
+- **Salvaging** (`menus.rs`): the salvaging table opens Java's screen; its
+  button breaks every affixed piece of its inputs into 1–4 of its rarity's
+  material and gives back each socketed gem at the purity it had (Java gives
+  the material only). A piece whose results would not fit the six outputs
+  stays whole. `/apoth salvage` does the same for the piece held.
+- **Gem cutting** (`menus.rs`): the gem cutting table opens Java's screen: a
+  gem, a second gem of the same type and purity, gem dust and one of the
+  recipe's materials; the button gives the gem of the next purity at the
+  Java cost of the current purity.
+- **Five sigils** (`sigil_of_socketing`, `sigil_of_withdrawal`,
+  `sigil_of_rebirth`, `sigil_of_enhancement`, `sigil_of_unnaming`), each a
+  stackable item with its own 16×16 wax-seal texture, en_us/fr_fr name and
+  description line, and the Java shaped recipe in gem dust and gem-fused slate
+  (with amethyst and gunpowder, ender pearls and a lava bucket, flint,
+  godforged pearl), and a place in the creative tab. A sigil is used with the
+  affixed piece in the **off hand** and the sigil in the **main hand**, right
+  click: socketing adds one socket up to the maximum, withdrawal takes every
+  socketed gem back out at the purity it had, rebirth rerolls the piece's
+  rarity and affixes (gems kept), enhancement moves the rarity one step up
+  (Common→…→Ancient) and rerolls at the new tier, and unnaming removes the
+  name the affix roll wrote — never a name the player typed, which leaves the
+  sigil unspent. The sigil is used up on the next inventory tick, so a hand
+  that changed costs nothing. Java does socketing, the sockets sigil, withdrawal and
+  unnaming in the smithing table; Horizon a85's smithing hook passes neither
+  the slots' contents nor the taking of the result, so this port keeps the
+  right click.
+- **Four working tables as blocks**, with Apotheosis' ids
+  (`gem_cutting_table`, `salvaging_table`, `reforging_table`,
+  `simple_reforging_table`): a real block declaration (own top and side
+  textures, `cube_bottom_top` model), item, blockstate, block loot table,
+  pickaxe tag, the Java shaped recipe, and the creative tab. Their template is
+  `minecraft:crafting_table`, because Horizon only opens a mod menu on a
+  block whose template opens one; a right click opens the table's own screen
+  (see above). Items left in a table stay there when the screen closes, like
+  a furnace (Java hands them back; that needs a hook above API 415).
+- **The four new Java items**: `gem_fused_slate` (8 from deepslate and gem
+  dust), the iron, gold and diamond smithing templates (7 diamonds around a
+  template, 7 gold, 7 iron), `sigil_of_unnaming` and
+  `simple_reforging_table` are declared, craftable and in the creative tab.
+  Their Java textures and models come in through the git-ignored
+  `content-java/` layer; without it a vanilla placeholder texture is used.
 - **Chest gems roll their purity** (`loot_function`, API 133): the gem pool
   `loot_table_load` adds to vanilla chests carries the mod's own
   `apotheosis:gem_purity` function, which draws from the loot roll's seed with
@@ -181,10 +192,20 @@ a85af177 and covered by unit tests only.
   a gem in, no preview of the result, and no slot-level picking of which gem to
   pull out. A chest-style server menu (API 10) could show one, at the cost of
   modelling every click by hand.
-- **The other 1.21 sigils are not ported**: `sigil_of_unnaming` (this port never
-  writes a custom name onto an affixed piece), `sigil_of_malice` and
-  `sigil_of_supremacy` (no overcharged-affix state), and the augmenting table
-  they feed (no per-affix level).
+- **`sigil_of_malice` and `sigil_of_supremacy` are not ported**: both need an
+  overcharged-affix state this port does not have, and the augmenting table
+  they feed has no per-affix level.
+- **Reforging has no result-slot choice**: Java's reforging menu shows three
+  results priced at 1×, 2× and 3× the recipe row; a right click on the table
+  charges the 1× row only, since there is no grid to pick a slot in.
+- **Plain vanilla gear is not salvaged**: Java also has `recipe/salvaging/other`
+  rows for ordinary tools and armour; this port only salvages affixed pieces
+  and gems.
+- **The 28 sized smithing upgrades are not recipes here**: Java's
+  `apotheosis:sized_upgrade_recipe` consumes four ingots or gems per template,
+  and the vanilla smithing format cannot express that; shipping it as a
+  one-ingot recipe would change what the Java pack costs. The three templates
+  are craftable, but not applied through a smithing table in this port.
 - **A socket, once added, is permanent**: no sigil takes one away, only the
   gems can be withdrawn.
 - **Gear affixed before this slice** carries no `apotheosis:tier`, so it can be
@@ -197,12 +218,13 @@ a85af177 and covered by unit tests only.
 
 ### Done
 
-- **Fifteen attributes** (`native/apotheosis/api/src/attributes.rs`), stored on
-  an affixed stack in `minecraft:custom_data` under `apotheosis:attributes`
+- **Eighteen attributes** (`native/apotheosis/api/src/attributes.rs`), stored
+  on an affixed stack in `minecraft:custom_data` under `apotheosis:attributes`
   and read back by the hooks: crit chance and crit damage, life steal,
   overheal, dodge chance, armor pierce, armor shred, fire and cold damage,
   experience gained, healing received, arrow damage and velocity, bow draw
-  speed, and mining speed.
+  speed, mining speed, current-health damage, protection shred and protection
+  pierce.
 - **They do something in play**:
   - *Damage*: `living_incoming_damage_v2` scales an attacker's hit by crit,
     fire, cold, pierce and shred (the victim's armor absorption is reduced by
@@ -220,43 +242,98 @@ a85af177 and covered by unit tests only.
     speed scales the charge needed to loose, so a faster bow fires sooner.
   - *Healing*: `living_heal` scales incoming healing by *healing received*
     and refunds the **overheal** share, up to the missing health.
+  - *Current-health damage, shred and pierce*: giant slaying adds its share of
+    the victim's **current** health as physical damage. Protection shred and
+    pierce lower a player victim's real protection points (4 % each, 20 points
+    at most) before the hit's reduction is computed, so the mod's damage
+    reduction and the vanilla protection line agree.
   - *Mining*: `break_speed` scales the break speed of the held tool.
   - *Experience*: `experience_orb_pickup` adds the experience-gained share to
     the orb's value.
-- **Tooltips** name each attribute and its value in blue under the affix
-  lore, translated in en_us and fr_fr.
-- **Affixes are filtered by item class**: sword and axe (melee), bow and
-  crossbow (ranged), helmet, chestplate, leggings and boots separately, tool,
-  shield. A bow can no longer roll `attack_damage`; a chestplate cannot roll a
-  bow affix; an item with no matching affix rolls none rather than falling
-  back to the whole pool.
+- **Java's affix catalogue is the source**: `tools/gen_java_affixes.py` reads
+  the 99 affixes of Apotheosis 8.9.0 and generates
+  `native/apotheosis/api/src/java_affixes.rs` (id, categories, rarities and
+  per-rarity ranges, plus Java's translation keys). The generator is
+  idempotent and only merges its language keys; it copies no asset and no Java
+  code. `affixes.rs` turns that table into the roll.
+- **The item name is Java's prefix + item + suffix**, composed from
+  `misc.apotheosis.affix_name.*` and `affix.apotheosis:<path>` keys, coloured
+  with the rarity's Java colour; a player's own custom name is left alone.
+- **Tooltips are one `+X Attribute` line per affix**, in the rolled rarity's
+  colour (common `#808080`, uncommon `#33FF33`, rare `#5555FF`, epic
+  `#BB00BB`, mythic `#ED7014`), translated in en_us and fr_fr. The separate
+  attribute block is only a fallback for old pieces without affix lore.
+- **Affixes are filtered by Java categories**: melee weapon and trident, bow,
+  breaker, shears, shield, and each armour piece. The trident is both melee and
+  its own category; shears have their own class. An item with no matching
+  affix rolls none rather than falling back to the whole pool.
 - **Base modifiers are merged**: `modify_default_components` records each
   item's own `minecraft:attribute_modifiers` before anything edits them, and
   `apply_affixes` writes them ahead of the rolled ones, so an affixed diamond
   sword keeps its innate attack damage.
-- **Names** for all 15 attributes and 18 new affixes are added to the shared
-  files by `python tools/gen_attributes.py` (merges, never replaces; the
-  creative tab and tags are checked and left untouched, no item is added).
+- **Rarity counts follow Java**: common 1 affix, uncommon 2, rare 2, epic 3,
+  mythic 4. `Ancient` is this port's extension and reuses mythic's ranges with
+  five affixes; it is documented rather than invented as a Java rarity.
+- **Not rolled** (kept in the generated catalogue with their Java ids, kinds
+  and values): the four attributes this port has no effect for —
+  `neoforge:swim_speed` (aquatic), `cooldown_reduction` (timekeeping),
+  `neoforge:creative_flight` (unbound) and `apothic_attributes:elytra_flight`
+  (winged) — plus every `attribute_toggle`, `stoneforming`, `radial`,
+  `omnetic`, `catalyzing`, `psychic`, `enlightened`, `magical` and `spectral`
+  entry, and the `mob_effect` affixes whose target is an arrow hit the port
+  has no host for (bursting, spelunkers, swift, bloodletting, caustic,
+  omniscient, sophisticated, acidic, grievous, shulkers, devilish). **69 of
+  the 99 Java affixes are rolled**; the other 30 are catalogue-only.
 
 ### Effets d'affixes et boss Apothic Invader
 
 #### Done
 
-- **Fourteen effect affixes** (`native/apotheosis/api/src/affix_effects.rs`,
-  `EFFECT_AFFIXES`) on top of the attribute ones, with upstream ids, item
-  classes and epic+ rarities: Venomous, Withering, Weakening, Ensnaring,
-  Blinding (helmet), Executing, Cleaving, Thunderstruck, Retreating (shield),
-  Durable, Telepathic, Spectral and Magical (ranged), Festive.
-- **Their payouts run in the real hooks**: poison/wither/weakness/slowness on
-  the victim, blindness on the attacker, execution under the rolled health
-  share, a cleave to nearby foes, real lightning, a knockback away from the
-  attacker, less durability wear, drops straight to the inventory, a free
-  spectral arrow, extra magic damage, and doubled kill loot.
+- **Twenty-nine effect affixes** (`native/apotheosis/api/src/affix_effects.rs`)
+  on top of the forty attribute ones, using Java's own kinds: fifteen
+  `mob_effect` (blinding, bolstering, nimble, revitalizing, elusive,
+  weakening, ensnaring, blighted, deathbound, ivy_laced, fleeting, galvanizing,
+  reinforcing, venomous, withering), six `damage_reduction` (blast forged,
+  blockading, deflective, feathery, grounded, runed), two `enchantment`
+  (prosperous: Fortune on a tool, Looting on a bow) and six one-off kinds
+  (cleaving, executing, festive, thunderstruck, retreating, telepathic), plus
+  the port's own Durable.
+- **Their numbers are Java's rolls**, not approximations: each affix keeps its
+  per-rarity `duration`, `amplifier`, `chance`, `targets`, `cooldown` (ticks)
+  and `rolls` as generated from the 8.9.0 data, and `supported` is true only
+  where a hook can actually pay the entry.
+- **Their item classes match Java's categories**: a file with no category list
+  takes its folder's (`shield/retreating`, `generic/telepathic`), and the
+  trident-only arrow targets (ensnaring, blighted, deathbound, ivy laced) are
+  paid because a trident hit reaches `attack_target`.
+- **Their payouts run in the real hooks**: poison/wither/weakness/slowness/
+  blindness and the other mob effects at their rolled duration and amplifier,
+  execution under the rolled health share, a cleave to nearby foes, real
+  lightning, a knockback away from the attacker, less durability wear, drops
+  straight to the inventory, doubled gear from a kill, and the two
+  enchantments written as real item enchantment levels. Mob-effect payouts
+  respect Java's per-affix cooldown before firing again.
+- **Damage reduction is applied to every damage route**: the six armour affixes
+  are read per damage class (explosion, physical, projectile, fall, lightning,
+  magic) and cached per entity, so the reduction holds for hits v1 and v2 see
+  alike. Current-health damage lands as physical damage after the blow.
 - They are **extra affixes**, never replacements: `apply_affixes` still rolls
-  the same number of attribute modifiers and lore lines, then adds at most one
-  effect affix from epic up. The roll is stored in
+  the same number of attribute modifiers and lore lines, then adds the effect
+  affixes Java's rarity guarantees (rare one `basic_effect`, epic one plus one
+  `ability`, mythic/ancient two plus one), drawn from that class's supported
+  pool and never twice the same. The rolls are stored in
   `minecraft:custom_data` under `apotheosis:effects` and read back per hit.
   Tooltips show the effect line in green, translated in en_us and fr_fr.
+  The enchantment levels an effect affix adds are recorded under
+  `apotheosis:effect_enchants`, so a reroll takes back only those and leaves
+  the item's own enchantments alone.
+- **A reforge only replaces the port's own work**: attribute values it wrote
+  are recorded under `apotheosis:affix_attrs` and subtracted before the new
+  ones, and its lore lines (`apotheosis.affix.*`) and modifiers (Java affix
+  ids) are the only ones it removes, so another mod's lore, modifiers or a
+  player's anvil-renamed name survive. A kept name is recoloured with the
+  tier's colour. Vanilla's `minecraft:rarity` stops at `epic`, so the real
+  Java rarity is also written to `apotheosis:rarity`.
 - **Apothic Invader boss**: `entity_join_level` queues fresh joins and
   `mob_spawned` consumes the one matching a natural spawn. An overworld spawn
   must be at night and on the surface (column heightmap); Nether and End
@@ -277,12 +354,23 @@ a85af177 and covered by unit tests only.
   grievous and knowledge effects have no equivalent here.
 - A mob's `active_effects` are merged into its NBT; a mod-added effect or a
   client-side effect icon beyond vanilla's is not shown.
-- Retreating fires on any hit with a shield in the off hand, not only on an
-  actual shield block: the hook API does not expose the block event.
-- Magical adds its share as damage instead of adding vanilla's magic damage
-  tags to the arrow's damage source, so armour is not literally bypassed.
+- Venomous, Withering, Galvanizing, Reinforcing and Retreating fire on any hit
+  taken with a shield in the off hand, not only on an actual shield block: the
+  hook API does not expose the block event.
+- An arrow hit has no weapon stack of its own, so `arrow_target`/`arrow_self`
+  `mob_effect` affixes (bursting, spelunkers, swift, bloodletting, caustic,
+  omniscient, sophisticated, acidic, grievous, shulkers, devilish) stay
+  catalogue-only; only a trident's arrow target is paid.
+- Effects on the victim's gear are read for players only: a mob's armour lives
+  in its NBT, not in `player_equipment`.
+- Protection shred and pierce move a **player** victim's protection points;
+  a mob's protection is not modelled.
+- Thunderstruck's Java data carries only the strike damage, so this port adds
+  its own one-in-five chance of the lightning.
 - Telepathy and Festive act on the killer's main hand; a projectile kill reads
   the bow still in hand, not the arrow's own affixes.
+- Durable has no Java data entry: it is a port extension at 15 % per tier,
+  capped at 50 %.
 - A boss roll is per natural spawn, not per dimension tier: the frontier /
   ascent / summit / pinnacle chances are collapsed to 2 % for this slice.
 - Invader names are generated server-side from translated components; there
@@ -295,7 +383,8 @@ a85af177 and covered by unit tests only.
 - Overheal is modelled as `minecraft:absorption`; the original keeps a
   separate overheal pool with its own decay and display.
 - Armor pierce and shred lower the damage reduction computed by this mod, not
-  vanilla's armor points, so the armour bar does not move.
+  vanilla's armor points, so the armour bar does not move. Protection shred and
+  pierce do move a player's protection points; a mob victim has none to move.
 - Dodge is rolled server-side per hit; there is no client animation or sound.
 - The mining-speed attribute is applied through `break_speed` only, so it does
   not show on the held tool's vanilla `mining_efficiency` line.
@@ -305,15 +394,6 @@ a85af177 and covered by unit tests only.
 - **Affixes from chest loot tables** — chest tables can supply gems, but their
   gear remains un-affixed; `loot_table_load` cannot roll the item components
   the later loot generation creates.
-- **The enchanting library** and its tomes (Scrap, Extraction) are not
-  implemented. Enchanting stats themselves are ported (see *Apothic Enchanting*
-  below), with the limits listed there; configurable spawners are ported (see
-  *Apothic Spawners*).
-
-- **The enchanting library** and **configurable spawners** (silk-touched
-  spawners with a chosen mob) are not implemented. Enchanting stats and the
-  tomes are ported (see *Apothic Enchanting* below), with the limits listed
-  there.
 - **Natural ore generation** for gems: gems come from mobs, bosses, recipes
   and reforge only.
 - Affix names, lore and command answers are translated, but an affixed item
@@ -324,7 +404,8 @@ a85af177 and covered by unit tests only.
 
 ### Done
 
-- **Twenty-three shelf blocks** on `minecraft:bookshelf` templates, with original
+- **Twenty-six shelf blocks** on `minecraft:bookshelf` (and, for the three
+  newest, `minecraft:stone`) templates, with original
   generated 16x16 textures, own blockstate/model, `block.apotheosis.<shelf>`
   names in en_us and fr_fr, an entry in the creative tab, a self-drop loot
   table and the axe mining tag. Their stats are public Apothic Enchanting
@@ -355,6 +436,17 @@ a85af177 and covered by unit tests only.
   | beeshelf | -30 | 0 | 100 | 0 | 0 |
   | melonshelf | -2 | 0 | -10 | 0 | 0 |
   | stoneshelf | -3 | 0 | 0 | -7.5 | 0 |
+  | geode_shelf | 5 | 60 | -15 | 0 | 0 |
+  | treasure_shelf | 5 | 70 | -15 | -15 | 0 |
+  | filtering_shelf | 0 | 30 | 0 | 0 | 0 |
+
+  The three newer shelves keep their Java ids (`apotheosis:geode_shelf`,
+  `apotheosis:treasure_shelf`, `apotheosis:filtering_shelf`), their stone
+  template and `minecraft:stone` sound, hardness 1.75, the pickaxe tag, their
+  Java shaped recipes (`geode_shelf`: calcite corners around a bookshelf with
+  a budding amethyst, `treasure_shelf`: gold and diamond above deepshelf over
+  emerald, `filtering_shelf`: prismarine bricks around an infused seashelf) and
+  are `enchantment_power_provider`s like the wooden ones.
 
   Vanilla `minecraft:amethyst_cluster`, `minecraft:skeleton_skull` /
   `minecraft:wither_skeleton_skull` and `minecraft:wither_skull` are recognised
@@ -384,9 +476,9 @@ a85af177 and covered by unit tests only.
   one `minecraft:bookshelf` surrounded by four of its theme catalyst — honeycomb,
   blaze rod or powder, glowstone, nether wart, pufferfish, prismarine shard or
   crystals, heart of the sea, sculk, echo shard, ender pearl, dragon head,
-  spyglass, emerald, melon slice or polished andesite. The custom
-  `apothic_enchanting:infusion` station does not exist in Horizon, so no recipe
-  depends on it.
+  spyglass, emerald, melon slice or polished andesite. Only the Ender Library
+  depends on the mod's own infusion table (see below); every other recipe is a
+  vanilla shaped one.
 - **Three tomes and the Prismatic Cobweb** (`use_item`, API 13), used on a
   right click: hold the tome in one hand and the enchanted item in the other.
   API 415 has no anvil hook, so this replaces the original's anvil step. Each
@@ -407,6 +499,18 @@ a85af177 and covered by unit tests only.
   shaped recipes: eight books around an anvil give eight scrap tomes, diamonds
   or netherite scraps upgrade one to the superior or extraction tome, and four
   prismarine shards around a cobweb give the Prismatic Cobweb.
+- **The Ender Library** (`apotheosis:ender_library`), built the way Java builds
+  it: an infusion of the ordinary library (`recipe/infusion/ender_library`,
+  Eterna 100 / Quanta 45 / Arcana 100 at most 100/50/100). It is the same
+  block entity and the same right-click gestures as the library below, with a
+  level cap of 31 instead of 30 (Apothic Enchanting builds it with
+  `new EnchLibraryBlock(EnderLibraryTile::new, 31)`); the ordinary library's
+  Java cap of 16 levels is kept at this port's one-point-per-level 30, so the
+  Ender one is exactly one level above it. Own texture, names, creative-tab
+  entry, self-drop loot table and axe tag. Java gets the block by infusing a
+  placed library; a world where the infusion table is out of reach can craft
+  the same upgrade without the table (an ender chest between two books over a
+  bookshelf), and the infusion stays the cheaper Eterna-free path.
 - **The Enchantment Library** (`block_entity` / `block_entity_ticks` /
   `block_entity_tick` API 15–17, `right_click_block` API 21). The block stores
   enchantments as points — one point per level, capped at level 30 per
@@ -420,6 +524,24 @@ a85af177 and covered by unit tests only.
   vanilla recipe (eight books around a bookshelf). No menu and no item slot is
   involved — every click is applied at once on the server thread, so rapid
   clicks, two players and a broken block cannot duplicate a book.
+- **Infusion at the Apothic Enchanting Table** (`apotheosis:apothic_enchanting_table`,
+  `use_item_on` API 13). API 415 cannot open or drive a block's menu, so the
+  table does on a right click what the Java menu's third slot does: the item in
+  hand is matched against the mod's `recipe/infusion` entries at the stats the
+  surrounding shelves give (`findMatch`, hardest Eterna requirement first), and
+  the click applies it at once — one item in, the result in the hand, the same
+  experience levels Java charges (the table's cost clamped to the recipe's
+  Eterna requirement, at least 3, free in creative). Twelve infusions are
+  ported, the ones whose input and result both exist here: budding amethyst,
+  golden carrot, deepshelf, the four echo shards, the Ender Library, the two
+  infused shelves, the three experience-bottle sizes, and the four-tome
+  upgrades (scrap → superior, superior → extraction). Recipes needing an item
+  this port does not carry (infused breath, ender leads, the inert trident,
+  magic discs) are left out. The block uses the `minecraft:obsidian` template
+  so no vanilla screen opens over it, has its own texture, names and creative
+  entry, the pickaxe tag, a self-drop loot table and a recipe (obsidian around
+  an enchanting table). A click that cannot be infused says what the shelves
+  give and what the recipe needs instead of silently doing nothing.
 
 ### Missing
 
@@ -446,9 +568,19 @@ a85af177 and covered by unit tests only.
   or dedicated host's guests (`lan_stations.rs`); the integrated single-player
   table computes its offers locally without calling the hook. Local play gets
   the tag-based power above, capped at vanilla's 15 providers.
-- **Infusion and rectifiers.** No infusion altar or rectifier is added; the
-  recipes stop at vanilla crafting. The tomes are used by a right click rather
-  than in an anvil, since API 415 has no anvil hook.
+- **The filtering shelf filters nothing.** Java gives it 0.5 Eterna and one
+  Arcana per enchanted book in its six slots and removes those books'
+  enchantments from the table's offers. API 415 has no block-entity inventory
+  hook (an item cannot be inserted into a shelf, and its contents cannot be
+  read), so the block exists with its recipe, model and names, counts as an
+  `enchantment_power_provider` like an empty Java shelf, and contributes no
+  stats: the values an empty filtering shelf has in Java. Storing books and
+  filtering the offers wait for an inventory hook above API 415.
+- **No rectifier and no enchanting screen.** No rectifier block is added, and
+  the infusion table and both libraries work by right clicks rather than by
+  menus: API 415's menu hooks only reach a LAN host's guests. The infusion
+  table also cannot show the Java preview of which recipe the shelves allow;
+  the requirements are reported in chat when a click cannot be infused.
 - **The Enchantment Library has no screen and drops no contents.** API 415's
   menu hooks only reach a LAN host's guests and vanilla-menu clicks cannot be
   intercepted, so the library is driven by right clicks and shows offers in
@@ -519,19 +651,11 @@ a85af177 and covered by unit tests only.
   carried spawner's tooltip, not in a screen.
 - **The Apotheosis bosses** are another chantier's, not this one's.
 
-## Known issues (review of 2026-11-22, not fixed yet)
+## Fixed since 0.5.0
 
-An independent review found these item duplication or loss risks in the
-sockets, sigils, reforge and salvage code. They are **not fixed** in 0.5.0;
-avoid these actions on a shared server until they are:
-
-- `sockets.rs:924`: consume_seal() retire le sigil de la pile qui occupe la case sélectionnée au moment du tick, pas de celle qui a été cliquée : use_seal() (l.837-868) ne mémorise ni la case ni l'objet, et add_socket/withdraw/rebirth/enhance ne vérifient même pas que `main` est encore un sigil avant d'appeler consume_seal (l.947, 978, 991, 1025).
-- `sockets.rs:1170`: polish() ne vérifie pas que la pile de la main (relue au tick, l.810) est encore une gemme : il applique set_purity() à n'importe quel objet et retire 4 gem dust de la main gauche. Le contrôle de use_item (l.751-757) porte sur la pile du clic, perdue entre-temps.
-- `sockets.rs:976`: withdraw() retire les gemmes des chambres et les donne avec `let _ = host.give_stack(...)` : l'échec (inventaire plein) est ignoré, alors que la pièce a déjà été réécrite sans ses chambres (l.968-971) et que le sigil est consommé (l.978).
-- `sockets.rs:1238`: salvage() rend les gemmes serties avec `let _ = host.give_stack(player, gem)` : une gemme qui ne rentre pas est perdue, et seul le matériau est contrôlé (`if given < count`, l.1249). La pièce est détruite avant (l.1229).
-- `sockets.rs:819`: Les actions différées relisent la pièce de la main gauche au tick (l.819)` et l'appliquent sans vérifier que c'est celle validée au clic (use_seal l.847-857, use_item l.743-756) : sertir, polir, ajouter une chambre, améliorer ou reroll agissent sur la pièce qui s'y trouve alors, et le consommable (gemme, poudre, sigil) est débité quand même.
-- `lib.rs:1259`: La reforge d'une pièce affixée débite les 3 niveaux (l.1251) puis pose juste `Action::Reforge` ; sockets::reforge (l.1192-1201) ne rend les niveaux que si la pile tenue n'est pas reforgable. Une autre pièce affixée tenue au tick est donc rerollée à la place de celle payée.
-- `lib.rs:1199`: `/apoth salvage` valide la pièce au moment de la commande (begin_salvage, sockets.rs:763-776, contrôle `has_affixes` sur held_stack) puis salvage() (sockets.rs:1216) détruit la pile tenue au tick suivant, sans revérifier que c'est la même.
+Two independent reviews found item duplication or loss risks (sockets, sigils,
+reforge, salvage, withdrawn gems) and stacking stats on reroll. All are fixed,
+each with a regression test; the reports are summarised in the commit history.
 
 ## Install
 
@@ -547,49 +671,50 @@ Both halves use the id `apotheosis`.
 3. Clients and the dedicated server need the same `.hmod` (a `side = "both"`
    mod: a client with another version is refused).
 
+## Dedicated server in Docker
+
+`tools/docker/` builds a dedicated Horizon server image with this mod compiled
+into its engine (adapted from Horizon's `packaging/server/Dockerfile`):
+
+```sh
+bash tools/docker/stage-context.sh "<Horizon source at the pinned commit>" ../docker-ctx
+docker build -t horizon-apotheosis:0.6.0 ../docker-ctx
+docker run -d --name apotheosis -p 25565:25565 --stop-timeout 180   -v apotheosis-data:/data   -v "<prepared 26.3 folder>:/opt/horizon/.local/horizon-client/26.3:ro"   -e HORIZON_EULA=true -e HORIZON_WHITELIST=true -e HORIZON_PLAYERS=<name> -e HORIZON_OP=<name>   horizon-apotheosis:0.6.0
+```
+
+The Horizon source at the pinned commit is in the launcher's cache
+(`%APPDATA%/horizon-launcher/native/source/<commit>`); the prepared 26.3 folder
+is the one `horizon-launcher prepare --version <base>` writes under
+`versions/<base>/.local/horizon-client/26.3`. Put the same `apotheosis.hmod` as
+the clients in the data volume's `horizon-mods/` with `mod.apotheosis:true` in
+`horizon-mods.txt`. `HORIZON_EULA=true` accepts the Minecraft EULA for that
+server. The image holds no Minecraft files and no Java assets.
+
 ## Build
 
-- Content: `python tools/gen_content.py` regenerates the item and block data,
-  models, blockstates, loot tables, recipes, tags, names and textures;
-  `python tools/gen_sockets.py` adds the rarity salvage materials, their
-  textures, recipes, names and creative-tab entries without touching the gem
-  entries; `python tools/pack.py` writes `target/apotheosis.hmod` and
-  `target/apotheosis.hnmod`.
-- Native: the crate is checked against the pinned Horizon commit on the build
-  VPS with `tools/vps/sync.sh full` (see `tools/vps/check.sh` and
-  `tools/vps/verify.sh`); it builds as a trait mod with
-  `horizon-launcher native-build`.
+1. Import the Java assets you own into the git-ignored layer (textures, models,
+   lang; they are All Rights Reserved and never committed):
+   `python tools/import_java_assets.py "<Prism instance>/minecraft/mods"`
+   (the four Saison 1 jars).
+2. Regenerate the port's own content if needed: `python tools/gen_*.py`
+   (idempotent: running them again changes nothing).
+3. `python tools/pack.py` writes `target/apotheosis.hmod` (with the Java layer
+   when it exists; `--no-java` without) and `target/apotheosis.hnmod`; check
+   them with `cargo-horizon-mod check <file>`.
+4. Tests: the native crate's unit tests run against the pinned Horizon commit
+   (`cargo test -p mod-apotheosis` in a Horizon a85af177 workspace with this
+   crate staged, as `tools/vps/stage.sh` does); the content tests are
+   `python tools/test_content.py`, `tools/test_lang_keys.py` and
+   `tools/test_import_java_assets.py`.
 
-### Build state (2026-11-22)
+### Build state (2026-11-23)
 
-- v0.4.0 compiles against the pinned commit `a85af177` (`cargo check -p
-  mod-apotheosis`, one warning: private `Rng` behind the public test helper).
-  **All unit tests pass** (see each section), and `cargo check -p horizon-native-game
-
-  mod-apotheosis`, no warnings).
-  **34 unit tests pass**, and `cargo check -p horizon-native-game
-
-  **27 unit tests pass** (twelve of them in the `sockets` module: purity steps,
-  socket counts, socketing, reforge and salvage yields, the sigil and table
-  ids, the rarity ladder, and the chest gem purity draw), and
-  `cargo check -p horizon-native-game
-  --no-default-features` (dedicated-server engine with this mod staged)
-  passes, as does the client flavour (`cargo check -p horizon-native-game`,
-  default features).
-- `cargo horizon-mod check` passes on both packed files
-  (`apotheosis.hmod`: kind `mod`, `side both`; `apotheosis.hnmod`: kind
-  `native-mod`, api `native-1/a85af177…/5a64af93…`).
-- The content mod has twelve gems (two per tier), gem dust, twelve gem blocks
-  with textures, models, loot tables and a pickaxe tag, five rarity salvage
-  materials, four sigils, the three working tables, and 55 recipes. Mob drops
-  and all vanilla chest loot tables now provide survival gem routes; chest
-  gems are restricted to common and uncommon tiers and roll a purity from the
-  table's own seed. The four mythic/ancient gems shimmer. All content JSON files parse, and
-  `python tools/pack.py` rebuilds `target/apotheosis.hmod` and
-  `target/apotheosis.hnmod`.
-- The registry check caught `horizon-mixin.toml` still naming version `0.2.0`
-  after the bump ("native manifest and mixin identity/revision differ"); the
-  three version fields now move together, and both packed files check clean.
+- v0.6.0 compiles against `a85af177` and **167 native unit tests pass**; the
+  three Python test suites pass; `target/apotheosis.hmod` (with the Java layer)
+  and `target/apotheosis.hnmod` pass `cargo-horizon-mod check`.
+- No Git-tracked file is identical to a file of the Java jars' `assets/`.
+- Run in game on a dedicated server in Docker with a Horizon client: see
+  `TEST-RESULTATS.md` (167 native unit tests after the in-game fixes).
 
 ## Licence
 

@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "building",
+  "pattern": [
+    "CBC",
+    "BLB",
+    "CBC"
+  ],
+  "key": {
+    "C": "minecraft:ender_chest",
+    "B": "minecraft:book",
+    "L": "apotheosis:enchantment_library"
+  },
+  "result": {
+    "id": "apotheosis:ender_library"
+  }
+}

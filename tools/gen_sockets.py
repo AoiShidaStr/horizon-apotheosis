@@ -60,8 +60,8 @@ MESSAGES = {
     "apotheosis.purity.line": ("Purity: %s", "Pureté : %s"),
     "apotheosis.socket.total": ("Sockets: %s/%s", "Sockets : %s/%s"),
     "apotheosis.socket.line": (
-        "%2$s %1$s: %3$s %4$s",
-        "%2$s %1$s : %3$s %4$s",
+        "%2$s %1$s: %3$s",
+        "%2$s %1$s : %3$s",
     ),
     "apotheosis.socket.done": ("Socketed %s (%s).", "Gemme sertie : %s (%s)."),
     "apotheosis.socket.full": (
@@ -85,15 +85,35 @@ MESSAGES = {
         "Reforged: the piece in your hand rolls again.",
         "Reforgé : la pièce tenue relance ses affixes.",
     ),
-    "apotheosis.reforge.not_affixed": (
-        "Hold an affixed piece to reforge it.",
-        "Tenez un objet affixé pour le reforger.",
-    ),
     "apotheosis.salvage.not_affixed": (
         "Hold an affixed piece to salvage it.",
         "Tenez un objet affixé pour le recycler.",
     ),
     "apotheosis.salvage.done": ("Salvaged into %s.", "Recyclé en %s."),
+    "apotheosis.salvage.gem": (
+        "Salvaged into %s gem dust.",
+        "Recyclé en %s poussière de gemme.",
+    ),
+    "apotheosis.unnaming.none": (
+        "That piece has no name to remove.",
+        "Cet objet n'a aucun nom à retirer.",
+    ),
+    "apotheosis.unnaming.custom": (
+        "That name was not written by affixes; it is left alone.",
+        "Ce nom n'a pas été écrit par les affixes ; il est conservé.",
+    ),
+    "apotheosis.unnaming.done": (
+        "The affix name was removed.",
+        "Le nom d'affixe a été retiré.",
+    ),
+    "apotheosis.table.reforge.rarity": (
+        "This table cannot reforge that rarity; use the reforging table.",
+        "Cette table ne peut pas reforger cette rareté ; utilisez la table de reforger.",
+    ),
+    "apotheosis.reforge.missing": (
+        "You do not have the materials this reforge needs.",
+        "Vous n'avez pas les matériaux nécessaires à ce reforger.",
+    ),
     "apotheosis.salvage.no_room": (
         "Some of it did not fit in your inventory.",
         "Une partie n'a pas tenu dans l'inventaire.",
@@ -124,7 +144,7 @@ MESSAGES = {
         "Cette pièce est déjà ancienne.",
     ),
     "apotheosis.cut.no_dust": (
-        "The gem cutting table needs %s gem dust.",
+        "The gem cutting table needs %s gem dust and the purity materials.",
         "La table de taille demande %s poussière de gemme.",
     ),
     "apotheosis.table.reforge.hint": (
@@ -154,7 +174,7 @@ SEALS = [
      "Sceau de sertissage", "Adds one socket to an item",
      "Ajoute un socket à un objet", 0xC98A3A, "plus"),
     ("sigil_of_withdrawal", "uncommon", "Sigil of Withdrawal",
-     "Sceau de retrait", "Removes all socketed gems from an item",
+     "Sceau de retrait", "Pulls every socketed gem back out of an item",
      "Retire toutes les gemmes serties d'un objet", 0x8A9BA8, "minus"),
     ("sigil_of_rebirth", "rare", "Sigil of Rebirth",
      "Sceau de renaissance", "Rerolls an affixed item's rarity and affixes",
@@ -162,42 +182,92 @@ SEALS = [
     ("sigil_of_enhancement", "epic", "Sigil of Enhancement",
      "Sceau d'amélioration", "Raises an affixed item's rarity by one step",
      "Augmente la rareté d'un objet affixé d'un cran", 0xD8483F, "arrow"),
+    ("sigil_of_unnaming", "rare", "Sigil of Unnaming",
+     "Sceau d'effacement", "Removes the affix name from an item",
+     "Retire le nom d'affixe d'un objet", 0x627A8B, "cross"),
 ]
 
 SEAL_RECIPES = {
     "sigil_of_socketing": {
         "type": "minecraft:crafting_shaped",
         "category": "misc",
-        "pattern": [" S ", "SGS", " S "],
-        "key": {"S": ID + ":mysterious_scrap_metal", "G": "minecraft:gold_ingot"},
-        "result": {"id": ID + ":sigil_of_socketing"},
+        "group": "apotheosis",
+        "pattern": ["GUG", "EEE", "GAG"],
+        "key": {"G": ID + ":gem_dust", "U": "minecraft:gunpowder",
+                "E": ID + ":gem_fused_slate", "A": "minecraft:amethyst_shard"},
+        "result": {"id": ID + ":sigil_of_socketing", "count": 3},
     },
     "sigil_of_withdrawal": {
         "type": "minecraft:crafting_shaped",
         "category": "misc",
-        "pattern": [" F ", "FIF", " F "],
-        "key": {"F": ID + ":timeworn_fabric", "I": "minecraft:iron_ingot"},
-        "result": {"id": ID + ":sigil_of_withdrawal"},
+        "group": "apotheosis",
+        "pattern": ["GBG", "ELE", "GMG"],
+        "key": {"G": ID + ":gem_fused_slate", "B": "minecraft:blaze_rod",
+                "E": {"tag": "c:ender_pearls"}, "L": "minecraft:lava_bucket",
+                "M": ID + ":gem_dust"},
+        "result": {"id": ID + ":sigil_of_withdrawal", "count": 4},
     },
     "sigil_of_rebirth": {
         "type": "minecraft:crafting_shaped",
         "category": "misc",
-        "pattern": [" L ", "LBL", " L "],
-        "key": {"L": ID + ":luminous_crystal_shard", "B": "minecraft:blaze_powder"},
-        "result": {"id": ID + ":sigil_of_rebirth"},
+        "group": "apotheosis",
+        "pattern": ["GGG", "EEE", "GGG"],
+        "key": {"G": ID + ":gem_fused_slate", "E": ID + ":gem_dust"},
+        "result": {"id": ID + ":sigil_of_rebirth", "count": 6},
     },
     "sigil_of_enhancement": {
         "type": "minecraft:crafting_shaped",
         "category": "misc",
-        "pattern": [" A ", "AEA", " A "],
-        "key": {"A": ID + ":arcane_sands", "E": "minecraft:emerald"},
-        "result": {"id": ID + ":sigil_of_enhancement"},
+        "group": "apotheosis",
+        "pattern": ["GEG", "EOE", "GEG"],
+        "key": {"G": ID + ":gem_dust", "E": ID + ":gem_fused_slate",
+                "O": ID + ":godforged_pearl"},
+        "result": {"id": ID + ":sigil_of_enhancement", "count": 4},
+    },
+    "sigil_of_unnaming": {
+        "type": "minecraft:crafting_shaped",
+        "category": "misc",
+        "group": "apotheosis",
+        "pattern": ["GGG", "FFF", "GGG"],
+        "key": {"G": ID + ":gem_fused_slate", "F": "minecraft:flint"},
+        "result": {"id": ID + ":sigil_of_unnaming", "count": 6},
     },
 }
 
 # A working table: id, English and French names, the base and emblem colours,
 # and its recipe.
+MATERIAL_ITEMS = [
+    ("gem_fused_slate", "minecraft:deepslate", "Gem-Fused Slate", "Ardoise fusionnée",
+     {"type": "minecraft:crafting_shaped", "category": "misc", "group": "apotheosis",
+      "pattern": ["DDD", "DGD", "DDD"],
+      "key": {"D": "minecraft:deepslate", "G": ID + ":gem_dust"},
+      "result": {"id": ID + ":gem_fused_slate", "count": 8}}),
+    ("iron_upgrade_smithing_template", "minecraft:netherite_upgrade_smithing_template",
+     "Iron Upgrade Template", "Modèle d'amélioration en fer",
+     {"type": "minecraft:crafting_shaped", "category": "misc", "group": "apotheosis",
+      "pattern": [" M ", "SGS", "SGS"],
+      "key": {"M": ID + ":mysterious_scrap_metal", "S": "minecraft:stone",
+              "G": ID + ":gem_fused_slate"},
+      "result": {"id": ID + ":iron_upgrade_smithing_template", "count": 2}}),
+    ("gold_upgrade_smithing_template", "minecraft:netherite_upgrade_smithing_template",
+     "Gold Upgrade Template", "Modèle d'amélioration en or",
+     {"type": "minecraft:crafting_shaped", "category": "misc", "group": "apotheosis",
+      "pattern": [" T ", "SGS", "SGS"],
+      "key": {"T": ID + ":timeworn_fabric", "S": "minecraft:stone",
+              "G": ID + ":gem_fused_slate"},
+      "result": {"id": ID + ":gold_upgrade_smithing_template", "count": 2}}),
+    ("diamond_upgrade_smithing_template", "minecraft:netherite_upgrade_smithing_template",
+     "Diamond Upgrade Template", "Modèle d'amélioration en diamant",
+     {"type": "minecraft:crafting_shaped", "category": "misc", "group": "apotheosis",
+      "pattern": [" L ", "SGS", "SGS"],
+      "key": {"L": ID + ":luminous_crystal_shard", "S": "minecraft:stone",
+              "G": ID + ":gem_fused_slate"},
+      "result": {"id": ID + ":diamond_upgrade_smithing_template", "count": 2}}),
+]
+
 TABLES = [
+    ("simple_reforging_table", "Simple Reforging Table", "Table simple de recréation",
+     0x5D4937, 0xE8C36A),
     ("gem_cutting_table", "Gem Cutting Table", "Table de taille de gemme",
      0x5A3E7A, 0xC9A6F2),
     ("salvaging_table", "Salvaging Table", "Table de récupération",
@@ -207,6 +277,15 @@ TABLES = [
 ]
 
 TABLE_RECIPES = {
+    "simple_reforging_table": {
+        "type": "minecraft:crafting_shaped",
+        "category": "misc",
+        "group": "apotheosis",
+        "pattern": [" I ", "GEG", "SSS"],
+        "key": {"I": {"tag": "c:ingots/iron"}, "G": ID + ":gem_dust",
+                "E": "minecraft:enchanting_table", "S": "minecraft:smooth_stone"},
+        "result": {"id": ID + ":simple_reforging_table"},
+    },
     "gem_cutting_table": {
         "type": "minecraft:crafting_shaped",
         "category": "misc",
@@ -269,11 +348,38 @@ SEAL_GLYPHS = {
         "...x...",
         ".......",
     ],
+    "cross": [
+        "x.....x",
+        ".x...x.",
+        "..x.x..",
+        "...x...",
+        "..x.x..",
+        ".x...x.",
+        "x.....x",
+    ],
 }
 
 # The table top, 16x16: '#' the rim, '+' the field, 'x' the emblem, and any
 # other character leaves the texture's own field.
 TABLE_EMBLEMS = {
+    "simple_reforging_table": [
+        "................",
+        "................",
+        "......xxxx......",
+        ".....x....x.....",
+        "....x..xx..x....",
+        "....x.x..x.x....",
+        "....x.x..x.x....",
+        "....x..xx..x....",
+        ".....x....x.....",
+        "......xxxx......",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+    ],
     "gem_cutting_table": [
         "................",
         "................",
@@ -699,8 +805,6 @@ def main():
         })
         en["item.%s.%s" % (ID, material)] = name_en
         fr["item.%s.%s" % (ID, material)] = name_fr
-        en["apotheosis.material.%s.note" % material] = note_en
-        fr["apotheosis.material.%s.note" % material] = FRENCH_NOTES[material]
 
     for (seal, rarity, name_en, name_fr, desc_en, desc_fr, _colour, _glyph) in SEALS:
         write_json(os.path.join(CONTENT, "data", ID, "horizon", "item", seal + ".json"), {
@@ -724,11 +828,39 @@ def main():
         en["item.%s.%s.desc" % (ID, seal)] = desc_en
         fr["item.%s.%s.desc" % (ID, seal)] = desc_fr
 
+    # Vanilla-shaped recipes and their Java item ids; generated here so repeated
+    # runs do not depend on the local asset importer. The item models point at
+    # a vanilla texture until `tools/import_java_assets.py` layers the Java ones
+    # over `content-java/`; nothing here is a copy of a Java asset.
+    for name, template, name_en, name_fr, recipe in MATERIAL_ITEMS:
+        write_json(os.path.join(CONTENT, "data", ID, "horizon", "item", name + ".json"), {
+            "template": template,
+            "max_stack_size": 64,
+            "rarity": "common",
+        })
+        write_json(os.path.join(CONTENT, "assets", ID, "items", name + ".json"), {
+            "model": {"type": "minecraft:model", "model": "%s:item/%s" % (ID, name)}
+        })
+        if name == "gem_fused_slate":
+            model = {"parent": "minecraft:block/deepslate"}
+        else:
+            model = {
+                "parent": "minecraft:item/generated",
+                "textures": {
+                    "layer0": "minecraft:item/netherite_upgrade_smithing_template"
+                },
+            }
+        write_json(os.path.join(CONTENT, "assets", ID, "models", "item", name + ".json"),
+                   model)
+        write_json(os.path.join(CONTENT, "data", ID, "recipe", name + ".json"), recipe)
+        en["item.%s.%s" % (ID, name)] = name_en
+        fr["item.%s.%s" % (ID, name)] = name_fr
+
     for (table, name_en, name_fr, _base, _emblem) in TABLES:
         write_json(os.path.join(CONTENT, "data", ID, "horizon", "block", table + ".json"), {
-            # A plain block, not the crafting table: a template with a use of
-            # its own would open its menu before the click reached the mod.
-            "template": "minecraft:oak_planks",
+            # The crafting table: Horizon only opens a mod menu (menus.rs) on a
+            # block whose template opens a menu.
+            "template": "minecraft:crafting_table",
             "item": True,
             "properties": {
                 "hardness": 2.5,
@@ -739,8 +871,10 @@ def main():
         write_json(os.path.join(CONTENT, "assets", ID, "items", table + ".json"), {
             "model": {"type": "minecraft:model", "model": "%s:block/%s" % (ID, table)}
         })
+        # Multipart form: this port's own file, not the variants one the Java
+        # jar ships (its assets are All Rights Reserved).
         write_json(os.path.join(CONTENT, "assets", ID, "blockstates", table + ".json"), {
-            "variants": {"": {"model": "%s:block/%s" % (ID, table)}}
+            "multipart": [{"apply": {"model": "%s:block/%s" % (ID, table)}}]
         })
         write_json(os.path.join(CONTENT, "assets", ID, "models", "block", table + ".json"), {
             "parent": "minecraft:block/cube_bottom_top",
@@ -787,6 +921,10 @@ def main():
             items.append(item)
     for (table, *_rest) in TABLES:
         item = "%s:%s" % (ID, table)
+        if item not in items:
+            items.append(item)
+    for (name, *_rest) in MATERIAL_ITEMS:
+        item = "%s:%s" % (ID, name)
         if item not in items:
             items.append(item)
     tab["items"] = items

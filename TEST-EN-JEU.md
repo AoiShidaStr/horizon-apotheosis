@@ -67,11 +67,11 @@ Deux règles :
 ### 0.3 Vérifier que le mod est bien là
 
 ```
-horizon-ctl command "give @s apotheosis:gem_ruby"
+horizon-ctl command "give @s apotheosis:gem"
 horizon-ctl inventory
 ```
 
-On doit voir une pile `apotheosis:gem_ruby` (sinon : `Unknown item`, le `.hmod`
+On doit voir une pile `apotheosis:gem` (sinon : `Unknown item`, le `.hmod`
 n'est pas chargé). Puis, pour les hooks natifs :
 
 ```
@@ -97,41 +97,27 @@ Rien de `Exception`, `Unknown`, `not loaded`, `Failed` ne doit venir de
 
 ## 1. Chantier « gemmes, attributs et affixes »
 
-### 1.1 Les douze gemmes ont une infobulle et un vrai bonus
+### 1.1 Une gemme Java a une infobulle et un bonus une fois sertie
 
-Les gemmes : `gem_ruby`, `gem_amber`, `gem_topaz`, `gem_amethyst`, `gem_sapphire`,
-`gem_peridot`, `gem_jade`, `gem_citrine`, `gem_onyx`, `gem_moonstone`,
-`gem_bloodstone`, `gem_opal`.
+Les gemmes sont les 21 gemmes Java, réunies dans un seul objet `apotheosis:gem` :
+son type et sa pureté sont dans ses données (`apotheosis:gem`,
+`apotheosis:gem_purity`), et une gemme ne fait rien avant d'être sertie.
 
-| Gemme | Palier | Bonus en main secondaire | Attribut à lire |
-| --- | --- | --- | --- |
-| ruby | Common | +1 dégâts d'attaque | `minecraft:attack_damage` |
-| amber | Common | +15 % vitesse de minage | `minecraft:mining_efficiency` (si `/attribute` connaît cet attribut dans cette version, sinon la vitesse de minage à l'œil) |
-| topaz | Uncommon | +0,01 vitesse (+10 %) | `minecraft:movement_speed` |
-| amethyst | Uncommon | +0,4 vitesse d'attaque (+10 %) | `minecraft:attack_speed` |
-| sapphire | Rare | +2 vie max | `minecraft:max_health` |
-| peridot | Rare | +1 chance | `minecraft:luck` |
-| jade | Epic | +2 armure | `minecraft:armor` |
-| citrine | Epic | +0,5 recul | `minecraft:attack_knockback` |
-| onyx | Mythic | +3 dégâts d'attaque | `minecraft:attack_damage` |
-| moonstone | Mythic | +3 vie max | `minecraft:max_health` |
-| bloodstone | Ancient | +4 vie max | `minecraft:max_health` |
-| opal | Ancient | +3 robustesse d'armure | `minecraft:armor_toughness` |
-
-Pour chaque gemme, la preuve est la même (exemple avec le saphir, +2 vie) :
+**Une gemme de type et de pureté choisis** s'obtient par le butin (mob ou
+coffre), pas par `/give` : tuer des mobs ouvre des coffres jusqu'à en tenir une,
+puis lire sa pile.
 
 ```
-horizon-ctl command "attribute @s minecraft:max_health get"
-horizon-ctl command "item replace entity @s weapon.offhand with apotheosis:gem_sapphire 1"
-horizon-ctl command "attribute @s minecraft:max_health get"
+horizon-ctl command "give @s apotheosis:gem"
+horizon-ctl inventory
 ```
 
-**Attendu :** la deuxième lecture vaut `22.0` (20 + 2), la première `20.0`. Le
-même schéma donne 10 → 11 en `attack_damage` pour le rubis, 0 → 2 en `armor`
-pour le jade, etc. (voir la colonne « Attribut à lire »).
+**Attendu :** la pile est `apotheosis:gem`, porte `minecraft:custom_data` avec
+`apotheosis:gem` (id du type, par exemple `apotheosis:core/ballast`) et
+`apotheosis:gem_purity` (0 à 5), et `minecraft:custom_model_data` avec ce même
+id de type. Son modèle affiche la texture Java du type.
 
-Infobulle (ligne de palier dans la couleur du palier + ligne d'effet, en FR et en
-EN) :
+Infobulle :
 
 ```
 horizon-ctl open-inventory
@@ -139,41 +125,41 @@ horizon-ctl open-inventory
 horizon-ctl screenshot /tmp/gemme.png
 ```
 
-**Attendu :** « Palier : Rare » en bleu clair, puis « +2 vie maximale » en bleu.
-Preuve lisible par la machine, en attendant :
+**Attendu :** le nom Java du type (« Gem of the Molten Breach »…), puis une
+ligne par catégorie d'objet avec la valeur de la pureté (« Melee Weapon: +5 Attack
+Damage »…). Les bonus que ce port n'applique pas n'apparaissent pas.
+
+**Le bonus actif** : sertir la gemme dans une pièce à socket libre (clic droit,
+gemme en main, pièce en main secondaire), puis lire la pièce :
 
 ```
-horizon-ctl inventory
+horizon-ctl command "attribute @s minecraft:attack_damage get"
 ```
 
-→ la pile porte `minecraft:attribute_modifiers` avec une entrée d'id
-`apotheosis:<gemme>`, `slot: offhand`.
+→ la pièce porte `minecraft:attribute_modifiers` avec un modificateur
+`apotheosis:socket_0_0` (un par bonus résolu), et la valeur suit celle du JSON
+Java à cette pureté. Une gemme non sertie ne change aucun attribut.
 
-Les quatre gemmes Mythic et Ancient (`onyx`, `moonstone`, `bloodstone`, `opal`)
-doivent en plus scintiller dans l'inventaire (`enchantment_glint_override`).
-
-### 1.2 Poussière de gemme et blocs de gemme
+### 1.2 Poussière de gemme
 
 ```
 horizon-ctl command "give @s apotheosis:gem_dust 64"
-horizon-ctl command "give @s apotheosis:gem_block_ruby"
-horizon-ctl command "setblock ~2 ~ ~ apotheosis:gem_block_ruby"
-horizon-ctl block <X> <Y> <Z>
-horizon-ctl light <X> <Y> <Z> <X> <Y> <Z>
+horizon-ctl inventory
 ```
 
-**Attendu :** le bloc se pose, `block` renvoie
-`apotheosis:gem_block_ruby`, et le niveau de lumière du bloc vaut 3 pour un bloc
-Common, jusqu'à 8 pour un bloc Ancient (`gem_block_opal`). Casser le bloc à la
-pioche rend un bloc (table de butin sur soi).
+**Attendu :** la pile `apotheosis:gem_dust` existe et se montre avec sa texture.
 
-Recettes de survie (à vérifier à l'établi, `horizon-ctl open-inventory` puis
-`click-slot` sur la grille 100-103) :
+Recettes de survie (à vérifier à l'établi) :
 
-- 1 éclat d'améthyste → 2 poussières ; 1 gemme (tag `apotheosis:gems`) → 3 poussières ;
-- 4 poussières autour du catalyseur de la gemme (redstone pour le rubis, gloire
-  pour le topaz, obsidienne pour l'onyx, quartz pour le moonstone…) → 1 gemme ;
-- 9 gemmes → 1 bloc, 1 bloc → 9 gemmes.
+- 1 éclat d'améthyste → 2 poussières ; 1 gemme (tag `apotheosis:gems`, qui ne
+  contient que `apotheosis:gem`) → 3 poussières ;
+- la poussière (3 à 9 selon la pureté visée) et les matériaux de rareté (scrap,
+  étoffe, éclat, sables, perle) en main secondaire, gemme en main, clic droit →
+  pureté +1 ; la table de taille applique le même coût. Java n'a pas de
+  recette pour Parfaite : une gemme s'arrête à Sans défaut.
+
+Les blocs de gemme et la taille de gemme à l'établi n'existent plus : ce port
+n'a que l'objet gemme Java et la poussière.
 
 ### 1.3 Affixes sur le butin des mobs
 
@@ -464,9 +450,9 @@ Perfect 1 % ; sur un boss : 5/20/35/28/10/2), affichée dans son infobulle.
 Polissage : gemme en main, **4 poussières de gemme** en secondaire, clic droit.
 
 ```
-horizon-ctl command "give @s apotheosis:gem_ruby"
+horizon-ctl command "give @s apotheosis:gem"
 horizon-ctl command "item replace entity @s weapon.offhand with apotheosis:gem_dust 4"
-horizon-ctl select apotheosis:gem_ruby
+horizon-ctl select apotheosis:gem
 horizon-ctl use-item
 horizon-ctl inventory
 ```

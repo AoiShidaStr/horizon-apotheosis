@@ -177,12 +177,6 @@ def main():
     for key, english, french in ATTRIBUTES:
         en[f"{ID}.attribute.{key}"] = english
         fr[f"{ID}.attribute.{key}"] = french
-    for key, english, french in AFFIXES:
-        en[f"{ID}.affix.{key}"] = english
-        fr[f"{ID}.affix.{key}"] = french
-    for key, english, french in EFFECT_DESCRIPTIONS:
-        en[f"{ID}.affix.{key}.desc"] = english
-        fr[f"{ID}.affix.{key}.desc"] = french
     for key, english, french in BOSS_WORDS:
         en[f"{ID}.boss.{key}"] = english
         fr[f"{ID}.boss.{key}"] = french

@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "group": "apotheosis",
+  "pattern": [
+    " L ",
+    "SGS",
+    "SGS"
+  ],
+  "key": {
+    "L": "apotheosis:luminous_crystal_shard",
+    "S": "minecraft:stone",
+    "G": "apotheosis:gem_fused_slate"
+  },
+  "result": {
+    "id": "apotheosis:diamond_upgrade_smithing_template",
+    "count": 2
+  }
+}

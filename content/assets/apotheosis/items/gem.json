@@ -1,0 +1,160 @@
+{
+  "model": {
+    "type": "minecraft:select",
+    "property": "minecraft:custom_model_data",
+    "index": 0,
+    "cases": [
+      {
+        "when": "apotheosis:core/ballast",
+        "model": {
+          "type": "minecraft:model",
+          "model": "apotheosis:item/gem_ballast"
+        }
+      },
+      {
+        "when": "apotheosis:core/brawlers",
+        "model": {
+          "type": "minecraft:model",
+          "model": "apotheosis:item/gem_brawlers"
+        }
+      },
+      {
+        "when": "apotheosis:core/breach",
+        "model": {
+          "type": "minecraft:model",
+          "model": "apotheosis:item/gem_breach"
+        }
+      },
+      {
+        "when": "apotheosis:core/combatant",
+        "model": {
+          "type": "minecraft:model",
+          "model": "apotheosis:item/gem_combatant"
+        }
+      },
+      {
+        "when": "apotheosis:core/guardian",
+        "model": {
+          "type": "minecraft:model",
+          "model": "apotheosis:item/gem_guardian"
+        }
+      },
+      {
+        "when": "apotheosis:core/lightning",
+        "model": {
+          "type": "minecraft:model",
+          "model": "apotheosis:item/gem_lightning"
+        }
+      },
+      {
+        "when": "apotheosis:core/lunar",
+        "model": {
+          "type": "minecraft:model",
+          "model": "apotheosis:item/gem_lunar"
+        }
+      },
+      {
+        "when": "apotheosis:core/samurai",
+        "model": {
+          "type": "minecraft:model",
+          "model": "apotheosis:item/gem_samurai"
+        }
+      },
+      {
+        "when": "apotheosis:core/slipstream",
+        "model": {
+          "type": "minecraft:model",
+          "model": "apotheosis:item/gem_slipstream"
+        }
+      },
+      {
+        "when": "apotheosis:core/solar",
+        "model": {
+          "type": "minecraft:model",
+          "model": "apotheosis:item/gem_solar"
+        }
+      },
+      {
+        "when": "apotheosis:core/splendor",
+        "model": {
+          "type": "minecraft:model",
+          "model": "apotheosis:item/gem_splendor"
+        }
+      },
+      {
+        "when": "apotheosis:core/tyrannical",
+        "model": {
+          "type": "minecraft:model",
+          "model": "apotheosis:item/gem_tyrannical"
+        }
+      },
+      {
+        "when": "apotheosis:core/warlord",
+        "model": {
+          "type": "minecraft:model",
+          "model": "apotheosis:item/gem_warlord"
+        }
+      },
+      {
+        "when": "apotheosis:overworld/earth",
+        "model": {
+          "type": "minecraft:model",
+          "model": "apotheosis:item/gem_earth"
+        }
+      },
+      {
+        "when": "apotheosis:overworld/royalty",
+        "model": {
+          "type": "minecraft:model",
+          "model": "apotheosis:item/gem_royalty"
+        }
+      },
+      {
+        "when": "apotheosis:overworld/verdant_ruin",
+        "model": {
+          "type": "minecraft:model",
+          "model": "apotheosis:item/gem_verdant_ruin"
+        }
+      },
+      {
+        "when": "apotheosis:the_end/endersurge",
+        "model": {
+          "type": "minecraft:model",
+          "model": "apotheosis:item/gem_endersurge"
+        }
+      },
+      {
+        "when": "apotheosis:the_end/mageslayer",
+        "model": {
+          "type": "minecraft:model",
+          "model": "apotheosis:item/gem_mageslayer"
+        }
+      },
+      {
+        "when": "apotheosis:the_nether/blood_lord",
+        "model": {
+          "type": "minecraft:model",
+          "model": "apotheosis:item/gem_blood_lord"
+        }
+      },
+      {
+        "when": "apotheosis:the_nether/inferno",
+        "model": {
+          "type": "minecraft:model",
+          "model": "apotheosis:item/gem_inferno"
+        }
+      },
+      {
+        "when": "apotheosis:the_nether/molten_breach",
+        "model": {
+          "type": "minecraft:model",
+          "model": "apotheosis:item/gem_molten_breach"
+        }
+      }
+    ],
+    "fallback": {
+      "type": "minecraft:model",
+      "model": "apotheosis:item/gem_ballast"
+    }
+  }
+}
