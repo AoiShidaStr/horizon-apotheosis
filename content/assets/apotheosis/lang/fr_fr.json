@@ -22,7 +22,7 @@
   "apotheosis.command.set_world_tier.done": "Palier de monde de %s réglé sur %s.",
   "apotheosis.command.set_world_tier.missing_player": "Aucun joueur nommé %s n'est en ligne.",
   "apotheosis.command.set_world_tier.denied": "Seuls les opérateurs peuvent changer le palier de monde d'un autre joueur.",
-  "apotheosis.command.help": "Apothéose : /apoth reforge — relance les affixes de l'équipement tenu (3 niveaux) ; /apoth salvage — recycle un objet affixé en matériaux de rareté ; /apoth world_tier — affiche ou change votre palier de monde.",
+  "apotheosis.command.help": "Apothéose : /apoth salvage — recycle un objet affixé en matériaux de rareté ; /apoth world_tier — affiche ou change votre palier de monde. La reforge se fait sur une table de reforge.",
   "apotheosis.command.unknown": "Commande Apothéose inconnue.",
   "apotheosis.reforge.empty": "Tenez en main l'équipement à reforger.",
   "apotheosis.reforge.not_gear": "Ce n'est ni une arme, ni un outil, ni une armure.",
@@ -702,5 +702,6 @@
   "button.apotheosis.augmenting.max_level": "Niveau maximal déjà atteint",
   "button.apotheosis.augmenting.no_alternatives": "Aucun affixe de remplacement",
   "button.apotheosis.augmenting.upgrade.cost": "Coût : %sx %s",
-  "button.apotheosis.augmenting.upgrade.exp_cost": "Coût en expérience : %s niveaux"
+  "button.apotheosis.augmenting.upgrade.exp_cost": "Coût en expérience : %s niveaux",
+  "item.apotheosis.superior_sigil_of_enhancement": "Sceau d'amélioration supérieur"
 }

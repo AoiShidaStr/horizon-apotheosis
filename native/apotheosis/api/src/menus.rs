@@ -1534,10 +1534,11 @@ fn augmenting_draw(host: &dyn Host, event: &mut ScreenDrawEvent<'_>) {
         host.text(event.batch, ">", [ox + AUG_NEXT_BUTTON[0], oy + AUG_NEXT_BUTTON[1]], 0xFFFFFF, true);
     }
     let buttons = [
-        (AUG_UPGRADE_BUTTON, AUG_UPGRADE, 4, 5, "Up"),
-        (AUG_REROLL_BUTTON, AUG_REROLL, 6, 7, "Re"),
+        (AUG_UPGRADE_BUTTON, AUG_UPGRADE, "Up"),
+        (AUG_REROLL_BUTTON, AUG_REROLL, "Re"),
     ];
-    for (corner, flag, sigil_slot, level_slot, label) in buttons {
+    // Costs live in the button tooltip, as in Java: a label under the button would cover "Inventory".
+    for (corner, flag, label) in buttons {
         let ready = flags & flag != 0;
         let [x, y] = corner;
         let src = [184.0, if ready { 133.0 } else { 150.0 }, 33.0, 17.0];
@@ -1555,8 +1556,6 @@ fn augmenting_draw(host: &dyn Host, event: &mut ScreenDrawEvent<'_>) {
                 true,
             );
         }
-        let cost = format!("{}x {}", get(event.data, sigil_slot), get(event.data, level_slot));
-        host.text(event.batch, &cost, [ox + x, oy + y + 17.0], if ready { 0xA0FFA0 } else { 0x808080 }, true);
     }
 }
 
