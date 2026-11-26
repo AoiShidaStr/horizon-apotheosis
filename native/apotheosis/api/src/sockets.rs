@@ -25,6 +25,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::affixes;
 use crate::attributes::{self, Attr};
 use crate::gems::{self, Resolved};
+use crate::tiers::WorldTier;
 use crate::{apply_affixes, is_equipment, Rng, Tier};
 
 /// The off hand's slot in `native_inventory`'s `Player` numbering.
@@ -242,8 +243,8 @@ pub struct Socket {
     pub purity: Purity,
 }
 
-/// The purity a fresh drop rolls. Ordinary loot is mostly poor, as in
-/// Apotheosis' frontier tables; a boss draws from better tables.
+/// The purity a gem in a chest rolls, where no player's world tier decides it:
+/// ordinary loot is mostly poor.
 const ORDINARY_PURITY: [(Purity, u64); 6] = [
     (Purity::Cracked, 30),
     (Purity::Chipped, 40),
@@ -251,15 +252,6 @@ const ORDINARY_PURITY: [(Purity, u64); 6] = [
     (Purity::Normal, 8),
     (Purity::Flawless, 2),
     (Purity::Perfect, 1),
-];
-
-const BOSS_PURITY: [(Purity, u64); 6] = [
-    (Purity::Cracked, 5),
-    (Purity::Chipped, 20),
-    (Purity::Flawed, 35),
-    (Purity::Normal, 28),
-    (Purity::Flawless, 10),
-    (Purity::Perfect, 2),
 ];
 
 fn roll_purity(purity_weights: &[(Purity, u64)], rng: &mut Rng) -> Purity {
@@ -292,14 +284,16 @@ pub fn purity_of(stack: &ItemStack) -> Purity {
     gems::purity_of(stack)
 }
 
-/// Gives a freshly dropped gem its purity, never below the floor its Java data
-/// sets for it.
-pub fn roll_dropped_purity(stack: &mut ItemStack, rng: &mut Rng, boss: bool) {
+/// Gives a freshly dropped gem its purity from the world `tier`'s table, never
+/// below the floor its Java data sets for it, nor above the ceiling a boss or
+/// an ordinary drop allows.  Horizon's Host reads no attribute, so luck is 0.
+pub fn roll_dropped_purity(stack: &mut ItemStack, tier: WorldTier, rng: &mut Rng, boss: bool) {
     let Some(gem) = gems::of_stack(stack).map(|(gem, _)| gem) else {
         return;
     };
-    let rolled = roll_purity(if boss { &BOSS_PURITY } else { &ORDINARY_PURITY }, rng);
-    set_purity(stack, rolled.max(gem.min_purity));
+    let ceiling = if boss { Purity::Perfect } else { Purity::Flawless };
+    let purity = crate::tiers::roll_gem_purity(tier, 0.0, gem.min_purity, ceiling, rng);
+    set_purity(stack, purity);
 }
 
 /// How many sockets a piece of a given tier rolls: none at common, up to three
@@ -1504,7 +1498,7 @@ pub fn loot_function(event: &mut LootFunctionEvent<'_>) {
 /// the game handing it a level.
 fn fill_chest_gem(dimension: &str, seed: i64, stack: &mut LootStack) {
     let mut rng = Rng::new(seed as u64);
-    let (gem, _) = gems::roll(dimension, false, &mut rng);
+    let gem = gems::roll_type(dimension, &mut rng);
     let purity = chest_gem_purity(seed).max(gem.min_purity);
     // The gem's own item: its declaration carries the type, purity, name and
     // model, so the generic entry's patch is dropped.
@@ -2035,13 +2029,13 @@ mod tests {
         let mut stack = ItemStack::new("apotheosis:gem_opal", 1);
         assert_eq!(purity_of(&stack), Purity::Normal);
         let mut rng = Rng::new(13);
-        roll_dropped_purity(&mut stack, &mut rng, true);
+        roll_dropped_purity(&mut stack, WorldTier::Pinnacle, &mut rng, true);
         assert!(purity_of(&stack) >= Purity::Cracked);
         set_purity(&mut stack, Purity::Perfect);
         assert_eq!(purity_of(&stack), Purity::Perfect);
 
         let mut sword = ItemStack::new("minecraft:iron_sword", 1);
-        roll_dropped_purity(&mut sword, &mut rng, false);
+        roll_dropped_purity(&mut sword, WorldTier::Pinnacle, &mut rng, false);
         assert!(!has_affixes(&sword), "a plain item got gem data");
     }
 

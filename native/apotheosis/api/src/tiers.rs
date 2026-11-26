@@ -13,8 +13,11 @@
 //! criterion once met stays met even after the gear is taken off, and the
 //! tiers it opens stay unlocked.
 //!
-//! Only the state, the unlocking and the commands live here: the loot, gem and
-//! invader rates of a tier and the monsters' augments are later steps.
+//! The state, the unlocking, the commands and the rates live here: a tier's
+//! rarity and gem-purity tables and its invader spawn chances are Java's data
+//! (`rarities/*.json`, `purity_weights/weights.json`,
+//! `data_maps/dimension_type/invader_spawn_rules.json`), rolled by the loot,
+//! gem and invader hooks. The monsters' augments are a later step.
 
 use horizon_client::mod_api::{
     AttachmentCodec, AttachmentError, AttachmentType, Compound, EquipmentSlot, Flow, Holder, Host,
@@ -23,7 +26,8 @@ use horizon_client::mod_api::{
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use crate::{sockets, Tier};
+use crate::sockets::Purity;
+use crate::{sockets, Rng, Tier};
 
 /// The bits of `Progress::kills`.
 const KILLED_INVADER: i32 = 1;
@@ -463,6 +467,264 @@ pub fn tier_of(player: u128) -> WorldTier {
 #[allow(dead_code)] // the loot and monster steps read it from a hook's host.
 pub fn tier_of_with(host: &mut dyn Host, player: u128) -> WorldTier {
     state_of(host, player).tier
+}
+
+// ---------------------------------------------------------------------------
+// Rates by world tier
+// ---------------------------------------------------------------------------
+
+/// Java's `TieredWeights.Weight`: a base weight and how much one point of
+/// `minecraft:luck` moves it. The values are the ones in
+/// `data/apotheosis/rarities/*.json` and `purity_weights/weights.json`; a
+/// field the file leaves out is zero.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Weight {
+    /// The weight with no luck at all.
+    pub weight: i32,
+    /// How many points of weight one point of luck adds.
+    pub quality: f32,
+}
+
+impl Weight {
+    const fn new(weight: i32, quality: f32) -> Self {
+        Self { weight, quality }
+    }
+
+    /// Java's `Weight.getWeight` with `Weighted.wrap`'s floor:
+    /// `max(0, weight + Math.round(luck * quality))`.
+    pub fn at(self, luck: f32) -> i64 {
+        // Java's `Math.round(float)` is `floor(x + 0.5)`, which differs from
+        // Rust's `round` for a negative luck.
+        let bonus = (luck * self.quality + 0.5).floor() as i64;
+        (i64::from(self.weight) + bonus).max(0)
+    }
+}
+
+/// The rarities a world tier rolls, in Java's order. `Tier::Ancient` is this
+/// port's own extension and never comes from a tier's table.
+pub const ROLLED_RARITIES: [Tier; 5] = [
+    Tier::Common,
+    Tier::Uncommon,
+    Tier::Rare,
+    Tier::Epic,
+    Tier::Mythic,
+];
+
+/// Java's rarity weights, by tier (`WorldTier::index`) and by
+/// `ROLLED_RARITIES` index.
+const RARITY_WEIGHTS: [[Weight; 5]; 5] = [
+    // Haven
+    [
+        Weight::new(600, 0.0),
+        Weight::new(360, 2.5),
+        Weight::new(40, 5.0),
+        Weight::new(0, 0.0),
+        Weight::new(0, 0.0),
+    ],
+    // Frontier
+    [
+        Weight::new(290, 0.0),
+        Weight::new(600, 0.0),
+        Weight::new(100, 5.0),
+        Weight::new(10, 0.0),
+        Weight::new(0, 0.0),
+    ],
+    // Ascent
+    [
+        Weight::new(100, 0.0),
+        Weight::new(300, 0.0),
+        Weight::new(500, 2.5),
+        Weight::new(100, 5.0),
+        Weight::new(0, 0.0),
+    ],
+    // Summit
+    [
+        Weight::new(0, 0.0),
+        Weight::new(120, 0.0),
+        Weight::new(290, 2.5),
+        Weight::new(540, 5.0),
+        Weight::new(50, 5.0),
+    ],
+    // Pinnacle
+    [
+        Weight::new(0, 0.0),
+        Weight::new(0, 0.0),
+        Weight::new(100, 0.0),
+        Weight::new(650, 2.5),
+        Weight::new(250, 10.0),
+    ],
+];
+
+/// The purities a gem drops at, in Java's order (cracked to perfect).
+pub const ROLLED_PURITIES: [Purity; 6] = Purity::ALL;
+
+/// Java's purity weights, by tier (`WorldTier::index`) and by
+/// `ROLLED_PURITIES` index.
+const PURITY_WEIGHTS: [[Weight; 6]; 5] = [
+    // Haven
+    [
+        Weight::new(550, 0.0),
+        Weight::new(410, 2.5),
+        Weight::new(40, 5.0),
+        Weight::new(0, 0.0),
+        Weight::new(0, 0.0),
+        Weight::new(0, 0.0),
+    ],
+    // Frontier
+    [
+        Weight::new(230, 0.0),
+        Weight::new(540, 0.0),
+        Weight::new(180, 2.5),
+        Weight::new(50, 1.0),
+        Weight::new(0, 0.0),
+        Weight::new(0, 0.0),
+    ],
+    // Ascent
+    [
+        Weight::new(20, 0.0),
+        Weight::new(250, 0.0),
+        Weight::new(560, 2.5),
+        Weight::new(160, 5.0),
+        Weight::new(10, 1.0),
+        Weight::new(0, 0.0),
+    ],
+    // Summit
+    [
+        Weight::new(0, 0.0),
+        Weight::new(80, 0.0),
+        Weight::new(310, 2.5),
+        Weight::new(580, 5.0),
+        Weight::new(20, 5.0),
+        Weight::new(10, 0.0),
+    ],
+    // Pinnacle
+    [
+        Weight::new(0, 0.0),
+        Weight::new(0, 0.0),
+        Weight::new(100, 0.0),
+        Weight::new(330, 0.0),
+        Weight::new(470, 0.0),
+        Weight::new(100, 5.0),
+    ],
+];
+
+/// Natural-spawn invader chances in 10 000, by dimension (overworld, Nether,
+/// End) and tier. Java's overworld and End rows are equal; a dimension the
+/// data gives no row (a mod's) takes the overworld's.
+const INVADER_CHANCES: [[u64; 5]; 3] = [
+    // Overworld
+    [0, 180, 200, 250, 300],
+    // Nether
+    [0, 250, 270, 300, 350],
+    // End
+    [0, 180, 200, 250, 300],
+];
+
+/// The rarity table of a tier, common first.
+pub fn rarity_weights(tier: WorldTier) -> &'static [Weight; 5] {
+    &RARITY_WEIGHTS[tier.index()]
+}
+
+/// The purity table of a tier, cracked first.
+pub fn purity_weights(tier: WorldTier) -> &'static [Weight; 6] {
+    &PURITY_WEIGHTS[tier.index()]
+}
+
+/// An index drawn from `weights`, each entry's chance proportional to its
+/// weight; the first entry when every one of them weighs zero.
+fn weighted(weights: &[i64], rand: &mut Rng) -> usize {
+    let total: u64 = weights.iter().map(|weight| *weight as u64).sum();
+    if total == 0 {
+        return 0;
+    }
+    let mut roll = rand.below(total);
+    for (index, weight) in weights.iter().enumerate() {
+        let weight = *weight as u64;
+        if roll < weight {
+            return index;
+        }
+        roll -= weight;
+    }
+    weights.len() - 1
+}
+
+/// The rarity an affixed piece of `tier` rolls at `luck`.
+pub fn roll_rarity(tier: WorldTier, luck: f32, rand: &mut Rng) -> Tier {
+    let weights: Vec<i64> = rarity_weights(tier).iter().map(|w| w.at(luck)).collect();
+    ROLLED_RARITIES[weighted(&weights, rand)]
+}
+
+/// The purity a gem of `tier` rolls at `luck`, with no gem constraint.
+pub fn roll_purity(tier: WorldTier, luck: f32, rand: &mut Rng) -> Purity {
+    let weights: Vec<i64> = purity_weights(tier).iter().map(|w| w.at(luck)).collect();
+    ROLLED_PURITIES[weighted(&weights, rand)]
+}
+
+/// The purity a gem of `tier` rolls at `luck` between the gem's own floor and
+/// the drop's ceiling: a purity outside that range never weighs, and when every
+/// allowed purity weighs zero, the plain roll is clamped into the range.
+pub fn roll_gem_purity(
+    tier: WorldTier,
+    luck: f32,
+    floor: Purity,
+    ceiling: Purity,
+    rand: &mut Rng,
+) -> Purity {
+    let ceiling = ceiling.max(floor);
+    let weights: Vec<i64> = purity_weights(tier)
+        .iter()
+        .enumerate()
+        .map(|(index, weight)| {
+            let purity = ROLLED_PURITIES[index];
+            if purity >= floor && purity <= ceiling {
+                weight.at(luck)
+            } else {
+                0
+            }
+        })
+        .collect();
+    if weights.iter().any(|weight| *weight > 0) {
+        return ROLLED_PURITIES[weighted(&weights, rand)];
+    }
+    roll_purity(tier, luck, rand).clamp(floor, ceiling)
+}
+
+/// The chance in 10 000 that a natural spawn near a `tier` player becomes an
+/// invader; zero at Haven.
+pub fn invader_chance(tier: WorldTier, dimension: &str) -> u64 {
+    let row = match dimension {
+        "minecraft:the_nether" => 1,
+        "minecraft:the_end" => 2,
+        _ => 0,
+    };
+    INVADER_CHANCES[row][tier.index()]
+}
+
+/// The player nearest a point of `dimension`, from the server's online list.
+pub fn nearest_player(host: &mut dyn Host, dimension: &str, pos: [f64; 3]) -> Option<u128> {
+    let distance = |player: &NativeServerPlayer| {
+        let [x, y, z] = player.position;
+        (x - pos[0]).powi(2) + (y - pos[1]).powi(2) + (z - pos[2]).powi(2)
+    };
+    host.server_players()
+        .into_iter()
+        .filter(|player| player.dimension == dimension)
+        .min_by(|a, b| distance(a).total_cmp(&distance(b)))
+        .map(|player| player.uuid)
+}
+
+/// The tier that governs a drop in `dimension` at `pos`: the killer's when the
+/// loot names one, else the nearest player's, else Haven.
+pub fn tier_for_drop(
+    host: &mut dyn Host,
+    killer: Option<u128>,
+    dimension: &str,
+    pos: [f64; 3],
+) -> WorldTier {
+    match killer.or_else(|| nearest_player(host, dimension, pos)) {
+        Some(player) => tier_of_with(host, player),
+        None => WorldTier::Haven,
+    }
 }
 
 /// Reads a player's state, remembering its active tier.
@@ -1038,5 +1300,142 @@ mod tests {
     #[test]
     fn tier_of_starts_at_haven() {
         assert_eq!(tier_of(0x1234_5678_9abc_def0), WorldTier::Haven);
+    }
+
+    /// The raw `(weight, quality)` pairs of a table, for an exact comparison.
+    fn pairs(weights: &[Weight]) -> Vec<(i32, f32)> {
+        weights.iter().map(|w| (w.weight, w.quality)).collect()
+    }
+
+    #[test]
+    fn the_rarity_table_is_javas() {
+        assert_eq!(
+            pairs(rarity_weights(WorldTier::Haven)),
+            vec![(600, 0.0), (360, 2.5), (40, 5.0), (0, 0.0), (0, 0.0)]
+        );
+        assert_eq!(
+            pairs(rarity_weights(WorldTier::Frontier)),
+            vec![(290, 0.0), (600, 0.0), (100, 5.0), (10, 0.0), (0, 0.0)]
+        );
+        assert_eq!(
+            pairs(rarity_weights(WorldTier::Ascent)),
+            vec![(100, 0.0), (300, 0.0), (500, 2.5), (100, 5.0), (0, 0.0)]
+        );
+        assert_eq!(
+            pairs(rarity_weights(WorldTier::Summit)),
+            vec![(0, 0.0), (120, 0.0), (290, 2.5), (540, 5.0), (50, 5.0)]
+        );
+        assert_eq!(
+            pairs(rarity_weights(WorldTier::Pinnacle)),
+            vec![(0, 0.0), (0, 0.0), (100, 0.0), (650, 2.5), (250, 10.0)]
+        );
+    }
+
+    #[test]
+    fn the_purity_table_is_javas() {
+        assert_eq!(
+            pairs(purity_weights(WorldTier::Haven)),
+            vec![(550, 0.0), (410, 2.5), (40, 5.0), (0, 0.0), (0, 0.0), (0, 0.0)]
+        );
+        assert_eq!(
+            pairs(purity_weights(WorldTier::Frontier)),
+            vec![(230, 0.0), (540, 0.0), (180, 2.5), (50, 1.0), (0, 0.0), (0, 0.0)]
+        );
+        assert_eq!(
+            pairs(purity_weights(WorldTier::Ascent)),
+            vec![(20, 0.0), (250, 0.0), (560, 2.5), (160, 5.0), (10, 1.0), (0, 0.0)]
+        );
+        assert_eq!(
+            pairs(purity_weights(WorldTier::Summit)),
+            vec![(0, 0.0), (80, 0.0), (310, 2.5), (580, 5.0), (20, 5.0), (10, 0.0)]
+        );
+        assert_eq!(
+            pairs(purity_weights(WorldTier::Pinnacle)),
+            vec![(0, 0.0), (0, 0.0), (100, 0.0), (330, 0.0), (470, 0.0), (100, 5.0)]
+        );
+    }
+
+    #[test]
+    fn luck_moves_only_the_weights_with_a_quality() {
+        assert_eq!(Weight::new(360, 2.5).at(2.0), 365);
+        assert_eq!(Weight::new(40, 5.0).at(1.0), 45);
+        assert_eq!(Weight::new(600, 0.0).at(4.0), 600, "quality zero never moves");
+        assert_eq!(Weight::new(40, 5.0).at(-2.0), 30, "unlucky lowers it too");
+        assert_eq!(Weight::new(1, 1.0).at(-5.0), 0, "never below zero");
+        // Java's `Math.round` rounds half up: 0.2 * 2.5 -> 1.
+        assert_eq!(Weight::new(410, 2.5).at(0.2), 411);
+        // Nothing common moves at Haven, since its quality is zero; the rest
+        // do not fall when luck rises.
+        let haven = rarity_weights(WorldTier::Haven);
+        assert_eq!(haven[0].at(3.0), haven[0].at(0.0));
+        for index in 1..5 {
+            assert!(haven[index].at(3.0) >= haven[index].at(0.0));
+        }
+    }
+
+    #[test]
+    fn haven_never_rolls_epic_mythic_or_ancient() {
+        let mut rand = Rng::new(5);
+        for _ in 0..4000 {
+            let rarity = roll_rarity(WorldTier::Haven, 0.0, &mut rand);
+            assert!(rarity <= Tier::Rare, "Haven rolled {rarity:?}");
+            assert_ne!(rarity, Tier::Ancient);
+        }
+    }
+
+    #[test]
+    fn pinnacle_never_rolls_common_or_ancient() {
+        let mut rand = Rng::new(9);
+        for _ in 0..4000 {
+            let rarity = roll_rarity(WorldTier::Pinnacle, 0.0, &mut rand);
+            assert!(rarity >= Tier::Rare, "Pinnacle rolled {rarity:?}");
+            assert_ne!(rarity, Tier::Ancient);
+        }
+    }
+
+    #[test]
+    fn a_gem_floor_is_never_crossed() {
+        let mut rand = Rng::new(21);
+        for tier in WorldTier::ALL {
+            for boss in [false, true] {
+                let ceiling = if boss { Purity::Perfect } else { Purity::Flawless };
+                for _ in 0..500 {
+                    let purity = roll_gem_purity(tier, 0.0, Purity::Flawless, ceiling, &mut rand);
+                    assert!(purity >= Purity::Flawless, "{tier:?} rolled {purity:?}");
+                    assert!(purity <= ceiling);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_gem_whose_allowed_purities_all_weigh_zero_takes_the_nearest() {
+        // Haven weighs nothing from normal up, so a normal floor lands there.
+        let mut rand = Rng::new(31);
+        for _ in 0..500 {
+            assert_eq!(
+                roll_gem_purity(WorldTier::Haven, 0.0, Purity::Normal, Purity::Perfect, &mut rand),
+                Purity::Normal
+            );
+        }
+    }
+
+    #[test]
+    fn invader_chances_follow_the_tier_and_dimension() {
+        for dimension in ["minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"] {
+            assert_eq!(invader_chance(WorldTier::Haven, dimension), 0, "Haven is safe");
+        }
+        assert_eq!(invader_chance(WorldTier::Frontier, "minecraft:overworld"), 180);
+        assert_eq!(invader_chance(WorldTier::Ascent, "minecraft:overworld"), 200);
+        assert_eq!(invader_chance(WorldTier::Summit, "minecraft:overworld"), 250);
+        assert_eq!(invader_chance(WorldTier::Pinnacle, "minecraft:overworld"), 300);
+        assert_eq!(invader_chance(WorldTier::Frontier, "minecraft:the_nether"), 250);
+        assert_eq!(invader_chance(WorldTier::Ascent, "minecraft:the_nether"), 270);
+        assert_eq!(invader_chance(WorldTier::Summit, "minecraft:the_nether"), 300);
+        assert_eq!(invader_chance(WorldTier::Pinnacle, "minecraft:the_nether"), 350);
+        assert_eq!(invader_chance(WorldTier::Frontier, "minecraft:the_end"), 180);
+        assert_eq!(invader_chance(WorldTier::Pinnacle, "minecraft:the_end"), 300);
+        // A mod's dimension takes the overworld's row.
+        assert_eq!(invader_chance(WorldTier::Pinnacle, "mymod:void"), 300);
     }
 }

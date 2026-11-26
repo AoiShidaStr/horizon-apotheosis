@@ -302,17 +302,10 @@ impl Rng {
     }
 }
 
-/// What an ordinary mob killed by a player can roll: never above epic, so the
-/// two high tiers stay boss-only.
+/// What the sigil of rebirth rolls: never above epic, so the two high tiers
+/// stay boss-only. Loot rolls its rarity from the player's world tier instead
+/// (`tiers::roll_rarity`).
 const ORDINARY_TIERS: [(Tier, u64); 3] = [(Tier::Uncommon, 55), (Tier::Rare, 30), (Tier::Epic, 15)];
-
-/// What a boss's gear rolls.
-pub(crate) const BOSS_TIERS: [(Tier, u64); 4] = [
-    (Tier::Rare, 25),
-    (Tier::Epic, 40),
-    (Tier::Mythic, 25),
-    (Tier::Ancient, 10),
-];
 
 const CHEST_GEM_POOL: &str = "apotheosis:chest_gems";
 
@@ -649,13 +642,23 @@ impl Hooks for Apotheosis {
         let Some(gem_rate) = gem_kill_chance(kind, boss, killed_by_player) else {
             return;
         };
+        // The killer's tier, or the nearest player's when the mob names none:
+        // it decides the rarity, the gem's purity and the gear. Horizon's Host
+        // reads no attribute, so `minecraft:luck` is 0 here.
+        let world = tiers::tier_for_drop(
+            host,
+            event.context.player,
+            event.context.dimension,
+            event.context.origin,
+        );
+        let luck = 0.0;
         let n = DROPS.fetch_add(1, Ordering::Relaxed);
         let mut rng = Rng::new(seed_of(&event.context, n));
 
-        // A gem of the level's dimension, at a purity at or above its Java
-        // floor: a boss draws from better steps than an ordinary mob.
+        // A gem of the level's dimension, at the world tier's purity above its
+        // Java floor: a boss may reach a step an ordinary drop cannot.
         if boss {
-            let (gem, purity) = gems::roll(event.context.dimension, true, &mut rng);
+            let (gem, purity) = gems::roll(event.context.dimension, world, true, &mut rng);
             event.drops.push(gems::stack(gem, purity));
         }
         // The gear this mob dropped, upgraded in place: a zombie's sword, a
@@ -665,11 +668,11 @@ impl Hooks for Apotheosis {
                 continue;
             }
             if boss {
-                let tier = rng.tier(&BOSS_TIERS);
+                let tier = tiers::roll_rarity(world, luck, &mut rng);
                 apply_affixes(stack, tier, &mut rng);
                 sockets::after_affixes(stack, tier, &mut rng);
             } else if killed_by_player && rng.chance(35) {
-                let tier = rng.tier(&ORDINARY_TIERS);
+                let tier = tiers::roll_rarity(world, luck, &mut rng);
                 apply_affixes(stack, tier, &mut rng);
                 sockets::after_affixes(stack, tier, &mut rng);
             }
@@ -677,7 +680,7 @@ impl Hooks for Apotheosis {
         // A low gem from an ordinary monster: 4% for a player kill, 0.5%
         // otherwise, as the two Java GLMs do.
         if !boss && rng.below(1000) < gem_rate {
-            let (gem, purity) = gems::roll(event.context.dimension, false, &mut rng);
+            let (gem, purity) = gems::roll(event.context.dimension, world, false, &mut rng);
             event.drops.push(gems::stack(gem, purity));
         }
         // And one of its own: a boss always, an ordinary mob killed by a player
@@ -691,11 +694,7 @@ impl Hooks for Apotheosis {
         };
         let drop = boss || (killed_by_player && rng.chance(4));
         if drop {
-            let tier = if boss {
-                rng.tier(&BOSS_TIERS)
-            } else {
-                rng.tier(&ORDINARY_TIERS)
-            };
+            let tier = tiers::roll_rarity(world, luck, &mut rng);
             let item = gear(&mut rng);
             let mut stack = one(item);
             apply_affixes(&mut stack, tier, &mut rng);
@@ -705,7 +704,7 @@ impl Hooks for Apotheosis {
         // A gem's purity is rolled where it drops; the gear above is done.
         for stack in event.drops.iter_mut() {
             if stack.data().is_none() {
-                sockets::roll_dropped_purity(stack, &mut rng, boss);
+                sockets::roll_dropped_purity(stack, world, &mut rng, boss);
             }
         }    }
 

@@ -665,11 +665,9 @@ pub fn tooltip_lines(gem: &Gem, purity: Purity) -> Vec<TooltipLine> {
     lines
 }
 
-/// What an ordinary mob or a boss rolls: a gem of the level's dimension, at a
-/// purity at or above its floor.  Every type in the dimension is eligible;
-/// the floor clamps the purity afterwards, as Java's `Gem.toStack` does, so a
-/// Flawless-only End gem can still drop in the End.
-pub fn roll(dimension: &str, boss: bool, rng: &mut crate::Rng) -> (&'static Gem, Purity) {
+/// The gem type a drop of `dimension` is, by Java weight.  Every type in the
+/// dimension is eligible, a type that names no dimension anywhere.
+pub fn roll_type(dimension: &str, rng: &mut crate::Rng) -> &'static Gem {
     let mut candidates: Vec<&'static Gem> = GEMS
         .iter()
         .filter(|gem| gem.dimensions.is_empty() || gem.dimensions.contains(&dimension))
@@ -690,9 +688,23 @@ pub fn roll(dimension: &str, boss: bool, rng: &mut crate::Rng) -> (&'static Gem,
         }
         pick -= gem.weight;
     }
+    chosen
+}
+
+/// What an ordinary mob or a boss rolls: a gem of the level's dimension, at a
+/// purity drawn from the world `tier`'s table, between the gem's own floor and
+/// the drop's ceiling.  The floor clamps the roll afterwards, as Java's
+/// `Gem.toStack` does, so a Flawless-only End gem can still drop in the End.
+/// Horizon's Host reads no attribute, so the player's luck is 0 here.
+pub fn roll(
+    dimension: &str,
+    tier: crate::tiers::WorldTier,
+    boss: bool,
+    rng: &mut crate::Rng,
+) -> (&'static Gem, Purity) {
+    let chosen = roll_type(dimension, rng);
     let ceiling = if boss { Purity::Perfect } else { Purity::Flawless };
-    let rolled = Purity::from_index(rng.below(6) as u8);
-    let purity = rolled.clamp(chosen.min_purity, ceiling.max(chosen.min_purity));
+    let purity = crate::tiers::roll_gem_purity(tier, 0.0, chosen.min_purity, ceiling, rng);
     (chosen, purity)
 }
 
@@ -826,7 +838,8 @@ mod tests {
         for dimension in ["minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"] {
             for boss in [false, true] {
                 for _ in 0..100 {
-                    let (gem, purity) = roll(dimension, boss, &mut rng);
+                    let (gem, purity) =
+                        roll(dimension, crate::tiers::WorldTier::Frontier, boss, &mut rng);
                     let drop = stack(gem, purity);
                     assert_eq!(Some(drop.item.to_string()), item_id(gem, purity));
                     assert_eq!(of_stack(&drop).map(|(g, p)| (g.id, p)), Some((gem.id, purity)));
@@ -927,12 +940,14 @@ mod tests {
     fn a_roll_stays_in_the_levels_dimension_and_above_the_purity_floor() {
         let mut rng = crate::Rng::new(7);
         for _ in 0..200 {
-            let (gem, purity) = roll("minecraft:the_nether", true, &mut rng);
+            let (gem, purity) =
+                roll("minecraft:the_nether", crate::tiers::WorldTier::Ascent, true, &mut rng);
             assert!(
                 gem.dimensions.is_empty() || gem.dimensions.contains(&"minecraft:the_nether")
             );
             assert!(purity >= gem.min_purity);
-            let (gem, purity) = roll("minecraft:overworld", false, &mut rng);
+            let (gem, purity) =
+                roll("minecraft:overworld", crate::tiers::WorldTier::Frontier, false, &mut rng);
             assert!(purity <= Purity::Flawless);
             assert!(purity >= gem.min_purity);
         }
@@ -942,7 +957,8 @@ mod tests {
     fn the_nether_gems_never_roll_in_the_overworld() {
         let mut rng = crate::Rng::new(11);
         for _ in 0..500 {
-            let (gem, _) = roll("minecraft:overworld", true, &mut rng);
+            let (gem, _) =
+                roll("minecraft:overworld", crate::tiers::WorldTier::Frontier, true, &mut rng);
             assert_ne!(gem.id, "apotheosis:the_nether/inferno");
         }
     }
@@ -1009,7 +1025,12 @@ mod tests {
     fn an_ordinary_end_roll_can_pick_a_flawless_only_gem() {
         let mut found = false;
         for seed in 0..512 {
-            let (gem, purity) = roll("minecraft:the_end", false, &mut crate::Rng::new(seed));
+            let (gem, purity) = roll(
+                "minecraft:the_end",
+                crate::tiers::WorldTier::Frontier,
+                false,
+                &mut crate::Rng::new(seed),
+            );
             if gem.id == "apotheosis:the_end/endersurge" {
                 found = true;
                 assert!(

@@ -25,7 +25,8 @@
 use crate::affixes::roll_range;
 use crate::attributes::{self, ItemClass};
 use crate::java_affixes::{Affix, AFFIXES};
-use crate::{BOSS_TIERS, Rng, Tier, apply_affixes, one};
+use crate::tiers::{self, WorldTier};
+use crate::{Rng, Tier, apply_affixes, one};
 use horizon_client::mod_api::{
     Compound, EntityJoinLevelEvent, EquipmentSlot, Flow, Host, ItemDamagedEvent, ItemStack,
     LivingIncomingDamageV2Event, LootDropsEvent, MobSpawnedEvent, NativeEffect, NativeHeightmap, Tag,
@@ -1094,37 +1095,28 @@ fn take_join(event: &MobSpawnedEvent<'_>) -> Option<u32> {
     found.map(|index| joins.remove(index).entity)
 }
 
-/// The chance, in 1000, that a natural spawn becomes an invader: Java's
-/// `invader_spawn_rules.json` at the first world tier that has invaders
-/// (frontier): 1.8% in the overworld and the end, 2.5% in the nether.
-fn chance(dimension: &str) -> u64 {
-    match dimension {
-        "minecraft:the_nether" => 25,
-        _ => 18,
-    }
-}
-
 /// Java's `bossSpawnCooldown`: 3600 ticks (three minutes) between two natural
-/// invaders. Java keeps it per player and their neighbours; Horizon's spawn
-/// event names no player, so this port keeps one per dimension.
+/// invaders. Java keeps it per player; the spawn event names no player, so
+/// this port uses the nearest one, the same player whose world tier decides
+/// whether the spawn may be an invader at all.
 const INVADER_COOLDOWN: Duration = Duration::from_secs(3600 / 20);
 
-static LAST_INVADER: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+static LAST_INVADER: OnceLock<Mutex<HashMap<u128, Instant>>> = OnceLock::new();
 
-/// Whether `dimension` may have an invader at `now`; if so, starts its
+/// Whether `player` may have an invader at `now`; if so, starts their
 /// cooldown.
-fn invader_ready(dimension: &str, now: Instant) -> bool {
+fn invader_ready(player: u128, now: Instant) -> bool {
     let mut last = LAST_INVADER
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     if last
-        .get(dimension)
+        .get(&player)
         .is_some_and(|then| now.duration_since(*then) < INVADER_COOLDOWN)
     {
         return false;
     }
-    last.insert(dimension.to_string(), now);
+    last.insert(player, now);
     true
 }
 
@@ -1158,20 +1150,20 @@ pub fn mob_spawned(host: &mut dyn Host, event: &MobSpawnedEvent<'_>) {
     if overworld && (!night || !on_surface(host, event.dimension, event.pos)) {
         return;
     }
+    // The nearest player decides both the chance (Haven never spawns one) and
+    // whose cooldown the invader takes.
+    let Some(player) = tiers::nearest_player(host, event.dimension, event.pos) else {
+        return;
+    };
+    let world = tiers::tier_of_with(host, player);
     let mut rng = roll(u64::from(entity) ^ event.pos[0].to_bits().rotate_left(9));
-    if rng.below(1000) >= chance(event.dimension) || !invader_ready(event.dimension, Instant::now()) {
+    if rng.below(10_000) >= tiers::invader_chance(world, event.dimension)
+        || !invader_ready(player, Instant::now())
+    {
         return;
     }
-    become_boss(host, event.dimension, entity, event.kind, &mut rng);
+    become_boss(host, event.dimension, entity, event.kind, world, &mut rng);
 }
-
-/// The rarity a converted invader rolls.
-const BOSS_RARITIES: [(Tier, u64); 4] = [
-    (Tier::Uncommon, 35),
-    (Tier::Rare, 40),
-    (Tier::Epic, 20),
-    (Tier::Mythic, 5),
-];
 
 /// Extra health by rarity, so an invader is a fight.
 fn bonus_health(tier: Tier) -> f64 {
@@ -1282,12 +1274,20 @@ fn generated_name(rng: &mut Rng, kind: &str) -> (String, Text) {
     (json.to_string(), text)
 }
 
-/// Converts the freshly spawned mob into an invader.
-fn become_boss(host: &mut dyn Host, dimension: &str, entity: u32, kind: &str, rng: &mut Rng) {
+/// Converts the freshly spawned mob into an invader whose own rarity and gear
+/// roll from the nearby player's world tier.
+fn become_boss(
+    host: &mut dyn Host,
+    dimension: &str,
+    entity: u32,
+    kind: &str,
+    world: WorldTier,
+    rng: &mut Rng,
+) {
     let Some(reference) = host.entity(entity) else {
         return;
     };
-    let tier = rng.tier(&BOSS_RARITIES);
+    let tier = tiers::roll_rarity(world, 0.0, rng);
     let (name, name_text) = generated_name(rng, kind);
     let health = 20.0 + bonus_health(tier);
     let _ = host.entity_set_attribute_base(reference, "minecraft:max_health", health);
@@ -1310,7 +1310,8 @@ fn become_boss(host: &mut dyn Host, dimension: &str, entity: u32, kind: &str, rn
         ];
         for slot in slots {
             let mut stack = one(boss_gear(kind, slot, rng));
-            apply_affixes(&mut stack, rng.tier(&BOSS_TIERS), rng);
+            let rarity = tiers::roll_rarity(world, 0.0, rng);
+            apply_affixes(&mut stack, rarity, rng);
             let _ = host.living_set_equipment(living, slot, Some(stack));
         }
     }
@@ -1348,11 +1349,6 @@ pub fn is_boss(host: &mut dyn Host, entity: u32) -> bool {
     host.entity(entity)
         .and_then(|reference| host.entity_tags(reference))
         .is_some_and(|tags| tags.iter().any(|tag| tag == BOSS_TAG))
-}
-
-/// The boss loot tiers, exposed for `loot_drops`' gear upgrade.
-pub fn boss_tiers() -> &'static [(Tier, u64)] {
-    &BOSS_TIERS
 }
 
 #[cfg(test)]
@@ -1582,14 +1578,6 @@ mod tests {
     }
 
     #[test]
-    fn every_boss_rarity_is_below_ancient() {
-        for (tier, _) in BOSS_RARITIES {
-            assert!(tier < Tier::Ancient, "{tier:?} should not be a boss roll");
-        }
-        assert!(boss_tiers().iter().any(|(tier, _)| *tier == Tier::Ancient));
-    }
-
-    #[test]
     fn the_boss_tag_is_the_one_the_loot_hook_reads() {
         assert_eq!(BOSS_TAG, "apotheosis:boss");
     }
@@ -1603,19 +1591,17 @@ mod tests {
 
 #[cfg(test)]
 mod invader_rate_tests {
-    use super::{chance, invader_ready, INVADER_COOLDOWN};
+    use super::{invader_ready, INVADER_COOLDOWN};
     use std::time::{Duration, Instant};
 
     #[test]
-    fn invaders_follow_java_rates_and_cooldown() {
-        assert_eq!(chance("minecraft:overworld"), 18);
-        assert_eq!(chance("minecraft:the_end"), 18);
-        assert_eq!(chance("minecraft:the_nether"), 25);
+    fn the_invader_cooldown_is_per_player() {
         let t0 = Instant::now();
-        let dim = "test:invader_cooldown";
-        assert!(invader_ready(dim, t0));
-        assert!(!invader_ready(dim, t0 + Duration::from_secs(60)));
-        assert!(invader_ready(dim, t0 + INVADER_COOLDOWN));
-        assert!(invader_ready("test:other_dimension", t0));
+        let one = 0xAAAA;
+        let two = 0xBBBB;
+        assert!(invader_ready(one, t0));
+        assert!(!invader_ready(one, t0 + Duration::from_secs(60)));
+        assert!(invader_ready(two, t0), "another player has their own cooldown");
+        assert!(invader_ready(one, t0 + INVADER_COOLDOWN));
     }
 }
